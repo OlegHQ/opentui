@@ -1928,6 +1928,26 @@ pub const UnifiedTextBuffer = struct {
         );
     }
 
+    /// Zero capacity queries the exact UTF-8 byte count. Short copies fail before writing.
+    pub fn copyTextRange(self: *const Self, start_offset: u32, end_offset: u32, out: []u8) !u32 {
+        const count = iter_mod.extractTextBetweenOffsets(
+            &self._rope,
+            &self.mem_registry,
+            self.tab_width,
+            start_offset,
+            @min(end_offset, self._rope.totalWeight()),
+            null,
+            self.width_method,
+        );
+        std.debug.assert(count <= self.getByteSize());
+        if (out.len != 0) {
+            if (out.len < count) return error.BufferTooSmall;
+            const written = self.getTextRange(start_offset, end_offset, out);
+            std.debug.assert(written == count);
+        }
+        return @intCast(count);
+    }
+
     /// Get text within a range specified by row/col coordinates
     /// Automatically snaps to grapheme boundaries:
     /// Returns number of bytes written to out_buffer

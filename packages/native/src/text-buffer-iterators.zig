@@ -363,20 +363,20 @@ pub fn getPrevGraphemeWidth(rope: *UnifiedRope, mem_registry: *const MemRegistry
 
 /// Extract text between display-width offsets into a buffer
 /// Automatically snaps to grapheme boundaries:
-/// - start_offset excludes graphemes that start before it
-/// - end_offset includes graphemes that start before it
-/// Returns number of bytes written to out_buffer
+/// - start_offset snaps backward to the containing grapheme
+/// - end_offset snaps forward to include a partially selected grapheme
+/// Returns bytes written, or the exact byte count when out_buffer is null.
 pub fn extractTextBetweenOffsets(
     rope: *const UnifiedRope,
     mem_registry: *const MemRegistry,
     tab_width: u8,
     start_offset: u32,
     end_offset: u32,
-    out_buffer: []u8,
+    out_buffer: ?[]u8,
     width_method: utf8.WidthMethod,
 ) usize {
     if (start_offset >= end_offset) return 0;
-    if (out_buffer.len == 0) return 0;
+    if (out_buffer) |out| if (out.len == 0) return 0;
 
     const line_count = rope.root.metrics().custom.linestart_count;
 
@@ -387,7 +387,7 @@ pub fn extractTextBetweenOffsets(
         rope: *const UnifiedRope,
         mem_registry: *const MemRegistry,
         tab_width: u8,
-        out_buffer: []u8,
+        out_buffer: ?[]u8,
         out_index: *usize,
         col_offset: *u32,
         start: u32,
@@ -431,11 +431,12 @@ pub fn extractTextBetweenOffsets(
             if (byte_start < byte_end and byte_start < chunk_bytes.len) {
                 const actual_end = @min(byte_end, @as(u32, @intCast(chunk_bytes.len)));
                 const selected_bytes = chunk_bytes[byte_start..actual_end];
-                const copy_len = @min(selected_bytes.len, ctx.out_buffer.len - ctx.out_index.*);
-
-                if (copy_len > 0) {
-                    @memcpy(ctx.out_buffer[ctx.out_index.* .. ctx.out_index.* + copy_len], selected_bytes[0..copy_len]);
+                if (ctx.out_buffer) |out| {
+                    const copy_len = @min(selected_bytes.len, out.len - ctx.out_index.*);
+                    @memcpy(out[ctx.out_index.*..][0..copy_len], selected_bytes[0..copy_len]);
                     ctx.out_index.* += copy_len;
+                } else {
+                    ctx.out_index.* += selected_bytes.len;
                 }
             }
 
@@ -448,9 +449,15 @@ pub fn extractTextBetweenOffsets(
             // Add newline when the newline offset is inside the selected range,
             // even for empty logical lines.
             const newline_offset = ctx.col_offset.*;
-            if (line_info.line_idx < ctx.line_count - 1 and newline_offset >= ctx.start and newline_offset < ctx.end and ctx.out_index.* < ctx.out_buffer.len) {
-                ctx.out_buffer[ctx.out_index.*] = '\n';
-                ctx.out_index.* += 1;
+            if (line_info.line_idx < ctx.line_count - 1 and newline_offset >= ctx.start and newline_offset < ctx.end) {
+                if (ctx.out_buffer) |out| {
+                    if (ctx.out_index.* < out.len) {
+                        out[ctx.out_index.*] = '\n';
+                        ctx.out_index.* += 1;
+                    }
+                } else {
+                    ctx.out_index.* += 1;
+                }
             }
 
             // Account for newline in display offset

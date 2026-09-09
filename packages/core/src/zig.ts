@@ -3399,28 +3399,24 @@ export class FFIRenderLib {
     operation: string,
     count: Uint32Array,
     read: (bytes: Uint8Array | null, capacity: number, count: Uint32Array) => number,
-    countMode: "exact" | "bounded" = "bounded",
     copyEmpty = false,
   ): string {
     nativeResult(operation, read(null, 0, count))
     if (count[0] === 0 && !copyEmpty) return ""
     const bytes = new Uint8Array(count[0])
     nativeResult(operation, read(viewOrNull(bytes), bytes.length, count))
-    if (countMode === "exact" ? count[0] !== bytes.length : count[0] > bytes.length) {
+    if (count[0] !== bytes.length) {
       throw new NativeError(operation, NativeStatus.InternalError)
     }
-    return this.decoder.decode(countMode === "exact" ? bytes : bytes.subarray(0, count[0]))
+    return this.decoder.decode(bytes)
   }
 
   public contextTextBufferGetText(context: NativeContextHandle, text: ContextTextBufferHandle): string {
     const handle = encodeContextHandle(context, text)
     const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_text_buffer_get_text")
-    return this.readText(
-      "ot_text_buffer_get_text",
-      count,
-      (bytes, capacity, count) => this.opentui.symbols.ot_text_buffer_get_text(pointer, handle, bytes, capacity, count),
-      "exact",
+    return this.readText("ot_text_buffer_get_text", count, (bytes, capacity, count) =>
+      this.opentui.symbols.ot_text_buffer_get_text(pointer, handle, bytes, capacity, count),
     )
   }
 
@@ -3971,7 +3967,6 @@ export class FFIRenderLib {
       "ot_edit_buffer_get_text",
       count,
       (bytes, capacity, count) => this.opentui.symbols.ot_edit_buffer_get_text(pointer, handle, bytes, capacity, count),
-      "exact",
       true,
     )
   }
@@ -6509,17 +6504,9 @@ export class FFIRenderLib {
     const handle = encodeContextHandle(context, node)
     const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_scene_get_selected_text")
-    nativeResult(
-      "ot_scene_get_selected_text",
-      this.opentui.symbols.ot_scene_get_selected_text(pointer, handle, null, 0, count),
+    return this.readText("ot_scene_get_selected_text", count, (bytes, capacity, count) =>
+      this.opentui.symbols.ot_scene_get_selected_text(pointer, handle, bytes, capacity, count),
     )
-    if (count[0] === 0) return ""
-    const bytes = new Uint8Array(count[0])
-    nativeResult(
-      "ot_scene_get_selected_text",
-      this.opentui.symbols.ot_scene_get_selected_text(pointer, handle, bytes, bytes.length, count),
-    )
-    return this.decoder.decode(bytes.subarray(0, count[0]))
   }
 
   public sceneGetTextMetrics(context: NativeContextHandle, node: SceneNodeHandle): NativeSceneTextMetrics {
@@ -6554,7 +6541,6 @@ export class FFIRenderLib {
           capacity,
           count,
         ),
-      "exact",
       true,
     )
   }

@@ -174,16 +174,8 @@ pub fn ot_text_buffer_get_text(context: ?*Owner, id: ?*const c.ot_handle, bytes:
 
 pub fn ot_text_buffer_get_range(context: ?*Owner, id: ?*const c.ot_handle, start: u32, end: u32, bytes: ?[*]u8, capacity: u32, out: ?*u32) callconv(.c) c.ot_status {
     const owner = admit(context, true) catch |err| return fail(context, err);
-    if (out == null or (capacity != 0 and bytes == null)) return fail(owner, error.InvalidOptions);
-    const value = text(owner, id) catch |err| return fail(owner, err);
-    const bound = value.buffer.getByteSize();
-    if (capacity != 0 and capacity < bound) return fail(owner, error.BufferTooSmall);
-    if (capacity == 0) {
-        out.?.* = bound;
-        return c.OT_OK;
-    }
-    editor.prepareBuffer(value.buffer) catch |err| return fail(owner, err);
-    out.?.* = @intCast(value.buffer.getTextRange(start, end, bytes.?[0..capacity]));
+    if (id == null or out == null or (capacity != 0 and bytes == null)) return fail(owner, error.InvalidOptions);
+    out.?.* = owner.core.textBufferGetRange(abi.handleFromC(id.?.*), start, end, if (bytes) |p| p[0..capacity] else &.{}) catch |err| return fail(owner, err);
     return c.OT_OK;
 }
 
@@ -277,15 +269,8 @@ pub fn ot_text_buffer_view_get_info(context: ?*Owner, id: ?*const c.ot_handle, o
 
 pub fn ot_text_buffer_view_get_selected_text(context: ?*Owner, id: ?*const c.ot_handle, bytes: ?[*]u8, capacity: u32, out: ?*u32) callconv(.c) c.ot_status {
     const owner = admit(context, true) catch |err| return fail(context, err);
-    if (out == null or (capacity != 0 and bytes == null)) return fail(owner, error.InvalidOptions);
-    const value = view(owner, id) catch |err| return fail(owner, err);
-    const bound = if (value.view.packSelectionInfo() == std.math.maxInt(u64)) 0 else value.text.buffer.getByteSize();
-    if (capacity != 0 and capacity < bound) return fail(owner, error.BufferTooSmall);
-    if (capacity == 0 or bound == 0) {
-        out.?.* = bound;
-        return c.OT_OK;
-    }
-    out.?.* = @intCast(value.view.getSelectedTextIntoBuffer(bytes.?[0..capacity]));
+    if (id == null or out == null or (capacity != 0 and bytes == null)) return fail(owner, error.InvalidOptions);
+    out.?.* = owner.core.textViewGetSelectedText(abi.handleFromC(id.?.*), if (bytes) |p| p[0..capacity] else &.{}) catch |err| return fail(owner, err);
     return c.OT_OK;
 }
 
@@ -348,6 +333,79 @@ pub fn ot_buffer_draw_text_view(context: ?*Owner, target: ?*const c.ot_handle, f
     const request = if (frame) |p| abi.frameRequestFromC(p.*) catch |err| return fail(context, err) else null;
     context.?.core.drawTextBufferView(abi.handleFromC(target.?.*), request, abi.handleFromC(source.?.*), x, y) catch |err| return fail(context, err);
     return c.OT_OK;
+}
+
+test "Context text copy queries report exact selected bytes and preserve short outputs" {
+    const core = try ctx.Context.init(std.testing.allocator, std.testing.io, .{});
+    defer core.deinit() catch unreachable;
+    var owner: Owner = .{ .gpa = .init, .io_threaded = .init_single_threaded, .core = core, .owner_thread = std.Thread.getCurrentId() };
+    const text_handle = try core.createTextBuffer(.unicode);
+    const text_id = abi.handleToC(text_handle);
+    const view_handle = try core.createTextBufferView(text_handle);
+    const view_id = abi.handleToC(view_handle);
+    const edit_handle = try core.createEditBuffer(.unicode);
+    const edit_id = abi.handleToC(edit_handle);
+    const editor_handle = try core.createEditorView(edit_handle, 20, 2);
+    const editor_id = abi.handleToC(editor_handle);
+    const document = "prefix\n\xe4\xb8\xad\tend\n" ++ "x" ** 65536;
+    try core.textBufferSetText(text_handle, document);
+    try core.editSetText(edit_handle, document, false);
+    _ = try core.textViewSelect(view_handle, .{ .operation = .set, .start = 7, .end = 9 });
+    _ = try core.editorSelect(editor_handle, .{ .operation = .set, .start = 7, .end = 9 });
+
+    var count: u32 = 99;
+    inline for (.{ ot_text_buffer_view_get_selected_text, editor.ot_editor_view_get_selected_text }, .{ view_id, editor_id }) |copy, id| {
+        try std.testing.expectEqual(c.OT_OK, copy(&owner, &id, null, 0, &count));
+        try std.testing.expectEqual(3, count);
+        var output = "safe".*;
+        count = 99;
+        try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, copy(&owner, &id, &output, 2, &count));
+        try std.testing.expectEqual(99, count);
+        try std.testing.expectEqualStrings("safe", &output);
+        try std.testing.expectEqual(c.OT_OK, copy(&owner, &id, &output, 3, &count));
+        try std.testing.expectEqual(3, count);
+        try std.testing.expectEqualStrings("\xe4\xb8\xad", output[0..count]);
+        try std.testing.expectEqual('e', output[3]);
+    }
+    try std.testing.expectEqual(c.OT_OK, ot_text_buffer_get_range(&owner, &text_id, 7, 9, null, 0, &count));
+    try std.testing.expectEqual(3, count);
+    var output: [3]u8 = undefined;
+    try std.testing.expectEqual(c.OT_OK, ot_text_buffer_get_range(&owner, &text_id, 7, 9, &output, output.len, &count));
+    try std.testing.expectEqualStrings("\xe4\xb8\xad", &output);
+    try std.testing.expectEqual(c.OT_OK, editor.ot_edit_buffer_get_range(&owner, &edit_id, 0, 0, 7, 0, 9, null, 0, &count));
+    try std.testing.expectEqual(3, count);
+    try std.testing.expectEqual(c.OT_OK, editor.ot_edit_buffer_get_range(&owner, &edit_id, 1, 1, 0, 1, 2, &output, output.len, &count));
+    try std.testing.expectEqualStrings("\xe4\xb8\xad", &output);
+
+    // Empty, reversed, and out-of-document ranges have no selected bytes.
+    inline for (.{ .{ 7, 7 }, .{ 9, 7 }, .{ 100000, 100001 } }) |range| {
+        try std.testing.expectEqual(c.OT_OK, ot_text_buffer_get_range(&owner, &text_id, range[0], range[1], null, 0, &count));
+        try std.testing.expectEqual(0, count);
+    }
+}
+
+test "Context exact text ranges retain grapheme and newline boundaries" {
+    const core = try ctx.Context.init(std.testing.allocator, std.testing.io, .{});
+    defer core.deinit() catch unreachable;
+    const id = try core.createTextBuffer(.unicode);
+    const document = "a中e\u{301}\n🙂z";
+    try core.textBufferSetText(id, document);
+    const cases = [_]struct { start: u32, end: u32, bytes: []const u8 }{
+        .{ .start = 0, .end = 1, .bytes = "a" },
+        .{ .start = 1, .end = 2, .bytes = "中" },
+        .{ .start = 2, .end = 3, .bytes = "中" },
+        .{ .start = 3, .end = 4, .bytes = "e\u{301}" },
+        .{ .start = 4, .end = 5, .bytes = "\n" },
+        .{ .start = 5, .end = 6, .bytes = "🙂" },
+        .{ .start = 6, .end = 8, .bytes = "🙂z" },
+        .{ .start = 0, .end = 999, .bytes = document },
+    };
+    for (cases) |case| {
+        try std.testing.expectEqual(case.bytes.len, try core.textBufferGetRange(id, case.start, case.end, &.{}));
+        var output: [document.len]u8 = undefined;
+        const count = try core.textBufferGetRange(id, case.start, case.end, &output);
+        try std.testing.expectEqualStrings(case.bytes, output[0..count]);
+    }
 }
 
 test "Context shared text ABI rejects malformed replacement and preserves short-copy output" {

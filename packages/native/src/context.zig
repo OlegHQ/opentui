@@ -2252,8 +2252,7 @@ pub const Context = struct {
         return text.view.packSelectionInfo();
     }
 
-    /// A size query returns the full-document byte bound, or zero for no selection.
-    /// Copies require that bound, then return only the selected UTF-8 bytes.
+    /// Zero capacity queries exact selected UTF-8 bytes. Short copies preserve output.
     pub fn sceneGetSelectedText(self: *Context, handle: Handle, out: []u8) !u32 {
         try self.checkSceneRead();
         const was_mutating = self.mutating;
@@ -2261,11 +2260,51 @@ pub const Context = struct {
         defer self.mutating = was_mutating;
         const node = try self.sceneNode(handle);
         const text = node.scene_node.?.text orelse return error.WrongKind;
-        if (text.view.packSelectionInfo() == std.math.maxInt(u64)) return 0;
-        const bound = text.buffer.getByteSize();
-        if (out.len == 0) return bound;
-        if (out.len < bound) return error.InvalidOptions;
-        return @intCast(text.view.getSelectedTextIntoBuffer(out));
+        return text.view.copySelectedText(out);
+    }
+
+    pub fn textBufferGetRange(self: *Context, handle: Handle, start: u32, end: u32, out: []u8) !u32 {
+        try self.checkSceneRead();
+        const text = try self.getTextBuffer(handle);
+        return text.buffer.copyTextRange(start, end, out);
+    }
+
+    pub const TextRange = union(enum) {
+        offsets: struct { start: u32, end: u32 },
+        coords: struct { start_row: u32, start_col: u32, end_row: u32, end_col: u32 },
+    };
+
+    pub fn editBufferGetRange(self: *Context, handle: Handle, range: TextRange, out: []u8) !u32 {
+        try self.checkSceneRead();
+        const was_mutating = self.mutating;
+        self.mutating = true;
+        defer self.mutating = was_mutating;
+        const edit = try self.getEditBuffer(handle);
+        const buffer = edit.buffer.tb;
+        const offsets: @FieldType(TextRange, "offsets") = switch (range) {
+            .offsets => |offsets| offsets,
+            .coords => |coords| result: {
+                try prepareTextBuffer(buffer);
+                const iter = @import("text-buffer-iterators.zig");
+                break :result .{
+                    .start = iter.coordsToOffset(buffer.rope(), coords.start_row, coords.start_col) orelse return 0,
+                    .end = iter.coordsToOffset(buffer.rope(), coords.end_row, coords.end_col) orelse return 0,
+                };
+            },
+        };
+        return buffer.copyTextRange(offsets.start, offsets.end, out);
+    }
+
+    pub fn textViewGetSelectedText(self: *Context, handle: Handle, out: []u8) !u32 {
+        try self.checkSceneRead();
+        const view = try self.getTextBufferView(handle);
+        return view.view.copySelectedText(out);
+    }
+
+    pub fn editorGetSelectedText(self: *Context, handle: Handle, out: []u8) !u32 {
+        try self.checkSceneRead();
+        const view = try self.getEditorView(handle);
+        return view.view.text_buffer_view.copySelectedText(out);
     }
 
     pub fn sceneGetText(self: *Context, handle: Handle, out: []u8) !u32 {

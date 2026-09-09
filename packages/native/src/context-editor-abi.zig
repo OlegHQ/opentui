@@ -143,20 +143,13 @@ pub fn ot_edit_buffer_get_position(context: ?*Owner, id: ?*const c.ot_handle, qu
 
 pub fn ot_edit_buffer_get_range(context: ?*Owner, id: ?*const c.ot_handle, by_coords: u32, start_row: u32, start_col: u32, end_row: u32, end_col: u32, bytes: ?[*]u8, capacity: u32, out: ?*u32) callconv(.c) c.ot_status {
     const owner = admit(context, true) catch |err| return fail(context, err);
-    if (out == null or by_coords > 1 or (capacity != 0 and bytes == null) or
+    if (id == null or out == null or by_coords > 1 or (capacity != 0 and bytes == null) or
         (by_coords == 0 and (start_row != 0 or end_row != 0))) return fail(owner, error.InvalidOptions);
-    const value = edit(owner, id) catch |err| return fail(owner, err);
-    const bound = value.buffer.tb.getByteSize();
-    if (capacity != 0 and capacity < bound) return fail(owner, error.BufferTooSmall);
-    if (capacity == 0) {
-        out.?.* = bound;
-        return c.OT_OK;
-    }
-    prepareBuffer(value.buffer.tb) catch |err| return fail(owner, err);
-    out.?.* = @intCast(if (by_coords == 1)
-        value.buffer.getTextRangeByCoords(start_row, start_col, end_row, end_col, bytes.?[0..capacity])
+    const range: ctx.Context.TextRange = if (by_coords == 1)
+        .{ .coords = .{ .start_row = start_row, .start_col = start_col, .end_row = end_row, .end_col = end_col } }
     else
-        value.buffer.getTextRange(start_col, end_col, bytes.?[0..capacity]) catch |err| return fail(owner, err));
+        .{ .offsets = .{ .start = start_col, .end = end_col } };
+    out.?.* = owner.core.editBufferGetRange(abi.handleFromC(id.?.*), range, if (bytes) |p| p[0..capacity] else &.{}) catch |err| return fail(owner, err);
     return c.OT_OK;
 }
 
@@ -301,15 +294,8 @@ fn selectionInfo(value: *const ctx.Editor) c.ot_editor_view_info {
 
 pub fn ot_editor_view_get_selected_text(context: ?*Owner, id: ?*const c.ot_handle, bytes: ?[*]u8, capacity: u32, out: ?*u32) callconv(.c) c.ot_status {
     const owner = admit(context, true) catch |err| return fail(context, err);
-    if (out == null or (capacity != 0 and bytes == null)) return fail(owner, error.InvalidOptions);
-    const value = view(owner, id) catch |err| return fail(owner, err);
-    const bound = if (value.view.packSelectionInfo() == std.math.maxInt(u64)) 0 else value.view.text_buffer_view.text_buffer.getByteSize();
-    if (capacity != 0 and capacity < bound) return fail(owner, error.BufferTooSmall);
-    if (capacity == 0 or bound == 0) {
-        out.?.* = bound;
-        return c.OT_OK;
-    }
-    out.?.* = @intCast(value.view.getSelectedTextIntoBuffer(bytes.?[0..capacity]));
+    if (id == null or out == null or (capacity != 0 and bytes == null)) return fail(owner, error.InvalidOptions);
+    out.?.* = owner.core.editorGetSelectedText(abi.handleFromC(id.?.*), if (bytes) |p| p[0..capacity] else &.{}) catch |err| return fail(owner, err);
     return c.OT_OK;
 }
 

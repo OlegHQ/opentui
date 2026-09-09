@@ -3855,11 +3855,11 @@ test "Scene text selection ABI validates records pointers and readonly outputs" 
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_get_selected_text(handle, null, null, 0, &count));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_get_selected_text(handle, &node, null, 0, null));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_get_selected_text(handle, &node, null, 1, &count));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_get_selected_text(handle, &node, &bytes, 3, &count));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_get_selected_text(handle, &node, &bytes, 2, &count));
     try std.testing.expectEqual(@as(u32, 999), count);
     try std.testing.expectEqualStrings("!!!!!!!!!!!!!!!!", &bytes);
     try std.testing.expectEqual(c.OT_OK, ot_scene_get_selected_text(handle, &node, null, 0, &count));
-    try std.testing.expectEqual(@as(u32, 12), count);
+    try std.testing.expectEqual(@as(u32, 3), count);
     try std.testing.expectEqual(c.OT_OK, ot_scene_get_selected_text(handle, &node, &bytes, count, &count));
     try std.testing.expectEqual(@as(u32, 3), count);
     try std.testing.expectEqualStrings("one!!!!!!!!!!!!!", &bytes);

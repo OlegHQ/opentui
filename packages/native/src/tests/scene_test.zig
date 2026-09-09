@@ -1471,6 +1471,26 @@ test "Scene text bounds document counters before allocating a replacement" {
     try testing.expectEqualStrings("kept", &output);
 }
 
+test "Scene selected text copies exact bytes without allocating" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{});
+    const f = try Fixture.init(failing.allocator(), 8, 2, .{});
+    defer f.deinit();
+    const node = try f.owner.sceneCreateNode(f.id, 2, 2);
+    try dimensions(f.owner, node, 8, 2);
+    try f.owner.sceneSetTextOptions(node, .{ .wrap_mode = .none });
+    try f.owner.sceneSetText(node, "\xe4\xb8\xad tail\n" ++ "x" ** 65536);
+    _ = try f.owner.sceneSetTextSelection(node, .{ .operation = 1, .focus_x = 1 });
+    failing.fail_index = failing.alloc_index;
+    failing.resize_fail_index = failing.resize_index;
+    try testing.expectEqual(3, try f.owner.sceneGetSelectedText(node, &.{}));
+    var output = "safe".*;
+    try testing.expectError(error.BufferTooSmall, f.owner.sceneGetSelectedText(node, output[0..2]));
+    try testing.expectEqualStrings("safe", &output);
+    try testing.expectEqual(3, try f.owner.sceneGetSelectedText(node, output[0..3]));
+    try testing.expectEqualStrings("\xe4\xb8\xad", output[0..3]);
+    try testing.expect(!failing.has_induced_failure);
+}
+
 test "Scene text selection preparation OOM preserves accepted state and reset needs no allocation" {
     for ([_]u32{ 1, 2 }) |operation| {
         var failures: u32 = 0;

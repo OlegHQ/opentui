@@ -1198,6 +1198,11 @@ pub const UnifiedTextBufferView = struct {
         return self.text_buffer.getTextRange(selection.start, selection.end, out_buffer);
     }
 
+    pub fn copySelectedText(self: *const Self, out: []u8) !u32 {
+        const selection = self.selection orelse return 0;
+        return self.text_buffer.copyTextRange(selection.start, selection.end, out);
+    }
+
     pub fn getVirtualLineSpans(self: *const Self, vline_idx: usize) VirtualLineSpanInfo {
         if (vline_idx >= self.virtual_lines.items.len) {
             return .{ .spans = &[_]StyleSpan{}, .source_line = 0, .source_col_start = 0 };

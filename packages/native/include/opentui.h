@@ -607,9 +607,9 @@ ot_status ot_scene_set_text_selection(ot_context *, const ot_handle *node,
 /* Packed display-column offsets: start in the high 32 bits, exclusive end in the
  * low 32 bits. UINT64_MAX means absent or zero-width selection. */
 ot_status ot_scene_get_text_selection(ot_context *, const ot_handle *node, uint64_t *out_packed);
-/* Zero capacity reports a safe full-document UTF-8 byte bound, not the selected
- * byte count; absent/zero-width selection reports zero. A copy requires at least
- * that bound and returns the actual selected byte count, without a terminating
+/* Zero capacity reports the exact selected UTF-8 byte count;
+ * absent/zero-width selection reports zero. A copy requires at least
+ * that count and returns the selected byte count, without a terminating
  * NUL. Insufficient capacity rejects before writing bytes or out_count. bytes may
  * be NULL only for zero capacity. These reads follow the text getter rules. */
 ot_status ot_scene_get_selected_text(ot_context *, const ot_handle *node,
@@ -1030,8 +1030,10 @@ typedef struct ot_edit_position {
 ot_status ot_edit_buffer_get_position(ot_context *, const ot_handle *, uint32_t query,
     uint32_t a, uint32_t b, ot_edit_position *out_position);
 /* by_coords=0 uses start_col/end_col as offsets and requires zero rows;
- * by_coords=1 uses all coordinates. Zero capacity returns a safe document byte
- * bound; nonzero capacity must fit that bound and returns the actual byte count. */
+ * by_coords=1 uses all coordinates. Offsets and columns are display cells, not
+ * UTF-8 bytes. Zero capacity returns the exact selected UTF-8 byte count;
+ * nonzero capacity must fit that count. Short copies preserve both outputs.
+ * Grapheme boundaries follow the text range rules below. */
 ot_status ot_edit_buffer_get_range(ot_context *, const ot_handle *, uint32_t by_coords,
     uint32_t start_row, uint32_t start_col, uint32_t end_row, uint32_t end_col,
     uint8_t *bytes, uint32_t capacity, uint32_t *out_count);
@@ -1160,6 +1162,8 @@ ot_status ot_editor_view_get_info(ot_context *, const ot_handle *, uint32_t foll
  * info record with both line counts zero; absent or zero-width selections report
  * selection_present=0 and zero offsets. */
 ot_status ot_editor_view_get_selection(ot_context *, const ot_handle *, ot_editor_view_info *out_info);
+/* Exact selected UTF-8 byte query/copy, as for ot_scene_get_selected_text.
+ * Does not prepare lines or follow the cursor. */
 ot_status ot_editor_view_get_selected_text(ot_context *, const ot_handle *,
     uint8_t *bytes, uint32_t capacity, uint32_t *out_count);
 #define OT_EDITOR_POSITION_CURSOR UINT32_C(0)
@@ -1357,9 +1361,13 @@ ot_status ot_text_buffer_replace_styled_batch(ot_context *, const ot_text_buffer
     const uint8_t *urls, uint32_t url_byte_count, ot_text_buffer_replacement_info *out);
 ot_status ot_text_buffer_set_syntax_style(ot_context *, const ot_handle *, const ot_handle *style);
 ot_status ot_text_buffer_get_info(ot_context *, const ot_handle *, ot_text_buffer_info *);
-/* Zero capacity reports a byte bound. Nonzero capacity must fit that bound;
- * out_count is the actual copied byte count. Outputs are unchanged on rejection. */
+/* Zero capacity reports the exact UTF-8 byte count. Nonzero capacity must fit
+ * that count; no terminating NUL is copied. Outputs are unchanged on rejection. */
 ot_status ot_text_buffer_get_text(ot_context *, const ot_handle *, uint8_t *, uint32_t capacity, uint32_t *out_count);
+/* Same exact byte query/copy convention. start/end are display-column offsets,
+ * including one cell per LF. start snaps backward to the containing grapheme;
+ * exclusive end snaps forward to include a partially selected grapheme. Empty, reversed, and
+ * out-of-document ranges return zero. End is clamped to the document length. */
 ot_status ot_text_buffer_get_range(ot_context *, const ot_handle *, uint32_t start, uint32_t end,
     uint8_t *, uint32_t capacity, uint32_t *out_count);
 ot_status ot_text_buffer_set_defaults(ot_context *, const ot_handle *, uint32_t mask, const ot_editor_style *);
@@ -1373,6 +1381,8 @@ ot_status ot_text_buffer_view_command(ot_context *, const ot_handle *, uint32_t 
 ot_status ot_text_buffer_view_set_tab_color(ot_context *, const ot_handle *, const uint16_t color[4]);
 ot_status ot_text_buffer_view_select(ot_context *, const ot_handle *, const ot_editor_selection *, uint32_t *out_changed);
 ot_status ot_text_buffer_view_get_info(ot_context *, const ot_handle *, ot_editor_view_info *);
+/* Exact selected UTF-8 byte query/copy, as for ot_scene_get_selected_text.
+ * Does not prepare lines or change the viewport. */
 ot_status ot_text_buffer_view_get_selected_text(ot_context *, const ot_handle *, uint8_t *, uint32_t capacity, uint32_t *out_count);
 ot_status ot_text_buffer_view_get_lines(ot_context *, const ot_handle *, uint32_t logical,
     ot_scene_text_line *, uint32_t capacity, ot_editor_measure *);
