@@ -456,7 +456,7 @@ export class NativeSession {
 
   pollKittyImageTransport(): boolean {
     this.checkOpen()
-    return this.lib.sessionPollKittyImageTransport(this.context, this.session)
+    return this.lib.sessionPollKittyImageTransport(this.context, this.session, this.scheduler.now())
   }
 
   cancelKittyImageTransport(failed: boolean): void {

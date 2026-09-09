@@ -7,6 +7,9 @@ Standalone resources use the same checked ownership model without a terminal.
 The [ownership and observation contract](docs/api-contract.md) describes resource
 bindings, mutation visibility, text copy units, and scoped framebuffer access.
 
+See [Host I/O and time](docs/host-io-time.md) for terminal delivery, Context file
+operations, Session deadlines, and native diagnostic clock samples.
+
 ## API surfaces
 
 - [`src/opentui.zig`](src/opentui.zig) exports the checked `Context` API and explicit

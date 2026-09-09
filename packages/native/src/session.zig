@@ -204,6 +204,7 @@ pub const Session = struct {
     completed_bytes: u64 = 0,
     frame_end_offset: ?u64 = null,
     lifecycle: Lifecycle = .{},
+    // Pump and Kitty polling share one accepted host clock.
     last_pump_ns: ?u64 = null,
     // Cancel revokes authority, but outstanding scopes still pin renderer storage.
     frame_lease_count: u32 = 0,
@@ -627,9 +628,12 @@ pub const Session = struct {
         return value.kittyImageTransportStatus();
     }
 
-    pub fn pollKittyImageTransport(self: *Session) Error!bool {
+    pub fn pollKittyImageTransport(self: *Session, now_ns: u64) Error!bool {
         try self.checkOpen();
         const value = self.renderer orelse return error.RendererNotAttached;
+        try self.checkClock(now_ns);
+        self.last_pump_ns = now_ns;
+        value.kittyTransport.expire(now_ns);
         return value.pollKittyImageTransport();
     }
 
@@ -707,14 +711,13 @@ pub const Session = struct {
 
     /// One work unit visits one image entry (including non-Kitty entries), emits
     /// at most 4096 control bytes, or advances one state. Budget must be nonzero.
-    /// now_ns is monotone and caller-owned. Delays begin only when a pump observes
-    /// completed output. The first wait requires room for both waits; a cursor
-    /// retry requires room for the final wait. No allocation, clock reads, or sleeps.
+    /// now_ns shares a monotone host clock with Kitty polling. Cursor delays begin
+    /// when a pump observes completed output. The first wait requires room for both
+    /// waits; a cursor retry requires room for the final wait. Also visits at most
+    /// eight file leases, even under output pressure. No clock reads or sleeps.
     pub fn pump(self: *Session, now_ns: u64, work_budget: u32) Error!PumpResult {
         if (work_budget == 0) return error.InvalidBudget;
-        if (self.last_pump_ns) |previous| {
-            if (now_ns < previous) return error.InvalidClock;
-        }
+        try self.checkClock(now_ns);
         switch (self.state) {
             .open, .closing => {},
             .closed => return .{ .status = .closed },
@@ -724,7 +727,15 @@ pub const Session = struct {
         const previous_now = self.last_pump_ns;
         self.last_pump_ns = now_ns;
         errdefer self.last_pump_ns = previous_now;
-        return self.pumpWork(now_ns, work_budget);
+        const result = try self.pumpWork(now_ns, work_budget);
+        if (self.renderer) |value| value.kittyTransport.expire(now_ns);
+        return result;
+    }
+
+    fn checkClock(self: *const Session, now_ns: u64) Error!void {
+        if (self.last_pump_ns) |previous| {
+            if (now_ns < previous) return error.InvalidClock;
+        }
     }
 
     /// Process-exit fallback only: stop admission and visit one restoration unit

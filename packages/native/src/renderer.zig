@@ -336,7 +336,8 @@ pub const CliRenderer = struct {
     sixelCacheClock: u64 = 0,
     sixelCacheHits: u64 = 0,
     sixelCacheMisses: u64 = 0,
-    kittyTransport: kitty_transport.Transport = .{},
+    kittyTransport: kitty_transport.Transport,
+    host_driven_time: bool,
 
     pub const OutputTarget = union(enum) {
         stdout,
@@ -349,6 +350,8 @@ pub const CliRenderer = struct {
     /// backend variant: buffered stdout, injected buffered output, or feed.
     pub const CreateOptions = struct {
         io: std.Io = compatibility_io,
+        /// Sessions advance resource deadlines with explicit host time.
+        host_driven_time: bool = false,
         logger: *const logger.Logger = logger.compatibilityLogger(),
         remote_mode: Terminal.RemoteMode = .local,
         output: OutputTarget = .stdout,
@@ -480,6 +483,8 @@ pub const CliRenderer = struct {
             .lastRenderTime = std.Io.Clock.now(.awake, opts.io).toMicroseconds(),
             .allocator = allocator,
             .io = opts.io,
+            .kittyTransport = .{ .io = opts.io },
+            .host_driven_time = opts.host_driven_time,
             .logger = opts.logger,
             .currentHitGrid = currentHitGrid,
             .nextHitGrid = nextHitGrid,
@@ -2389,6 +2394,7 @@ pub const CliRenderer = struct {
                 defer if (transmit.owned) transmit.image.deinit();
                 const directory = if (self.kittyTransport.mode == .file) self.kittyTempDirectory() else "";
                 try self.kittyTransport.transmit(self.allocator, writer, transmit.image, image_id, tmux, directory);
+                self.expireKittyImageTransport();
             } else if (force_place or previous.?.x != placement.x or previous.?.y != placement.y or previous.?.width != placement.width or previous.?.height != placement.height or
                 previous.?.source_x != placement.source_x or previous.?.source_y != placement.source_y or previous.?.source_width != placement.source_width or
                 previous.?.source_height != placement.source_height)
@@ -3418,6 +3424,7 @@ pub const CliRenderer = struct {
             var buffer: [4096]u8 = undefined;
             var writer: std.Io.Writer = .fixed(&buffer);
             self.kittyTransport.startProbe(&writer, base + 1, self.kittyTempDirectory()) catch {};
+            self.expireKittyImageTransport();
             self.backend.writeOut(writer.buffered());
         } else self.kittyTransport.cancel(.unsupported);
     }
@@ -3448,11 +3455,17 @@ pub const CliRenderer = struct {
         if (builtin.os.tag == .windows or self.terminal.remote or self.terminal.multiplexer != .none or !self.terminal.graphics_enabled) {
             self.kittyTransport.cancel(.unsupported);
         }
-        self.kittyTransport.expire(kitty_transport.Transport.nowMs());
+        self.expireKittyImageTransport();
         if (!self.kittyTransport.retry_images) return false;
         self.kittyTransport.retry_images = false;
         self.invalidateKittyImages();
         return true;
+    }
+
+    fn expireKittyImageTransport(self: *CliRenderer) void {
+        if (self.host_driven_time or self.kittyTransport.pendingCount() == 0) return;
+        const now = std.Io.Clock.now(.awake, self.io).nanoseconds;
+        self.kittyTransport.expire(@intCast(std.math.clamp(now, 0, std.math.maxInt(u64))));
     }
 
     fn invalidateKittyImages(self: *CliRenderer) void {

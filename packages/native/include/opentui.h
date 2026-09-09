@@ -1288,7 +1288,15 @@ ot_status ot_session_get_kitty_image_transport(
     ot_context *,
     const ot_handle *session,
     ot_session_kitty_image_transport *out_status);
-ot_status ot_session_poll_kitty_image_transport(ot_context *, const ot_handle *session, uint32_t *out_retry);
+/* now_ns shares the Session pump clock. Earlier samples return OT_INVALID_ARGUMENT
+ * before changing leases or consuming retry notifications. Equal samples are valid.
+ * Each pump or poll visits at most eight files, even while output is pending.
+ * The first observation after creation arms a five-second lease deadline,
+ * saturating at UINT64_MAX. Expiry cancels file transport; it is not an ACK.
+ * Poll regularly while files may be pending, including after changing modes.
+ * Poll does not advance terminal lifecycle or deliver output. */
+ot_status ot_session_poll_kitty_image_transport(ot_context *, const ot_handle *session,
+    uint64_t now_ns, uint32_t *out_retry);
 ot_status ot_session_cancel_kitty_image_transport(ot_context *, const ot_handle *session, uint32_t failed);
 /* out_result is 0=ignored, 1=consumed, 2=consumed and images should retransmit. */
 ot_status ot_session_process_kitty_image_reply(
@@ -2085,8 +2093,9 @@ ot_status ot_session_notification(ot_context *, const ot_handle *,
     const uint8_t *message, uint32_t message_len, const uint8_t *title,
     uint32_t title_len, uint32_t *out_written);
 
-/* Run bounded owner-thread work without waiting, sleeping, or sampling a clock.
- * now_ns must be monotonic across accepted pumps. work_budget must be positive;
+/* Run bounded owner-thread work without sleeping or sampling a clock.
+ * now_ns must be monotonic across accepted pumps and Kitty polls; equal samples
+ * are valid. work_budget must be positive;
  * one unit visits one image entry, emits at most OT_SESSION_CONTROL_PACKET_BYTES,
  * or advances one lifecycle step. AGAIN needs another turn, OUTPUT_PENDING needs
  * output completion, and WAIT_UNTIL needs a clock turn at deadline_ns. Cursor
@@ -2094,6 +2103,9 @@ ot_status ot_session_notification(ot_context *, const ot_handle *,
  * The first wait requires time range for both cursor waits. Later retry times
  * must leave room for the final wait. Exhausted clock range returns
  * OT_INVALID_ARGUMENT; a host with no valid later time must cancel explicitly.
+ * Each accepted pump also visits at most eight Kitty file leases and can unlink
+ * expired files through Context I/O, even while terminal output is pending.
+ * WAIT_UNTIL describes lifecycle waits; Kitty expiry still requires regular polls.
  * No second frame is accepted or implicitly retried by this operation. */
 ot_status ot_session_pump(
     ot_context *context,

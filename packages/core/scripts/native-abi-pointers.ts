@@ -71,7 +71,7 @@ export const nativePointerPolicies = {
   ot_session_set_image_resolution: { 0: context, 1: buffer },
   ot_session_set_kitty_image_transport: { 0: context, 1: buffer },
   ot_session_get_kitty_image_transport: { 0: context, 1: buffer, 2: buffer },
-  ot_session_poll_kitty_image_transport: { 0: context, 1: buffer, 2: buffer },
+  ot_session_poll_kitty_image_transport: { 0: context, 1: buffer, 3: buffer },
   ot_session_cancel_kitty_image_transport: { 0: context, 1: buffer },
   ot_session_process_kitty_image_reply: { 0: context, 1: buffer, 2: empty, 4: buffer },
   ot_session_start_kitty_file_probe: { 0: context, 1: buffer },

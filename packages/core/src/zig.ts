@@ -4775,13 +4775,14 @@ export class FFIRenderLib {
     }
   }
 
-  public sessionPollKittyImageTransport(context: NativeContextHandle, session: SessionHandle): boolean {
+  public sessionPollKittyImageTransport(context: NativeContextHandle, session: SessionHandle, nowNs: bigint): boolean {
+    const now = toFFIU64(nowNs, "Session nowNs")
     const handle = encodeContextHandle(context, session)
     const output = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_session_poll_kitty_image_transport")
     nativeResult(
       "ot_session_poll_kitty_image_transport",
-      this.opentui.symbols.ot_session_poll_kitty_image_transport(pointer, handle, output),
+      this.opentui.symbols.ot_session_poll_kitty_image_transport(pointer, handle, now, output),
     )
     return output[0] !== 0
   }

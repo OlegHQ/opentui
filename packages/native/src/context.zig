@@ -656,6 +656,7 @@ pub const Context = struct {
         }
         const attached = try renderer.CliRenderer.createWithOptions(self.allocator, width, height, &self.graphemes, .{
             .io = self.io,
+            .host_driven_time = true,
             .logger = &self.logger,
             .remote_mode = options.remote_mode,
             .output = .{ .feed = value.output },
@@ -1187,10 +1188,10 @@ pub const Context = struct {
         return (try self.getSession(handle)).kittyImageTransportStatus();
     }
 
-    pub fn sessionPollKittyImageTransport(self: *Context, handle: Handle) !bool {
+    pub fn sessionPollKittyImageTransport(self: *Context, handle: Handle, now_ns: u64) !bool {
         try self.beginMutation();
         defer self.mutating = false;
-        return (try self.getSession(handle)).pollKittyImageTransport();
+        return (try self.getSession(handle)).pollKittyImageTransport(now_ns);
     }
 
     pub fn sessionCancelKittyImageTransport(self: *Context, handle: Handle, failed: bool) !void {

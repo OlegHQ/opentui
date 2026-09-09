@@ -495,6 +495,7 @@ pub fn ot_session_get_kitty_image_transport(
 pub fn ot_session_poll_kitty_image_transport(
     context: ?*ContextHandle,
     session_ptr: ?*const c.ot_handle,
+    now_ns: u64,
     out_retry_ptr: ?*u32,
 ) callconv(.c) c.ot_status {
     const status = sessionContextStatus(context);
@@ -503,7 +504,7 @@ pub fn ot_session_poll_kitty_image_transport(
     const id = session_ptr orelse return sessionError(owner, error.InvalidOptions);
     const out = out_retry_ptr orelse return sessionError(owner, error.InvalidOptions);
     out.* = 0;
-    const retry = owner.core.sessionPollKittyImageTransport(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const retry = owner.core.sessionPollKittyImageTransport(handleFromC(id.*), now_ns) catch |err| return sessionError(owner, err);
     out.* = @intFromBool(retry);
     return c.OT_OK;
 }
@@ -2698,8 +2699,8 @@ test "Context image ABI rejects invalid records identities and mutation reentry"
     try std.testing.expectEqual(c.OT_OK, ot_session_get_kitty_image_transport(context, &session_c, &kitty));
     try std.testing.expectEqual(@as(u32, 1), kitty.requested);
     var retry: u32 = 99;
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_poll_kitty_image_transport(context, &session_c, null));
-    try std.testing.expectEqual(c.OT_OK, ot_session_poll_kitty_image_transport(context, &session_c, &retry));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_poll_kitty_image_transport(context, &session_c, 0, null));
+    try std.testing.expectEqual(c.OT_OK, ot_session_poll_kitty_image_transport(context, &session_c, 0, &retry));
     try std.testing.expectEqual(@as(u32, 0), retry);
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_cancel_kitty_image_transport(context, &session_c, 2));
     try std.testing.expectEqual(c.OT_OK, ot_session_cancel_kitty_image_transport(context, &session_c, 0));

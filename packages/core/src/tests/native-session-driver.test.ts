@@ -66,6 +66,47 @@ class Sink extends Writable {
   }
 }
 
+;(process.platform === "win32" ? test.skip : test)(
+  "Kitty expiry uses the driver scheduler clock during a held output write",
+  async () => {
+    const clock = new Clock()
+    const sink = new Sink()
+    sink.synchronous = true
+    const driver = new NativeSession(sink, { scheduler: clock })
+    try {
+      driver.attachRenderer({ width: 2, height: 1, remote: false, environment: { OTUI_GRAPHICS: "true" } })
+      const setup = driver.setupTerminal()
+      clock.run()
+      await setup
+      sink.synchronous = false
+      driver.setKittyImageTransport(2)
+      clock.run()
+      const write = sink.writes.at(-1)!
+      assert.equal(driver.getKittyImageTransport().fileState, 1)
+      assert.equal(driver.getKittyImageTransport().pendingFiles, 1)
+      const start = clock.time
+      clock.time--
+      assert.throws(() => driver.pollKittyImageTransport(), { status: NativeStatus.InvalidArgument })
+      clock.time = start + 4_999_999_999n
+      assert.equal(driver.pollKittyImageTransport(), false)
+      assert.equal(driver.getKittyImageTransport().pendingFiles, 1)
+      clock.time++
+      assert.equal(driver.pollKittyImageTransport(), false)
+      assert.equal(driver.getKittyImageTransport().fileState, 4)
+      assert.equal(driver.getKittyImageTransport().pendingFiles, 0)
+      write.callback()
+      const idle = driver.idle()
+      clock.run()
+      await idle
+      assert.equal(driver.error, null)
+    } finally {
+      driver.dispose()
+      sink.writes.at(-1)?.callback()
+      clock.run()
+    }
+  },
+)
+
 test.each([
   ["span count", { chunkSize: 4, spanCapacity: 2, maxBytes: 16n }, 8],
   ["byte limit", { chunkSize: 4, spanCapacity: 4, maxBytes: 8n }, 8],

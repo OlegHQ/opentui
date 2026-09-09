@@ -1,7 +1,7 @@
 // Generated from packages/native/include/opentui.h and scripts/native-abi-pointers.ts.
 // Run `bun run generate:abi` in packages/core. Do not edit.
 // Inspect audit input: bun scripts/native-abi.ts --audit
-// ABI audit SHA-256: d81e5a18a504d628aae16e1f6e3829af6b4b51eec77294e96244e9a4698413b1
+// ABI audit SHA-256: 1723555620d990616ba9b83117a7c01834378cfbc3d00fedc339bcf144ff93b2
 
 export const nativeSymbols = {
   ot_scene_set_hooks: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
@@ -130,7 +130,7 @@ export const nativeSymbols = {
   ot_session_set_image_resolution: { args: ["ptr", "buffer", "u32", "u32", "u32", "u32"], returns: "i32" },
   ot_session_set_kitty_image_transport: { args: ["ptr", "buffer", "u32"], returns: "i32" },
   ot_session_get_kitty_image_transport: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
-  ot_session_poll_kitty_image_transport: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
+  ot_session_poll_kitty_image_transport: { args: ["ptr", "buffer", "u64", "buffer"], returns: "i32" },
   ot_session_cancel_kitty_image_transport: { args: ["ptr", "buffer", "u32"], returns: "i32" },
   ot_session_process_kitty_image_reply: { args: ["ptr", "buffer", "ptr", "u32", "buffer"], returns: "i32" },
   ot_session_start_kitty_file_probe: { args: ["ptr", "buffer"], returns: "i32" },
