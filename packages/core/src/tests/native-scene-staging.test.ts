@@ -14,6 +14,59 @@ import {
 
 const lib = resolveRenderLib()
 
+test("partial paint retains accepted fields and coalesces into a compact record", () => {
+  const { context, session, root, node } = setup()
+  try {
+    const staging = new SceneStaging(1)
+    staging.stageStyle(context, node, 4, 0, 0, 1, 1, 0)
+    staging.stageStyle(context, node, 4, 1, 0, 1, 1, 0)
+    staging.stagePaint(context, node, paint({ backgroundColor: RGBA.fromInts(90, 0, 0) }))
+    lib.sceneFlush(context, staging)
+    staging.stagePaint(context, node, { opacity: 1 })
+    staging.stagePaint(context, node, { zIndex: 2 })
+    assert.equal(staging.count, 1)
+    assert.equal(staging.byteLength, 32)
+    lib.sceneFlush(context, staging)
+    const frame = lib.sceneFrameStep(context, session, null, {
+      background: RGBA.fromInts(0, 0, 0), useMouse: false, excludedHitNum: 0,
+      maxLayoutRounds: 8, maxHostRequests: 64,
+    })
+    const lease = lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
+    try {
+      assert.deepEqual([...new Uint16Array(toArrayBuffer(lease.bg, 0, 8))], [90, 0, 0, 255])
+    } finally {
+      lib.contextReleaseBufferLease(context, lease.handle)
+      lib.sceneFrameCancel(context, session, frame.frameId)
+    }
+    void root
+  } finally {
+    lib.destroyContext(context)
+  }
+})
+
+test("mixed property prefix retry preserves first-touch order and coalesced suffix", () => {
+  const { context, node, root } = setup()
+  try {
+    const staging = new SceneStaging(1)
+    const stale = { ...node, generation: node.generation + 1 }
+    staging.stagePaint(context, root, { opacity: 0.5 })
+    staging.stageStyle(context, stale, 4, 0, 0, 1, 99, 0)
+    staging.stageStyle(context, node, 4, 0, 0, 1, 6, 0)
+    staging.stagePaint(context, node, { backgroundColor: RGBA.fromInts(3, 0, 0) })
+    staging.stagePaint(context, node, { translateX: 2, borderColor: RGBA.fromInts(4, 0, 0) })
+    assert.throws(() => lib.sceneFlush(context, staging), /after 1 of 4 staged entries/)
+    assert.equal(staging.count, 3)
+    assert.notEqual(lib.sceneGetStyle(context, node, 4, 0, 0).value, 6)
+    staging.discard(stale)
+    staging.stagePaint(context, node, { opacity: 0.75 })
+    lib.sceneFlush(context, staging)
+    assert.equal(lib.sceneGetStyle(context, node, 4, 0, 0).value, 6)
+    assert.equal(staging.count, 0)
+  } finally {
+    lib.destroyContext(context)
+  }
+})
+
 function paint(overrides: Partial<NativeScenePaint> = {}): NativeScenePaint {
   return {
     zIndex: 0,

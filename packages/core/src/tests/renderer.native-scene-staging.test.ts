@@ -72,6 +72,39 @@ test("a rejected position edge stages none of its siblings", async () => {
   assert.deepEqual([box.x, box.y], [2, 1])
 })
 
+test("property getters report requested values while style reads accept staging without layout", async () => {
+  const target = await setup()
+  const box = new BoxRenderable(target.renderer, { width: 4, height: 1 })
+  target.renderer.root.add(box)
+  await target.frame()
+  box.width = 7
+  box.opacity = 0.5
+  box.backgroundColor = "red"
+  assert.equal(box.width, 4)
+  assert.equal(box.opacity, 0.5)
+  assert.deepEqual(box.backgroundColor.toInts(), [255, 0, 0, 255])
+  assert.equal(target.renderer.nativeScene.hasStagedMutations, true)
+  assert.equal(getYogaNode(box).getWidth().value, 7)
+  assert.equal(target.renderer.nativeScene.hasStagedMutations, false)
+  assert.equal(box.width, 4)
+  await target.frame()
+  assert.equal(box.width, 7)
+})
+
+test("small visual edits never reconstruct a full host paint projection", async () => {
+  const target = await setup()
+  const box = new BoxRenderable(target.renderer, { width: 4, height: 1 })
+  target.renderer.root.add(box)
+  await target.frame()
+  Object.defineProperty(box, "getNativeScenePaint", { value() { throw new Error("full paint reconstruction") } })
+  box.opacity = 0.5
+  box.zIndex = 2
+  box.shouldFill = false
+  box.borderStyle = "double"
+  assert.equal(target.renderer.nativeScene.hasStagedMutations, true)
+  await target.frame()
+})
+
 test("background coalescing requires no spare Context objects", async () => {
   const stdout = createTestStdout(8, 2)
   const driver = new NativeSession(stdout, { context: { objectCapacity: 8, renderCellsMax: 32 } })
