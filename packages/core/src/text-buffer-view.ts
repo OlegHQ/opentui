@@ -10,35 +10,41 @@ import {
   type ContextTextBufferViewHandle,
 } from "./zig.js"
 import type { TextBuffer } from "./text-buffer.js"
-import type { NativeResourceOwner } from "./buffer.js"
+import type { NativeResourceOwner, ResourceContext } from "./buffer.js"
 import type { SelectionBehavior, SelectionOccupancy } from "./types.js"
 
 export class TextBufferView {
   private lib: RenderLib
-  private native: { scene: NativeResourceOwner; handle: ContextTextBufferViewHandle }
+  private native: { owner: ResourceContext; handle: ContextTextBufferViewHandle }
   private textBuffer: TextBuffer
   private _destroyed: boolean = false
 
-  constructor(lib: RenderLib, handle: ContextTextBufferViewHandle, textBuffer: TextBuffer, scene: NativeResourceOwner) {
-    if (!scene?.driver) throw new Error("TextBufferView requires an explicit resource owner")
-    scene.assertAlive()
-    const owner = textBuffer._getOwner()
-    if (owner.lib !== lib) throw new Error("TextBufferView library owner mismatch")
-    if (owner.scene !== scene || !handle || typeof handle !== "object" || handle.context !== scene.driver.context) {
+  constructor(
+    lib: RenderLib,
+    handle: ContextTextBufferViewHandle,
+    textBuffer: TextBuffer,
+    source: NativeResourceOwner,
+  ) {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("TextBufferView requires an explicit resource owner")
+    owner.assertAlive()
+    if (owner.renderLib !== lib) throw new Error("TextBufferView library owner mismatch")
+    if (textBuffer._getOwner() !== owner || !handle || typeof handle !== "object" || handle.context !== owner.context) {
       throw new Error("TextBufferView Context owner mismatch")
     }
     this.lib = lib
-    this.native = { scene, handle }
+    this.native = { owner, handle }
     this.textBuffer = textBuffer
   }
 
   static create(textBuffer: TextBuffer): TextBufferView {
-    const { lib, scene } = textBuffer._getOwner()
-    const handle = lib.createContextTextBufferView(scene.driver.context, textBuffer._getSceneHandle(scene))
+    const owner = textBuffer._getOwner()
+    const lib = owner.renderLib
+    const handle = lib.createContextTextBufferView(owner.context, textBuffer._getSceneHandle(owner))
     try {
-      return new TextBufferView(lib, handle, textBuffer, scene)
+      return new TextBufferView(lib, handle, textBuffer, owner)
     } catch (error) {
-      lib.destroyContextTextBufferView(scene.driver.context, handle)
+      lib.destroyContextTextBufferView(owner.context, handle)
       throw error
     }
   }
@@ -46,20 +52,20 @@ export class TextBufferView {
   // Fail loud and clear
   private guard(): void {
     if (this._destroyed) throw new Error("TextBufferView is destroyed")
-    this.native.scene.assertAlive()
-    this.textBuffer._getSceneHandle(this.native.scene)
+    this.native.owner.assertAlive()
+    this.textBuffer._getSceneHandle(this.native.owner)
   }
 
   /** @internal Drawing targets must use the view's library and Context. */
-  public _getOwner(): { lib: RenderLib; scene: NativeResourceOwner } {
+  public _getOwner(): ResourceContext {
     this.guard()
-    return { lib: this.lib, scene: this.native.scene }
+    return this.native.owner
   }
 
-  /** @internal Requires the exact resource owner. */
+  /** @internal Resources can be shared by scenes in the same Context. */
   public _getSceneHandle(scene: NativeResourceOwner): ContextTextBufferViewHandle {
     this.guard()
-    if (this.native.scene !== scene) throw new Error("TextBufferView Context owner mismatch")
+    if (this.native.owner !== scene.resourceContext) throw new Error("TextBufferView Context owner mismatch")
     return this.native.handle
   }
 
@@ -287,7 +293,7 @@ export class TextBufferView {
   public destroy(): void {
     if (this._destroyed) return
     this.lib.getYogaHost().runMutation(() => {
-      if (!this.native.scene.driver.contextDisposed) {
+      if (!this.native.owner.disposed) {
         try {
           this.lib.destroyContextTextBufferView(this.native.handle.context, this.native.handle)
         } catch (error) {

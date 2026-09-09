@@ -11,7 +11,7 @@ import { type WidthMethod, type Highlight } from "./types.js"
 import { RGBA } from "./lib/RGBA.js"
 import { EventEmitter } from "events"
 import type { SyntaxStyle } from "./syntax-style.js"
-import type { NativeResourceOwner } from "./buffer.js"
+import type { NativeResourceOwner, ResourceContext } from "./buffer.js"
 
 export type { LogicalCursor }
 
@@ -21,60 +21,57 @@ export type { LogicalCursor }
  */
 export class EditBuffer extends EventEmitter {
   private lib: RenderLib
-  private native: { scene: NativeResourceOwner; handle: ContextEditBufferHandle }
+  private native: { owner: ResourceContext; handle: ContextEditBufferHandle }
   private unsubscribe?: () => void
   public readonly id: number
   private _destroyed: boolean = false
   private _syntaxStyle?: SyntaxStyle
 
-  constructor(lib: RenderLib, handle: ContextEditBufferHandle, scene: NativeResourceOwner) {
+  constructor(lib: RenderLib, handle: ContextEditBufferHandle, source: NativeResourceOwner) {
     super()
-    if (!scene?.driver) throw new Error("EditBuffer requires an explicit resource owner")
-    scene.assertAlive()
-    if (
-      scene.driver.renderLib !== lib ||
-      !handle ||
-      typeof handle !== "object" ||
-      handle.context !== scene.driver.context
-    ) {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("EditBuffer requires an explicit resource owner")
+    owner.assertAlive()
+    if (owner.renderLib !== lib || !handle || typeof handle !== "object" || handle.context !== owner.context) {
       throw new Error("EditBuffer Context owner mismatch")
     }
     this.lib = lib
-    this.native = { scene, handle }
+    this.native = { owner, handle }
     this.id = handle.slot
     this.unsubscribe = lib.onContextEditEvent(handle.context, handle, (name) => {
-      if (!this._destroyed && !scene.driver.disposed) this.emit(name)
+      if (!this._destroyed && !owner.disposed) this.emit(name)
     })
   }
 
-  static create(widthMethod: WidthMethod, owner: NativeResourceOwner): EditBuffer {
-    if (!owner?.driver) throw new Error("EditBuffer requires an explicit resource owner")
+  static create(widthMethod: WidthMethod, source: NativeResourceOwner): EditBuffer {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("EditBuffer requires an explicit resource owner")
     owner.assertAlive()
-    const lib = owner.driver.renderLib
-    const handle = lib.createContextEditBuffer(owner.driver.context, { widthMethod })
+    const lib = owner.renderLib
+    const handle = lib.createContextEditBuffer(owner.context, { widthMethod })
     try {
       return new EditBuffer(lib, handle, owner)
     } catch (error) {
-      lib.destroyContextEditBuffer(owner.driver.context, handle)
+      lib.destroyContextEditBuffer(owner.context, handle)
       throw error
     }
   }
 
   private guard(): void {
     if (this._destroyed) throw new Error("EditBuffer is destroyed")
-    this.native.scene.assertAlive()
+    this.native.owner.assertAlive()
   }
 
   /** @internal Editor views must use the buffer's library and Context. */
-  public _getOwner(): { lib: RenderLib; scene: NativeResourceOwner } {
+  public _getOwner(): ResourceContext {
     this.guard()
-    return { lib: this.lib, scene: this.native.scene }
+    return this.native.owner
   }
 
-  /** @internal Requires the exact resource owner. */
+  /** @internal Resources can be shared by scenes in the same Context. */
   public _getSceneHandle(scene: NativeResourceOwner): ContextEditBufferHandle {
     this.guard()
-    if (this.native.scene !== scene) throw new Error("EditBuffer Context owner mismatch")
+    if (this.native.owner !== scene.resourceContext) throw new Error("EditBuffer Context owner mismatch")
     return this.native.handle
   }
 
@@ -430,7 +427,7 @@ export class EditBuffer extends EventEmitter {
       this.lib.contextEditBufferSetSyntaxStyle(
         this.native.handle.context,
         this.native.handle,
-        style?._getSceneHandle(this.native.scene) ?? null,
+        style?._getSceneHandle(this.native.owner) ?? null,
       )
       this._syntaxStyle = style ?? undefined
     })
@@ -505,8 +502,7 @@ export class EditBuffer extends EventEmitter {
   public destroy(): void {
     if (this._destroyed) return
     this.lib.getYogaHost().runMutation(() => {
-      if (!this.native.scene.driver.contextDisposed)
-        this.lib.destroyContextEditBuffer(this.native.handle.context, this.native.handle)
+      if (!this.native.owner.disposed) this.lib.destroyContextEditBuffer(this.native.handle.context, this.native.handle)
       this._destroyed = true
       this.unsubscribe?.()
       this.unsubscribe = undefined

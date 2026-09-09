@@ -53,7 +53,7 @@ test("standalone Context owns buffers, styles, views, and editor callbacks throu
   target.withBuffers((cells) => assert.deepEqual(cells.fg.slice(0, 4), RGBA.fromInts(255, 0, 0).buffer))
   edit.setText("editor")
   edit.setSyntaxStyle(style)
-  assert.equal(editor._getOwner().scene, owner)
+  assert.equal(editor._getOwner(), owner)
   assert.equal(edit.getText(), "editor")
   owner.destroy()
   for (const access of [
@@ -71,7 +71,7 @@ test("standalone Context owns buffers, styles, views, and editor callbacks throu
 
 test("styled batch keeps its encoded replacement count across the admission callback", () => {
   const owner = standalone()
-  const lib = owner.driver.renderLib
+  const lib = owner.renderLib
   const buffers = [TextBuffer.create("unicode", owner), TextBuffer.create("unicode", owner)]
   const views = buffers.map((buffer) => TextBufferView.create(buffer))
   resources.push(...buffers, ...views)
@@ -81,7 +81,7 @@ test("styled batch keeps its encoded replacement count across the admission call
     text: lib.encodeTextBufferStyledText(new StyledText([{ __isChunk: true, text: "new" }])),
   }))
 
-  lib.contextTextBufferReplaceStyledBatch(owner.driver.context, replacements, () => {
+  lib.contextTextBufferReplaceStyledBatch(owner.context, replacements, () => {
     replacements.pop()
   })
 
@@ -306,7 +306,7 @@ test.each([false, true])(
           return chunks
         },
       })
-      const host = buffer._getOwner().lib.getYogaHost()
+      const host = buffer._getOwner().renderLib.getYogaHost()
       host.invokeCallback(() => assert.throws(() => buffer.setStyledText(content), /during a callback/))
       host.throwCallbackError()
       assert.equal(reads, 0)

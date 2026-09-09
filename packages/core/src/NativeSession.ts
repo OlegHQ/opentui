@@ -1,5 +1,6 @@
 import { Writable } from "node:stream"
 import { writeSync } from "node:fs"
+import { ResourceContext } from "./buffer.js"
 import {
   NativeError,
   NativeSessionPumpStatus,
@@ -206,7 +207,7 @@ function asError(error: unknown): Error {
 export class NativeSession {
   private readonly lib = resolveRenderLib()
   private attachmentCleanup?: () => void
-  private readonly nativeContext: NativeContextHandle
+  readonly resourceContext: ResourceContext
   private readonly nativeSession: Readonly<SessionHandle>
   private readonly buffer: Uint8Array
   private readonly sinkWrite: Writable["write"]
@@ -273,13 +274,14 @@ export class NativeSession {
     this.maxSnapshotCount = output.spanCapacity
     this.closeTimeoutNs = BigInt(timeout) * 1_000_000n
     owner?.checkOpen()
-    this.nativeContext =
-      owner?.context ?? this.lib.createContext(options.context ?? { objectCapacity: 65_536, renderCellsMax: 1_000_000 })
+    this.resourceContext =
+      owner?.resourceContext ??
+      new ResourceContext(options.context ?? { objectCapacity: 65_536, renderCellsMax: 1_000_000 })
     let session: SessionHandle | undefined
     try {
-      session = this.lib.createSession(this.nativeContext, output)
+      session = this.lib.createSession(this.context, output)
       this.nativeSession = Object.freeze(session)
-      this.maxAtomicWriteBytes = this.lib.sessionGetWriteLimit(this.nativeContext, session)
+      this.maxAtomicWriteBytes = this.lib.sessionGetWriteLimit(this.context, session)
       sink.on("error", this.onError)
       sink.on("close", this.onClose)
       sink.on("finish", this.onFinish)
@@ -292,7 +294,7 @@ export class NativeSession {
       this.stopped = true
       try {
         if (session) this.finish(asError(error))
-        else if (!owner) this.lib.destroyContext(this.nativeContext)
+        else if (!owner) this.resourceContext.destroy()
       } catch {
         // Preserve the construction failure.
       } finally {
@@ -303,7 +305,7 @@ export class NativeSession {
   }
 
   get context(): NativeContextHandle {
-    return this.nativeContext
+    return this.resourceContext.context
   }
 
   get renderLib(): RenderLib {
@@ -319,13 +321,8 @@ export class NativeSession {
     return this._disposed
   }
 
-  /** @internal Shared Context identity and lifetime, independent of detached Session teardown. */
-  get contextOwner(): NativeSession {
-    return this.owner?.contextOwner ?? this
-  }
-
   get contextDisposed(): boolean {
-    return this.contextOwner.disposed
+    return this.resourceContext.disposed
   }
 
   get error(): Error | null {
@@ -839,10 +836,12 @@ export class NativeSession {
           }
         }
         try {
-          if (this.owner) this.lib.destroySession(this.context, this.session)
-          else this.lib.destroyContext(this.context)
-          this._disposed = true
-          this.owner?.detachedSessions.delete(this)
+          this.lib.getYogaHost().runMutation(() => {
+            if (this.owner) this.lib.destroySession(this.context, this.session)
+            else this.resourceContext.destroy()
+            this._disposed = true
+            this.owner?.detachedSessions.delete(this)
+          })
         } catch (error) {
           this._error ??= asError(error)
         }

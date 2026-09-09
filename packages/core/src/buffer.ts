@@ -88,22 +88,15 @@ type SessionBufferSource = {
 type ContextBufferSource = {
   context: NativeContextHandle
   buffer: ContextBufferHandle
-  scene: NativeResourceOwner
+  owner: ResourceContext
 }
 
 export interface NativeResourceOwner {
-  readonly driver: {
-    readonly renderLib: RenderLib
-    readonly context: NativeContextHandle
-    readonly disposed: boolean
-    readonly contextDisposed: boolean
-  }
-  assertAlive(): void
+  readonly resourceContext: ResourceContext
 }
 
-/** Owns standalone checked resources without a renderer, output Session, or terminal. */
+/** Owns checked resources independently of the Sessions and scenes that use them. */
 export class ResourceContext implements NativeResourceOwner {
-  readonly driver = this
   readonly renderLib = resolveRenderLib()
   readonly context: NativeContextHandle
   private _disposed = false
@@ -116,8 +109,8 @@ export class ResourceContext implements NativeResourceOwner {
     return this._disposed
   }
 
-  get contextDisposed(): boolean {
-    return this._disposed
+  get resourceContext(): ResourceContext {
+    return this
   }
 
   assertAlive(): void {
@@ -159,7 +152,7 @@ export class OptimizedBuffer {
   // this at least will show a stack trace to know where the call to a destroyed Buffer was made
   private guard(): void {
     if (this._destroyed) throw new Error(`Buffer ${this.id} is destroyed`)
-    if ("buffer" in this.source) this.source.scene.assertAlive()
+    if ("buffer" in this.source) this.source.owner.assertAlive()
   }
 
   private checkedTarget(): {
@@ -180,7 +173,11 @@ export class OptimizedBuffer {
   public _getSceneHandle(scene: NativeResourceOwner): ContextBufferHandle {
     this.guard()
     const source = this.source
-    if (!("buffer" in source) || source.context !== scene.driver.context || this.lib !== scene.driver.renderLib) {
+    if (
+      !("buffer" in source) ||
+      source.owner !== scene.resourceContext ||
+      this.lib !== scene.resourceContext.renderLib
+    ) {
       throw new Error("Scene binding requires a buffer owned by the same Context")
     }
     return source.buffer
@@ -302,10 +299,10 @@ export class OptimizedBuffer {
     widthMethod: WidthMethod,
     options: { respectAlpha?: boolean; id?: string; owner: NativeResourceOwner },
   ): OptimizedBuffer {
-    const owner = options?.owner
-    if (!owner || !("driver" in owner)) throw new Error("OptimizedBuffer requires an explicit resource owner")
+    const owner = options?.owner?.resourceContext
+    if (!owner) throw new Error("OptimizedBuffer requires an explicit resource owner")
     owner.assertAlive()
-    const { renderLib: lib, context } = owner.driver
+    const { renderLib: lib, context } = owner
     const buffer = lib.createContextBuffer(context, {
       width,
       height,
@@ -313,7 +310,7 @@ export class OptimizedBuffer {
       respectAlpha: options.respectAlpha,
     })
     try {
-      return new OptimizedBuffer(lib, { context, buffer, scene: owner }, width, height, { ...options, widthMethod })
+      return new OptimizedBuffer(lib, { context, buffer, owner }, width, height, { ...options, widthMethod })
     } catch (error) {
       try {
         lib.destroyContextBuffer(context, buffer)
@@ -597,7 +594,7 @@ export class OptimizedBuffer {
 
   public destroy(): void {
     if (this._destroyed) return
-    if ("buffer" in this.source && !this.source.scene.driver.contextDisposed) {
+    if ("buffer" in this.source && !this.source.owner.disposed) {
       this.lib.destroyContextBuffer(this.source.context, this.source.buffer)
     }
     this._destroyed = true
@@ -606,15 +603,15 @@ export class OptimizedBuffer {
   public drawTextBuffer(textBufferView: TextBufferView, x: number, y: number): void {
     this.guard()
     const target = this.checkedTarget()
-    const { lib, scene } = textBufferView._getOwner()
-    if (lib !== this.lib || scene.driver.context !== target.context) {
+    const owner = textBufferView._getOwner()
+    if (owner.renderLib !== this.lib || owner.context !== target.context) {
       throw new Error("Text drawing requires a view owned by the same Context")
     }
     this.lib.contextDrawTextBufferView(
       target.context,
       target.target,
       target.frame,
-      textBufferView._getSceneHandle(scene),
+      textBufferView._getSceneHandle(owner),
       x,
       y,
     )
@@ -623,11 +620,11 @@ export class OptimizedBuffer {
   public drawEditorView(editorView: EditorView, x: number, y: number): void {
     this.guard()
     const target = this.checkedTarget()
-    const { lib, scene } = editorView._getOwner()
-    if (lib !== this.lib || scene.driver.context !== target.context) {
+    const owner = editorView._getOwner()
+    if (owner.renderLib !== this.lib || owner.context !== target.context) {
       throw new Error("Editor drawing requires a view owned by the same Context")
     }
-    this.lib.contextDrawEditorView(target.context, target.target, target.frame, editorView._getSceneHandle(scene), x, y)
+    this.lib.contextDrawEditorView(target.context, target.target, target.frame, editorView._getSceneHandle(owner), x, y)
   }
 
   public drawSuperSampleBuffer(

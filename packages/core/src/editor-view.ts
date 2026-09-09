@@ -12,7 +12,7 @@ import {
   type NativeEditorReplacement,
 } from "./zig.js"
 import type { EditBuffer } from "./edit-buffer.js"
-import type { NativeResourceOwner } from "./buffer.js"
+import type { NativeResourceOwner, ResourceContext } from "./buffer.js"
 import { createExtmarksController } from "./lib/index.js"
 import { StyledText } from "./lib/styled-text.js"
 import type { SelectionBehavior, SelectionOccupancy } from "./types.js"
@@ -28,56 +28,57 @@ export type { VisualCursor }
 
 export class EditorView {
   private lib: RenderLib
-  private native: { scene: NativeResourceOwner; handle: ContextEditorViewHandle }
+  private native: { owner: ResourceContext; handle: ContextEditorViewHandle }
   private editBuffer: EditBuffer
   private _destroyed: boolean = false
   private _extmarksController?: any
 
-  constructor(lib: RenderLib, handle: ContextEditorViewHandle, editBuffer: EditBuffer, scene: NativeResourceOwner) {
-    if (!scene?.driver) throw new Error("EditorView requires an explicit resource owner")
-    scene.assertAlive()
-    const owner = editBuffer._getOwner()
-    if (owner.lib !== lib) throw new Error("EditorView library owner mismatch")
-    if (owner.scene !== scene || !handle || typeof handle !== "object" || handle.context !== scene.driver.context) {
+  constructor(lib: RenderLib, handle: ContextEditorViewHandle, editBuffer: EditBuffer, source: NativeResourceOwner) {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("EditorView requires an explicit resource owner")
+    owner.assertAlive()
+    if (owner.renderLib !== lib) throw new Error("EditorView library owner mismatch")
+    if (editBuffer._getOwner() !== owner || !handle || typeof handle !== "object" || handle.context !== owner.context) {
       throw new Error("EditorView Context owner mismatch")
     }
     this.lib = lib
-    this.native = { scene, handle }
+    this.native = { owner, handle }
     this.editBuffer = editBuffer
   }
 
   static create(editBuffer: EditBuffer, viewportWidth: number, viewportHeight: number): EditorView {
-    const { lib, scene } = editBuffer._getOwner()
+    const owner = editBuffer._getOwner()
+    const lib = owner.renderLib
     const handle = lib.createContextEditorView(
-      scene.driver.context,
-      editBuffer._getSceneHandle(scene),
+      owner.context,
+      editBuffer._getSceneHandle(owner),
       viewportWidth,
       viewportHeight,
     )
     try {
-      return new EditorView(lib, handle, editBuffer, scene)
+      return new EditorView(lib, handle, editBuffer, owner)
     } catch (error) {
-      lib.destroyContextEditorView(scene.driver.context, handle)
+      lib.destroyContextEditorView(owner.context, handle)
       throw error
     }
   }
 
   private guard(): void {
     if (this._destroyed) throw new Error("EditorView is destroyed")
-    this.native.scene.assertAlive()
+    this.native.owner.assertAlive()
     this.editBuffer._getOwner()
   }
 
   /** @internal Drawing targets must use the view's library and Context. */
-  public _getOwner(): { lib: RenderLib; scene: NativeResourceOwner } {
+  public _getOwner(): ResourceContext {
     this.guard()
-    return { lib: this.lib, scene: this.native.scene }
+    return this.native.owner
   }
 
-  /** @internal Requires the exact resource owner. */
+  /** @internal Resources can be shared by scenes in the same Context. */
   public _getSceneHandle(scene: NativeResourceOwner): ContextEditorViewHandle {
     this.guard()
-    if (this.native.scene !== scene) throw new Error("EditorView Context owner mismatch")
+    if (this.native.owner !== scene.resourceContext) throw new Error("EditorView Context owner mismatch")
     return this.native.handle
   }
 
@@ -446,7 +447,7 @@ export class EditorView {
   public destroy(): void {
     if (this._destroyed) return
     this.lib.getYogaHost().runMutation(() => {
-      if (!this.native.scene.driver.contextDisposed) {
+      if (!this.native.owner.disposed) {
         try {
           this.lib.destroyContextEditorView(this.native.handle.context, this.native.handle)
         } catch (error) {

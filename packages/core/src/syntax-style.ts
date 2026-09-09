@@ -1,7 +1,7 @@
 import { RGBA, parseColor, type ColorInput } from "./lib/RGBA.js"
 import { type RenderLib, type ContextSyntaxStyleHandle } from "./zig.js"
 import { createTextAttributes } from "./utils.js"
-import type { NativeResourceOwner } from "./buffer.js"
+import type { NativeResourceOwner, ResourceContext } from "./buffer.js"
 
 export interface StyleDefinition {
   fg?: RGBA
@@ -84,36 +84,33 @@ export function convertThemeToStyles(theme: ThemeTokenStyle[]): Record<string, S
 
 export class SyntaxStyle {
   private lib: RenderLib
-  private native: { scene: NativeResourceOwner; handle: ContextSyntaxStyleHandle }
+  private native: { owner: ResourceContext; handle: ContextSyntaxStyleHandle }
   private _destroyed: boolean = false
   private nameCache: Map<string, number> = new Map()
   private styleDefs: Map<string, StyleDefinition> = new Map()
   private mergedCache: Map<string, MergedStyle> = new Map()
 
-  constructor(lib: RenderLib, handle: ContextSyntaxStyleHandle, scene: NativeResourceOwner) {
-    if (!scene?.driver) throw new Error("SyntaxStyle requires an explicit resource owner")
-    scene.assertAlive()
-    if (
-      scene.driver.renderLib !== lib ||
-      !handle ||
-      typeof handle !== "object" ||
-      handle.context !== scene.driver.context
-    ) {
+  constructor(lib: RenderLib, handle: ContextSyntaxStyleHandle, source: NativeResourceOwner) {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("SyntaxStyle requires an explicit resource owner")
+    owner.assertAlive()
+    if (owner.renderLib !== lib || !handle || typeof handle !== "object" || handle.context !== owner.context) {
       throw new Error("SyntaxStyle Context owner mismatch")
     }
     this.lib = lib
-    this.native = { scene, handle }
+    this.native = { owner, handle }
   }
 
-  static create(owner: NativeResourceOwner): SyntaxStyle {
-    if (!owner?.driver) throw new Error("SyntaxStyle requires an explicit resource owner")
+  static create(source: NativeResourceOwner): SyntaxStyle {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("SyntaxStyle requires an explicit resource owner")
     owner.assertAlive()
-    const lib = owner.driver.renderLib
-    const handle = lib.createContextSyntaxStyle(owner.driver.context)
+    const lib = owner.renderLib
+    const handle = lib.createContextSyntaxStyle(owner.context)
     try {
       return new SyntaxStyle(lib, handle, owner)
     } catch (error) {
-      lib.destroyContextSyntaxStyle(owner.driver.context, handle)
+      lib.destroyContextSyntaxStyle(owner.context, handle)
       throw error
     }
   }
@@ -140,16 +137,14 @@ export class SyntaxStyle {
 
   private guard(): void {
     if (this._destroyed) throw new Error("NativeSyntaxStyle is destroyed")
-    this.native.scene.assertAlive()
+    this.native.owner.assertAlive()
   }
 
-  /** @internal Attachment borrows the destination-owned style; it never allocates a copy. */
+  /** @internal Attachment borrows the Context-owned style; it never allocates a copy. */
   public _getSceneHandle(scene: NativeResourceOwner): ContextSyntaxStyleHandle {
     this.guard()
-    scene.assertAlive()
-    if (scene.driver.renderLib !== this.lib) throw new Error("SyntaxStyle library owner mismatch")
-    if (this.native.scene !== scene)
-      throw new Error("SyntaxStyle owner mismatch: bind definitions in the destination owner")
+    if (this.native.owner !== scene.resourceContext)
+      throw new Error("SyntaxStyle owner mismatch: bind definitions in the destination Context")
     return this.native.handle
   }
 
@@ -307,7 +302,7 @@ export class SyntaxStyle {
   public destroy(): void {
     if (this._destroyed) return
     this.lib.getYogaHost().runMutation(() => {
-      if (!this.native.scene.driver.contextDisposed)
+      if (!this.native.owner.disposed)
         this.lib.destroyContextSyntaxStyle(this.native.handle.context, this.native.handle)
       this._destroyed = true
       this.nameCache.clear()

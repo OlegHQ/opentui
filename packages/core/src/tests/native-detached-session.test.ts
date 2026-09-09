@@ -43,9 +43,9 @@ test("definition bindings own distinct style handles across detached scenes in t
     const secondHandle = secondStyle._getSceneHandle(second.renderContext.nativeScene!)
     assert.equal(firstHandle.context, secondHandle.context)
     assert.notDeepEqual(firstHandle, secondHandle)
-    assert.throws(() => firstStyle._getSceneHandle(second.renderContext.nativeScene!), /owner mismatch/)
+    assert.equal(firstStyle._getSceneHandle(second.renderContext.nativeScene!), firstHandle)
     first.destroy()
-    assert.throws(() => firstStyle.getStyleCount(), /destroyed/)
+    assert.equal(firstStyle.getStyleCount(), 1)
     const later = secondStyle.registerStyle("later", { italic: true })
     assert.equal(lib.contextSyntaxStyleGetStyleCount(firstHandle.context, firstHandle), 1)
     assert.equal(source.getStyleCount(), 1)
@@ -68,6 +68,114 @@ test("definition bindings own distinct style handles across detached scenes in t
       await renderer.closed
     }
   }
+})
+
+test("same-Context resources share across detached scenes while view bindings stay exclusive", async () => {
+  const { renderer } = await setup()
+  const first = renderer.createScrollbackSurface()
+  const second = renderer.createScrollbackSurface()
+  const left = first.renderContext.nativeScene!
+  const right = second.renderContext.nativeScene!
+  const style = SyntaxStyle.fromStyles({ token: { fg: "#ff0000" } }, right)
+  const text = TextBuffer.create("unicode", left)
+  const textView = TextBufferView.create(text)
+  const edit = EditBuffer.create("unicode", left)
+  const editor = EditorView.create(edit, 4, 1)
+  const buffer = OptimizedBuffer.create(4, 1, "unicode", { owner: right })
+  const peer = await setup()
+  try {
+    for (const resource of [style, text, textView, edit, editor, buffer]) {
+      assert.equal(resource._getSceneHandle(left), resource._getSceneHandle(right))
+      assert.throws(() => resource._getSceneHandle(peer.renderer.nativeScene!))
+    }
+    text.setSyntaxStyle(style)
+    edit.setSyntaxStyle(style)
+    text.setText("text")
+    edit.setText("edit")
+    textView.setViewport(0, 0, 4, 1)
+    buffer.drawTextBuffer(textView, 0, 0)
+    assert.equal(new TextDecoder().decode(buffer.getRealCharBytes()), "text")
+    buffer.drawEditorView(editor, 0, 0)
+    assert.equal(new TextDecoder().decode(buffer.getRealCharBytes()), "edit")
+
+    const a = lib.sceneCreateNode(left.driver.context, left.driver.session, "text_view", 9001)
+    const b = lib.sceneCreateNode(right.driver.context, right.driver.session, "text_view", 9002)
+    lib.sceneSetTextView(left.driver.context, a, textView._getSceneHandle(left))
+    assert.throws(() => lib.sceneSetTextView(right.driver.context, b, textView._getSceneHandle(right)))
+    lib.sceneDestroyNode(left.driver.context, a)
+    lib.sceneSetTextView(right.driver.context, b, textView._getSceneHandle(right))
+    assert.equal(textView.getPlainText(), "text")
+    text.destroy()
+    assert.throws(() => textView.getPlainText(), /destroyed/)
+  } finally {
+    for (const resource of [buffer, editor, edit, textView, text, style]) resource.destroy()
+    renderer.destroy()
+    peer.renderer.destroy()
+    await Promise.all([renderer.closed, peer.renderer.closed])
+  }
+})
+
+test("detached resource access and queued edit events survive Session destruction", async () => {
+  const { renderer } = await setup()
+  const surface = renderer.createScrollbackSurface()
+  const scene = surface.renderContext.nativeScene!
+  const text = TextBuffer.create("unicode", scene)
+  const view = TextBufferView.create(text)
+  const edit = EditBuffer.create("unicode", scene)
+  const editor = EditorView.create(edit, 4, 1)
+  const style = SyntaxStyle.fromStyles({ token: { bold: true } }, scene)
+  const buffer = OptimizedBuffer.create(4, 1, "unicode", { owner: scene })
+  const events: string[] = []
+  edit.on("content-changed", () => events.push(edit.getText()))
+  try {
+    edit.setText("edit")
+    surface.destroy()
+    await Promise.resolve()
+    assert.deepEqual(events, ["edit"])
+    edit.setText("next")
+    await Promise.resolve()
+    assert.deepEqual(events, ["edit", "next"])
+    assert.equal(editor.getText(), "next")
+    text.setSyntaxStyle(style)
+    edit.setSyntaxStyle(style)
+    text.setText("text")
+    view.setViewport(0, 0, 4, 1)
+    buffer.drawTextBuffer(view, 0, 0)
+    assert.equal(new TextDecoder().decode(buffer.getRealCharBytes()), "text")
+    assert.equal(style.getStyleCount(), 1)
+    const laterView = TextBufferView.create(text)
+    laterView.destroy()
+
+    edit.setText("drop")
+    edit.destroy()
+    await Promise.resolve()
+    assert.deepEqual(events, ["edit", "next"])
+    assert.equal(edit.listenerCount("content-changed"), 0)
+    assert.throws(() => editor.getText(), /destroyed/)
+  } finally {
+    for (const resource of [buffer, style, editor, edit, view, text]) resource.destroy()
+    renderer.destroy()
+    await renderer.closed
+  }
+})
+
+test("Context destruction suppresses queued edit events and permits wrapper cleanup", async () => {
+  const parent = new NativeSession(new Writable({ write: (_bytes, _encoding, done) => done() }))
+  const child = parent.createDetached(dimensions, () => {})
+  const edit = EditBuffer.create("unicode", child)
+  let events = 0
+  edit.on("content-changed", () => events++)
+  try {
+    edit.setText("queued")
+    parent.dispose()
+    await Promise.resolve()
+    assert.equal(events, 0)
+    assert.throws(() => edit.getText(), /destroyed/)
+  } finally {
+    edit.destroy()
+    parent.dispose()
+  }
+  assert.equal(edit.listenerCount("content-changed"), 0)
 })
 
 test("resource wrappers release Context handles after detached Session disposal", async () => {
@@ -104,6 +212,23 @@ test("resource wrappers release Context handles after detached Session disposal"
     edit.destroy()
     renderer.destroy()
     await renderer.closed
+  }
+})
+
+test("Session publishes accepted Context teardown before deferred callback errors", () => {
+  const parent = new NativeSession(new Writable({ write: (_bytes, _encoding, done) => done() }))
+  const edit = EditBuffer.create("unicode", parent)
+  try {
+    lib.getYogaHost().invokeCallback(() => {
+      throw new Error("deferred callback failure")
+    })
+    parent.dispose()
+    assert.equal(parent.disposed, true)
+    assert.equal(parent.resourceContext.disposed, true)
+    assert.throws(() => edit.getText(), /destroyed/)
+  } finally {
+    edit.destroy()
+    parent.dispose()
   }
 })
 

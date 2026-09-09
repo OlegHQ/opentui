@@ -114,6 +114,10 @@ class NativeLifecyclePasses extends Set<Renderable> {
 
 /** Retained built-in scene with sparse owner-thread hooks. */
 export class NativeScene {
+  get resourceContext() {
+    return this.driver.resourceContext
+  }
+
   readonly lifecyclePasses = new NativeLifecyclePasses()
   private readonly nodes = new Map<number, Renderable>()
   private readonly nativeMethods = new Map(

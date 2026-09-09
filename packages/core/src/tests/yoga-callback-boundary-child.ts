@@ -149,7 +149,7 @@ try {
       if (owner === scene) scene.setTextView(renderable, view._getSceneHandle(scene))
       scene.measureSnapshot(renderable)
       assert.equal(nativeNode.getComputedWidth(), 5)
-      const resourceContext = owner.driver.context
+      const resourceContext = owner.resourceContext.context
       const resourceMutations = [
         () => lib.destroyContextTextBuffer(resourceContext, text._getSceneHandle(owner)),
         () => lib.destroyContextTextBufferView(resourceContext, view._getSceneHandle(owner)),

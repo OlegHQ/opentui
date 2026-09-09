@@ -12,7 +12,7 @@ import {
 } from "./zig.js"
 import { type WidthMethod, type Highlight } from "./types.js"
 import type { SyntaxStyle } from "./syntax-style.js"
-import type { NativeResourceOwner } from "./buffer.js"
+import type { NativeResourceOwner, ResourceContext } from "./buffer.js"
 import type { TextBufferView } from "./text-buffer-view.js"
 
 export interface TextChunk {
@@ -26,37 +26,34 @@ export interface TextChunk {
 
 export class TextBuffer {
   private lib: RenderLib
-  private native: { scene: NativeResourceOwner; handle: ContextTextBufferHandle }
+  private native: { owner: ResourceContext; handle: ContextTextBufferHandle }
   private _length: number = 0
   private _byteSize: number = 0
   private _destroyed: boolean = false
   private _syntaxStyle?: SyntaxStyle
 
-  constructor(lib: RenderLib, handle: ContextTextBufferHandle, scene: NativeResourceOwner) {
-    if (!scene?.driver) throw new Error("TextBuffer requires an explicit resource owner")
-    scene.assertAlive()
-    if (
-      scene.driver.renderLib !== lib ||
-      !handle ||
-      typeof handle !== "object" ||
-      handle.context !== scene.driver.context
-    ) {
+  constructor(lib: RenderLib, handle: ContextTextBufferHandle, source: NativeResourceOwner) {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("TextBuffer requires an explicit resource owner")
+    owner.assertAlive()
+    if (owner.renderLib !== lib || !handle || typeof handle !== "object" || handle.context !== owner.context) {
       throw new Error("TextBuffer Context owner mismatch")
     }
     this.lib = lib
-    this.native = { scene, handle }
+    this.native = { owner, handle }
     this.updateLengths()
   }
 
-  static create(widthMethod: WidthMethod, owner: NativeResourceOwner): TextBuffer {
-    if (!owner?.driver) throw new Error("TextBuffer requires an explicit resource owner")
+  static create(widthMethod: WidthMethod, source: NativeResourceOwner): TextBuffer {
+    const owner = source?.resourceContext
+    if (!owner) throw new Error("TextBuffer requires an explicit resource owner")
     owner.assertAlive()
-    const lib = owner.driver.renderLib
-    const handle = lib.createContextTextBuffer(owner.driver.context, { widthMethod })
+    const lib = owner.renderLib
+    const handle = lib.createContextTextBuffer(owner.context, { widthMethod })
     try {
       return new TextBuffer(lib, handle, owner)
     } catch (error) {
-      lib.destroyContextTextBuffer(owner.driver.context, handle)
+      lib.destroyContextTextBuffer(owner.context, handle)
       throw error
     }
   }
@@ -66,19 +63,19 @@ export class TextBuffer {
   // this at least will show a stack trace to know where the call to a destroyed TextBuffer was made
   private guard(): void {
     if (this._destroyed) throw new Error("TextBuffer is destroyed")
-    this.native.scene.assertAlive()
+    this.native.owner.assertAlive()
   }
 
   /** @internal Dependent views must use the buffer's library and Context. */
-  public _getOwner(): { lib: RenderLib; scene: NativeResourceOwner } {
+  public _getOwner(): ResourceContext {
     this.guard()
-    return { lib: this.lib, scene: this.native.scene }
+    return this.native.owner
   }
 
-  /** @internal Requires the exact resource owner. */
+  /** @internal Resources can be shared by scenes in the same Context. */
   public _getSceneHandle(scene: NativeResourceOwner): ContextTextBufferHandle {
     this.guard()
-    if (this.native.scene !== scene) throw new Error("TextBuffer Context owner mismatch")
+    if (this.native.owner !== scene.resourceContext) throw new Error("TextBuffer Context owner mismatch")
     return this.native.handle
   }
 
@@ -130,7 +127,7 @@ export class TextBuffer {
       if (Array.isArray(chunks) && chunks.length === 0) {
         this.lib.contextTextBufferClear(this.native.handle.context, this.native.handle)
       } else {
-        const beforeNative = () => this._syntaxStyle?._getSceneHandle(this.native.scene)
+        const beforeNative = () => this._syntaxStyle?._getSceneHandle(this.native.owner)
         this.lib.contextTextBufferSetStyledText(
           this.native.handle.context,
           this.native.handle,
@@ -160,14 +157,15 @@ export class TextBuffer {
       beforeNative()
       return true
     }
-    const { lib, scene } = replacements[0].textBuffer._getOwner()
+    const owner = replacements[0].textBuffer._getOwner()
+    const lib = owner.renderLib
     const entries = replacements.map(({ textBuffer, textBufferView, text }) => ({
-      buffer: textBuffer._getSceneHandle(scene),
-      view: textBufferView._getSceneHandle(scene),
+      buffer: textBuffer._getSceneHandle(owner),
+      view: textBufferView._getSceneHandle(owner),
       text,
     }))
     return lib.getYogaHost().runMutation(() => {
-      const info = lib.contextTextBufferReplaceStyledBatch(scene.driver.context, entries, beforeNative)
+      const info = lib.contextTextBufferReplaceStyledBatch(owner.context, entries, beforeNative)
       if (info === null) return false
       for (let index = 0; index < replacements.length; index++) {
         replacements[index].textBuffer._length = info[index * 2]
@@ -329,7 +327,7 @@ export class TextBuffer {
       this.lib.contextTextBufferSetSyntaxStyle(
         this.native.handle.context,
         this.native.handle,
-        style?._getSceneHandle(this.native.scene) ?? null,
+        style?._getSceneHandle(this.native.owner) ?? null,
       )
       this._syntaxStyle = style ?? undefined
     })
@@ -374,7 +372,7 @@ export class TextBuffer {
   public destroy(): void {
     if (this._destroyed) return
     this.lib.getYogaHost().runMutation(() => {
-      if (!this.native.scene.driver.contextDisposed) {
+      if (!this.native.owner.disposed) {
         try {
           this.lib.destroyContextTextBuffer(this.native.handle.context, this.native.handle)
         } catch (error) {
