@@ -4,6 +4,7 @@ const context = @import("../context.zig");
 const yoga = @import("../yoga.zig");
 const yoga_c = @import("yoga");
 const scene = @import("../scene.zig");
+const native = @import("../native-renderable.zig");
 
 fn session(owner: *context.Context) !context.Handle {
     const result = try owner.createSession(.{ .chunk_size = 4096, .chunk_count = 2, .span_capacity = 2 });
@@ -262,7 +263,12 @@ test "Context reuse bounds idle shell counts and discards oversized storage" {
     failing.resize_fail_index = std.math.maxInt(usize);
     try testing.expectEqual(@as(u32, context.Context.node_pool_count_max), owner.node_pool_count);
     var bytes: usize = 0;
-    for (owner.node_pool[0..owner.node_pool_count]) |storage| bytes += storage.retainedBytes();
+    for (owner.node_pool[0..owner.node_pool_count]) |storage| {
+        const retained = @sizeOf(native.NativeRenderable) + @sizeOf(scene.Node) +
+            yoga.nodeStorageBytes(storage.node.yoga_node);
+        try testing.expectEqual(retained, storage.retainedBytes());
+        bytes += retained;
+    }
     try testing.expectEqual(bytes, owner.node_pool_bytes);
     try testing.expect(bytes + owner.node_pool.len * @sizeOf(@TypeOf(owner.node_pool[0])) <= context.Context.node_pool_bytes_max);
     const large = try owner.sceneCreateNode(id, 1, 1000);
@@ -378,6 +384,34 @@ test "Context reuse failed text construction releases the checked out shell" {
             try owner.sceneDestroyNode(recovered);
         }
     }
+}
+
+test "Context reuse cold shell construction failures release partial ownership" {
+    var failures: usize = 0;
+    for (0..8) |offset| {
+        var failing = testing.FailingAllocator.init(testing.allocator, .{});
+        const owner = try context.Context.init(failing.allocator(), testing.io, .{});
+        defer owner.deinit() catch unreachable;
+        const id = try session(owner);
+        const count = owner.objects.live_count;
+        failing.fail_index = failing.alloc_index + offset;
+        failing.resize_fail_index = failing.resize_index;
+        const result = owner.sceneCreateNode(id, 1, 2);
+        failing.fail_index = std.math.maxInt(usize);
+        failing.resize_fail_index = std.math.maxInt(usize);
+        if (result) |handle| {
+            try owner.sceneDestroyNode(handle);
+            break;
+        } else |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
+            failures += 1;
+            try testing.expectEqual(count, owner.objects.live_count);
+            try testing.expectEqual(@as(u32, 1), (try owner.getSession(id)).scene.?.count);
+            const recovered = try owner.sceneCreateNode(id, 1, 2);
+            try owner.sceneDestroyNode(recovered);
+        }
+    }
+    try testing.expect(failures > 0 and failures < 8);
 }
 
 test "Context reuse entered paint owns retired bytes until resume cancel or teardown" {

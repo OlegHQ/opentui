@@ -409,8 +409,9 @@ pub const Scene = struct {
         try self.tokens.ensureUnusedCapacity(self.allocator, 1);
     }
 
-    pub fn insert(self: *Scene, storage: native.NodeStorage, handle: handles.Handle, kind: u32, num: u32, node_ptr: *Node) void {
+    pub fn insert(self: *Scene, storage: native.NodeStorage, handle: handles.Handle, kind: u32, num: u32) void {
         const value = storage.node;
+        const node_ptr = storage.scene_node;
         self.last_token += 1;
         node_ptr.* = .{
             .owner = self,
@@ -552,9 +553,14 @@ pub const Scene = struct {
         }
         self.preparation_dirty = true;
         self.work.clearRetainingCapacity();
-        const storage: native.NodeStorage = .{ .node = value, .children = node.children, .paint_children = node.paint_children };
+        const storage: native.NodeStorage = .{
+            .node = value,
+            .scene_node = node,
+            .children = node.children,
+            .paint_children = node.paint_children,
+        };
         value.scene_node = null;
-        self.allocator.destroy(node);
+        node.* = undefined;
         return storage;
     }
 

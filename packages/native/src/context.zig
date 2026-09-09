@@ -1544,10 +1544,8 @@ pub const Context = struct {
             resource.view.setWrapMode(.word);
             try node.setMeasureTarget(.{ .text_buffer_view = resource.view });
         }
-        const scene_state = try self.allocator.create(scene.Node);
-        errdefer self.allocator.destroy(scene_state);
         const handle = try self.objects.insert(.native_renderable, node);
-        owned.insert(storage, handle, kind, num, scene_state);
+        owned.insert(storage, handle, kind, num);
         node.scene_node.?.text = text;
         value.scene = owned;
         return handle;
@@ -1574,9 +1572,11 @@ pub const Context = struct {
         }
         const node = try self.allocator.create(native_renderable.NativeRenderable);
         errdefer self.allocator.destroy(node);
+        const scene_node = try self.allocator.create(scene.Node);
+        errdefer self.allocator.destroy(scene_node);
         node.* = try native_renderable.NativeRenderable.initWithConfig(&self.yoga_config);
         node.context_owned = true;
-        return .{ .node = node };
+        return .{ .node = node, .scene_node = scene_node };
     }
 
     fn releaseNodeStorage(self: *Context, storage: native_renderable.NodeStorage) void {
@@ -1601,6 +1601,7 @@ pub const Context = struct {
         var paint_children = storage.paint_children;
         children.deinit(self.allocator);
         paint_children.deinit(self.allocator);
+        self.allocator.destroy(storage.scene_node);
         storage.node.deinit();
         self.allocator.destroy(storage.node);
     }

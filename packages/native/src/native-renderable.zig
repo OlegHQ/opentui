@@ -142,12 +142,13 @@ pub const NativeRenderable = struct {
 // Scene state is a separate allocation so live Yoga owners stay small.
 pub const NodeStorage = struct {
     node: *NativeRenderable,
+    scene_node: *scene.Node,
     children: std.ArrayListUnmanaged(*NativeRenderable) = .empty,
     paint_children: std.ArrayListUnmanaged(*NativeRenderable) = .empty,
     reuse_web_defaults: bool = false,
 
     pub fn retainedBytes(self: *const NodeStorage) usize {
-        return @sizeOf(NativeRenderable) + native_yoga.nodeStorageBytes(self.node.yoga_node) +
+        return @sizeOf(NativeRenderable) + @sizeOf(scene.Node) + native_yoga.nodeStorageBytes(self.node.yoga_node) +
             (self.children.capacity + self.paint_children.capacity) * @sizeOf(*NativeRenderable);
     }
 };
