@@ -38,6 +38,7 @@
     "bench:image-pool": "bun src/benchmark/image-pool-benchmark.ts",
     "bench:js:node": "bun scripts/bench-js-node.ts",
     "bench:layout": "bun src/benchmark/layout-benchmark.ts",
+    "bench:session-history-scroll": "bun src/benchmark/session-history-scroll-benchmark.ts",
     "bench:box-draw": "bun src/benchmark/box-draw-benchmark.ts",
     "bench:render-traversal": "bun src/benchmark/render-traversal-benchmark.ts",
     "bench:render-runtimes": "bun src/benchmark/render-runtime-benchmark.ts",
