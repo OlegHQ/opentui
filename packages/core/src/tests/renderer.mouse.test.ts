@@ -68,7 +68,7 @@ describe("renderer getLinkAt", () => {
 
     const lib = renderer.currentRenderBuffer.lib
     const urlLookups = spyOn(lib, "contextGetLinkUrl")
-    const styledTextUpdates = spyOn(lib, "textBufferSetStyledText")
+    const styledTextUpdates = spyOn(lib, "sceneSetStyledText")
 
     try {
       let hoveredLinkId = 0
