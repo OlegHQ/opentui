@@ -112,10 +112,10 @@ export interface ContextObjectHandle {
   generation: number
 }
 
-export type SessionHandle = ContextObjectHandle
-export type ContextBufferHandle = ContextObjectHandle
-export type SceneNodeHandle = ContextObjectHandle
 declare const contextResourceBrand: unique symbol
+export type SessionHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "session" }
+export type ContextBufferHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "buffer" }
+export type SceneNodeHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "scene_node" }
 export type ContextEditBufferHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "edit_buffer" }
 export type ContextEditorViewHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "editor_view" }
 export type ContextSyntaxStyleHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "syntax_style" }
@@ -4847,7 +4847,7 @@ export class FFIRenderLib {
     const pointer = this.nativeContextPointer(context, "ot_buffer_create")
     nativeResult("ot_buffer_create", this.opentui.symbols.ot_buffer_create(pointer, record, output))
     try {
-      return decodeContextHandle(context, output)
+      return decodeContextHandle(context, output) as ContextBufferHandle
     } catch (error) {
       const live = this.nativeContexts.get(context)
       if (live !== undefined) this.opentui.symbols.ot_buffer_destroy(live, output)
@@ -5203,7 +5203,7 @@ export class FFIRenderLib {
     const output = new BigUint64Array(nativeLayouts.ot_handle.size / 8)
     const pointer = this.nativeContextPointer(context, "ot_session_create")
     nativeResult("ot_session_create", this.opentui.symbols.ot_session_create(pointer, record, output))
-    return decodeContextHandle(context, output)
+    return decodeContextHandle(context, output) as SessionHandle
   }
 
   public sessionGetWriteLimit(context: NativeContextHandle, session: SessionHandle): bigint {
@@ -5844,7 +5844,7 @@ export class FFIRenderLib {
           session: decodeContextHandle(
             context,
             new BigUint64Array(output.buffer, layout.fields.session.offset, nativeLayouts.ot_handle.size / 8),
-          ),
+          ) as SessionHandle,
           requestId: output[layout.fields.request_id.offset / 8],
           byteCount,
         }
@@ -5949,7 +5949,7 @@ export class FFIRenderLib {
         this.opentui.symbols.ot_scene_create_node(pointer, handle, tag, number, output),
       )
       try {
-        return decodeContextHandle(context, output, scratch.target.words)
+        return decodeContextHandle(context, output, scratch.target.words) as SceneNodeHandle
       } catch (error) {
         const live = this.nativeContexts.get(context)
         if (live !== undefined) this.opentui.symbols.ot_scene_destroy_node(live, output)
@@ -5978,7 +5978,7 @@ export class FFIRenderLib {
   public sceneSetMeasure(context: NativeContextHandle, node: SceneNodeHandle, measure: MeasureFunction | null): void {
     this.getYogaHost().assertMutable()
     const handle = encodeContextHandle(context, node)
-    const identity = decodeContextHandle(context, handle)
+    const identity = decodeContextHandle(context, handle) as SceneNodeHandle
     const pointer = this.nativeContextPointer(context, "ot_scene_set_measure")
     let registration = this.sceneMeasures.get(context)
     const existing = registration !== undefined
@@ -6697,9 +6697,9 @@ export class FFIRenderLib {
         const fields = nativeLayouts.ot_scene_frame_geometry.fields
         const flags = geometry[fields.flags.offset / 4]
         return {
-          session: decodeContextHandle(context, scratch.session.record, scratch.session.words),
-          root: decodeContextHandle(context, scratch.root.record, scratch.root.words),
-          node: decodeContextHandle(context, scratch.node.record, scratch.node.words),
+          session: decodeContextHandle(context, scratch.session.record, scratch.session.words) as SessionHandle,
+          root: decodeContextHandle(context, scratch.root.record, scratch.root.words) as SceneNodeHandle,
+          node: decodeContextHandle(context, scratch.node.record, scratch.node.words) as SceneNodeHandle,
           frameId: output[nativeLayouts.ot_scene_frame_request.fields.frame_id.offset / 8],
           requestId: output[nativeLayouts.ot_scene_frame_request.fields.request_id.offset / 8],
           layoutEpoch: output[nativeLayouts.ot_scene_frame_request.fields.layout_epoch.offset / 8],

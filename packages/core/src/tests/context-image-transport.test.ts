@@ -47,6 +47,7 @@ test("Context image transport checks owners kinds optional backing storage and d
     assert.throws(() => lib.sceneSetImage(context, node, image, "fit", "auto", foreign), {
       status: NativeStatus.WrongContext,
     })
+    // @ts-expect-error The checked API also rejects an image used as buffer storage at runtime.
     assert.throws(() => lib.sceneSetImage(context, node, image, "fit", "auto", image), {
       status: NativeStatus.WrongKind,
     })

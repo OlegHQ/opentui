@@ -115,6 +115,8 @@ test("Session storage leases reject foreign, wrong-kind, stale, and duplicate ha
   const session = lib.createSession(context, sessionOptions)
   try {
     lib.sessionAttachRenderer(context, session, { width: 2, height: 1, remote: true })
+    // @ts-expect-error A Session cannot be queried as a scene node.
+    assert.throws(() => lib.sceneGetLayout(context, session), { status: NativeStatus.WrongKind })
     assert.throws(() => lib.sessionAcquireBufferLease(context, session, "invalid" as never), TypeError)
     assert.throws(() => lib.sessionAcquireBufferLease(foreign, session, "next"), {
       status: NativeStatus.WrongContext,
@@ -125,6 +127,7 @@ test("Session storage leases reject foreign, wrong-kind, stale, and duplicate ha
       assert.equal(lease.handle.context, context)
       assert.throws(() => lib.contextValidateBufferLease(context, session), { status: NativeStatus.WrongKind })
       assert.throws(() => lib.contextReleaseBufferLease(context, session), { status: NativeStatus.WrongKind })
+      // @ts-expect-error A storage lease cannot authorize Session operations.
       assert.throws(() => lib.sessionAcquireBufferLease(context, lease.handle, "next"), {
         status: NativeStatus.WrongKind,
       })
@@ -160,20 +163,20 @@ test.each(["Session", "Context"] as const)("%s buffer scopes retain retired stor
   const context = lib.createContext(contextOptions)
   const target =
     owner === "Context"
-      ? lib.createContextBuffer(context, { width: 2, height: 1 })
-      : lib.createSession(context, sessionOptions)
+      ? { buffer: lib.createContextBuffer(context, { width: 2, height: 1 }) }
+      : { session: lib.createSession(context, sessionOptions) }
   const access = <T>(callback: (cells: BufferAccess) => T) =>
     withBufferAccess(
       lib,
       context,
-      owner === "Context"
-        ? lib.contextAcquireBufferLease(context, target)
-        : acquireSessionBufferLease(lib, context, target, "next"),
+      target.buffer
+        ? lib.contextAcquireBufferLease(context, target.buffer)
+        : acquireSessionBufferLease(lib, context, target.session, "next"),
       callback,
     )
   let saved: BufferAccess | undefined
   try {
-    if (owner === "Session") lib.sessionAttachRenderer(context, target, { width: 2, height: 1, remote: true })
+    if (target.session) lib.sessionAttachRenderer(context, target.session, { width: 2, height: 1, remote: true })
     let generation = 0n
     assert.throws(
       () =>
@@ -182,8 +185,8 @@ test.each(["Session", "Context"] as const)("%s buffer scopes retain retired stor
           generation = cells.generation
           const chars = cells.char
           chars[0] = 65
-          if (owner === "Context") lib.contextResizeBuffer(context, target, 3, 2)
-          else lib.sessionResizeRenderer(context, target, 3, 2)
+          if (target.buffer) lib.contextResizeBuffer(context, target.buffer, 3, 2)
+          else lib.sessionResizeRenderer(context, target.session, 3, 2)
           assert.equal(chars[0], 65)
           assert.equal(cells.char, chars)
           assert.throws(() => lib.destroyContext(context), { status: NativeStatus.ContextBusy })
@@ -200,8 +203,8 @@ test.each(["Session", "Context"] as const)("%s buffer scopes retain retired stor
         access((cells) => {
           const chars = cells.char
           chars[0] = 66
-          if (owner === "Context") lib.destroyContextBuffer(context, target)
-          else lib.destroySession(context, target)
+          if (target.buffer) lib.destroyContextBuffer(context, target.buffer)
+          else lib.destroySession(context, target.session)
           assert.equal(chars[0], 66)
           assert.throws(() => lib.destroyContext(context), { status: NativeStatus.ContextBusy })
         }),
