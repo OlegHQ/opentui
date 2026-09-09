@@ -4,6 +4,9 @@ OpenTUI uses Context-owned scenes and Sessions for production rendering, includi
 text, editors, custom paint hooks, images, detached surfaces, and split output.
 Standalone resources use the same checked ownership model without a terminal.
 
+The [ownership and observation contract](docs/api-contract.md) describes resource
+bindings, mutation visibility, text copy units, and scoped framebuffer access.
+
 ## API surfaces
 
 - [`src/opentui.zig`](src/opentui.zig) exports the checked `Context` API and explicit
