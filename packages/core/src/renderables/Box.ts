@@ -50,7 +50,11 @@ function borderMask(sides: BorderSidesConfig): number {
 }
 
 export class BoxRenderable extends Renderable {
-  static readonly nativeSceneGrowsHooks = false
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "box",
+    body: { native: this.prototype.renderSelf },
+    construction: "prototype",
+  })
   protected _backgroundColor: RGBA
   protected _border: boolean | BorderSides[]
   protected _borderStyle: BorderStyle

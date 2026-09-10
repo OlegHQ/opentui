@@ -19,6 +19,12 @@ export interface ScrollBarOptions extends RenderableOptions<ScrollBarRenderable>
 export type ScrollUnit = "absolute" | "viewport" | "content" | "step"
 
 export class ScrollBarRenderable extends Renderable {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    ...Renderable.nativeIntegration,
+    kind: "box",
+    construction: "prototype",
+  })
+
   public readonly slider: SliderRenderable
   public readonly startArrow: ArrowRenderable
   public readonly endArrow: ArrowRenderable
@@ -367,6 +373,12 @@ export interface ArrowOptions extends RenderableOptions<ArrowRenderable> {
 }
 
 export class ArrowRenderable extends Renderable {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "arrow",
+    body: { native: this.prototype.renderSelf },
+    construction: "prototype",
+  })
+
   private _direction: "up" | "down" | "left" | "right"
   private _foregroundColor: RGBA
   private _backgroundColor: RGBA

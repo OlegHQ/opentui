@@ -11,7 +11,10 @@ export interface TextOptions extends TextBufferOptions {
 }
 
 export class TextRenderable extends TextBufferRenderable {
-  static readonly nativeSceneGrowsHooks = false
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    ...TextBufferRenderable.nativeIntegration,
+    lineInfo: true,
+  })
   private _text!: StyledText | string
 
   // TODO: The TextRenderable is currently juggling both a StyledText and a RootTextNodeRenderable.

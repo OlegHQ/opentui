@@ -9,6 +9,12 @@ export interface FrameBufferOptions extends RenderableOptions<FrameBufferRendera
 }
 
 export class FrameBufferRenderable extends Renderable {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "custom",
+    body: { native: this.prototype.renderSelf },
+    construction: "prototype",
+  })
+
   declare public frameBuffer: OptimizedBuffer
   protected respectAlpha: boolean
 
@@ -29,7 +35,7 @@ export class FrameBufferRenderable extends Renderable {
   }
 
   /** @internal Native class fields can replace the accessor after this constructor returns. */
-  _refreshNativeSceneSurface(): void {
+  override _refreshNativeSceneSurface(): void {
     if (this.respectAlpha === undefined || Object.getOwnPropertyDescriptor(this, "frameBuffer")?.get) return
     let surface: OptimizedBuffer | null = this.frameBuffer
     this._ctx.nativeScene.setSurface(this, surface)

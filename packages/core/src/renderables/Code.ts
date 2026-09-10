@@ -47,6 +47,12 @@ export interface CodeOptions extends TextBufferOptions {
 type ConcealLineRange = [start: number, end: number]
 
 export class CodeRenderable extends TextBufferRenderable {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    ...TextBufferRenderable.nativeIntegration,
+    kind: "text_view",
+    body: { textController: this.prototype.renderSelf },
+  })
+
   private _content: string
   private _filetype?: string
   private _syntaxStyle: SyntaxStyle
@@ -591,7 +597,7 @@ export class CodeRenderable extends TextBufferRenderable {
     const scene = this._ctx.nativeScene
     const renderSelf = this.renderSelf
     const previous = this._nativeTextPaint
-    this._nativeTextPaint = scene.usesNativeTextController(this, renderSelf)
+    this._nativeTextPaint = this._usesNativeTextController(renderSelf)
     try {
       if (!this.isDestroyed) scene.selectTextViewPaint(this, this._nativeTextPaint)
       renderSelf.call(this, buffer)

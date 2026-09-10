@@ -23,6 +23,15 @@ export interface TextBufferOptions extends RenderableOptions<TextBufferRenderabl
 }
 
 export abstract class TextBufferRenderable extends Renderable implements LineInfoProvider {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "text",
+    body: { native: this.prototype.renderSelf },
+    lifecycle: { resize: { native: this.prototype.onResize } },
+    beforeAfter: false,
+    paintBuffer: "destination",
+    construction: "prototype",
+  })
+
   protected _defaultFg: RGBA
   protected _defaultBg: RGBA
   protected _defaultAttributes: number

@@ -76,6 +76,22 @@ export interface EditBufferOptions extends RenderableOptions<EditBufferRenderabl
 }
 
 export abstract class EditBufferRenderable extends Renderable implements LineInfoProvider {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "editor",
+    body: { native: this.prototype.renderSelf },
+    lifecycle: {
+      resize: { native: this.prototype.onResize },
+      update: {
+        idle: this.prototype.onUpdate,
+        active: (renderable) => (renderable as EditBufferRenderable)._needsAutoScrollUpdate,
+      },
+    },
+    beforeAfter: false,
+    paintBuffer: "destination",
+    bufferComposition: "native",
+    construction: "prototype",
+  });
+
   [BrandedEditBufferRenderable] = true
   protected _focusable: boolean = true
   private _traits: EditorTraits = {}

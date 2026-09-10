@@ -1,17 +1,9 @@
 import type { NativeSession } from "./NativeSession.js"
-import { Renderable, RootRenderable, type RenderableOptions } from "./Renderable.js"
-import { BoxRenderable } from "./renderables/Box.js"
-import { TextRenderable } from "./renderables/Text.js"
-import { CodeRenderable } from "./renderables/Code.js"
-import { EditBufferRenderable } from "./renderables/EditBufferRenderable.js"
-import { TextBufferRenderable } from "./renderables/TextBufferRenderable.js"
-import { SliderRenderable } from "./renderables/Slider.js"
-import { ImageRenderable, type ImageFit } from "./renderables/Image.js"
-import { FrameBufferRenderable } from "./renderables/FrameBuffer.js"
+import type { Renderable, RenderableOptions } from "./Renderable.js"
+import type { ImageFit } from "./renderables/Image.js"
 import type { NativeImage } from "./image.js"
 import type { OptimizedBuffer } from "./buffer.js"
 import type { ImageRenderProtocol } from "./types.js"
-import { ArrowRenderable, ScrollBarRenderable } from "./renderables/ScrollBar.js"
 import { RendererControlState, type CliRenderer } from "./renderer.js"
 import type { StyledText } from "./lib/styled-text.js"
 import type { RGBA } from "./lib/RGBA.js"
@@ -120,25 +112,6 @@ export class NativeScene {
 
   readonly lifecyclePasses = new NativeLifecyclePasses()
   private readonly nodes = new Map<number, Renderable>()
-  private readonly nativeMethods = new Map(
-    [
-      Renderable,
-      BoxRenderable,
-      TextBufferRenderable,
-      CodeRenderable,
-      EditBufferRenderable,
-      SliderRenderable,
-      ArrowRenderable,
-      ImageRenderable,
-      FrameBufferRenderable,
-    ].map((type) => {
-      const prototype: Renderable = type.prototype
-      return [
-        prototype,
-        { renderSelf: prototype["renderSelf"], onResize: prototype["onResize"], onUpdate: prototype["onUpdate"] },
-      ] as const
-    }),
-  )
   private paintedFrame: NativeSceneFrameRequest | null = null
   private prefixFrame: NativeSceneFrameRequest | null = null
   private cancelPaintYield: ((restart?: boolean) => void) | null = null
@@ -261,106 +234,12 @@ export class NativeScene {
     if (this.destroyed || this.driver.disposed) throw new Error("Native scene is destroyed")
   }
 
-  supportsEditing(renderable: Renderable): boolean {
-    return renderable instanceof EditBufferRenderable
-  }
-
-  usesNativeLineInfoEvents(renderable: Renderable): boolean {
-    return renderable instanceof TextRenderable
-  }
-
-  /** @internal Inherited built-in bodies remain native; only actual overrides need host drawing. */
-  usesNativeDrawing(renderable: Renderable, renderSelf: unknown): boolean {
-    if (renderable instanceof ImageRenderable) {
-      return renderSelf === this.nativeMethods.get(ImageRenderable.prototype)!.renderSelf
-    }
-    if (renderable["buffered"] || renderable instanceof CodeRenderable) return false
-    if (renderable instanceof FrameBufferRenderable) {
-      return renderSelf === this.nativeMethods.get(FrameBufferRenderable.prototype)!.renderSelf
-    }
-    const prototype =
-      renderable instanceof BoxRenderable
-        ? BoxRenderable.prototype
-        : renderable instanceof TextRenderable
-          ? TextBufferRenderable.prototype
-          : renderable instanceof EditBufferRenderable
-            ? EditBufferRenderable.prototype
-            : renderable instanceof SliderRenderable
-              ? SliderRenderable.prototype
-              : renderable instanceof ArrowRenderable
-                ? ArrowRenderable.prototype
-                : Renderable.prototype
-    return renderSelf === this.nativeMethods.get(prototype)!.renderSelf
-  }
-
-  usesNativeTextController(renderable: Renderable, renderSelf: unknown): boolean {
-    return (
-      renderable instanceof CodeRenderable &&
-      !renderable["buffered"] &&
-      renderSelf === this.nativeMethods.get(CodeRenderable.prototype)!.renderSelf
-    )
-  }
-
-  /** @internal Native text/editor preparation already performs their default viewport resize. */
-  usesNativeResize(renderable: Renderable, onResize: unknown): boolean {
-    return (
-      (renderable instanceof TextBufferRenderable &&
-        onResize === this.nativeMethods.get(TextBufferRenderable.prototype)!.onResize) ||
-      (renderable instanceof EditBufferRenderable &&
-        onResize === this.nativeMethods.get(EditBufferRenderable.prototype)!.onResize)
-    )
-  }
-
-  hostUpdateFlags(renderable: Renderable, onUpdate: unknown): number {
-    if (onUpdate === Renderable.prototype["onUpdate"]) return 0
-    if (
-      renderable instanceof EditBufferRenderable &&
-      onUpdate === this.nativeMethods.get(EditBufferRenderable.prototype)!.onUpdate
-    ) {
-      // Idle updates still consume their native traversal position without a host call.
-      return renderable._needsAutoScrollUpdate ? 1 : 64
-    }
-    return 1
-  }
-
-  skipsPaintHooks(renderable: Renderable): boolean {
-    return renderable instanceof TextBufferRenderable || this.supportsEditing(renderable)
-  }
-
-  composesBuffer(renderable: Renderable): boolean {
-    return this.supportsEditing(renderable) || renderable instanceof ImageRenderable
-  }
-
   /** @internal Scene nodes retain native ownership even when their body is a host hook. */
   createNode(renderable: Renderable, options: RenderableOptions): void {
     this.driver.renderLib.getYogaHost().assertMutable()
     this.assertAlive()
     if (this.destroying) throw new Error("Native scene is being destroyed")
-    if (
-      renderable instanceof TextBufferRenderable &&
-      !(renderable instanceof TextRenderable) &&
-      !(renderable instanceof CodeRenderable)
-    ) {
-      throw new Error("Native scene does not yet support this text-buffer resource")
-    }
-    const kind =
-      renderable instanceof RootRenderable
-        ? "root"
-        : renderable instanceof BoxRenderable || renderable instanceof ScrollBarRenderable
-          ? "box"
-          : renderable instanceof TextRenderable
-            ? "text"
-            : renderable instanceof SliderRenderable
-              ? "slider"
-              : renderable instanceof ArrowRenderable
-                ? "arrow"
-                : this.supportsEditing(renderable)
-                  ? "editor"
-                  : renderable instanceof CodeRenderable
-                    ? "text_view"
-                    : renderable instanceof ImageRenderable
-                      ? "image"
-                      : "custom"
+    const kind = renderable.nativeIntegration.kind
     if (options.enableLayout === false) throw new Error("Native scene requires Yoga layout")
     const handle = this.driver.renderLib.sceneCreateNode(this.driver.context, this.driver.session, kind, renderable.num)
     try {
@@ -435,18 +314,8 @@ export class NativeScene {
     generation: bigint,
     initialWidth: number,
     initialHeight: number,
-    hostResize: boolean,
-    renderSelf: unknown,
-    lineInfo: boolean,
   ): void {
     this.flushStaged()
-    // Text/editor bodies skip the generic before/after hooks.
-    if (this.skipsPaintHooks(renderable)) flags &= ~24
-    if (this.usesNativeTextController(renderable, renderSelf)) flags |= 128
-    if (!hostResize && this.skipsPaintHooks(renderable)) {
-      flags = (flags & ~2) | (lineInfo && this.usesNativeLineInfoEvents(renderable) ? 2 : 0)
-    }
-    if (flags & 32) flags |= 16
     this.driver.renderLib.sceneSetHooks(
       this.driver.context,
       renderable._getSceneHandle(this),
@@ -621,10 +490,6 @@ export class NativeScene {
       renderable._getSceneHandle(this),
       buffer?._getSceneHandle(this) ?? null,
     )
-  }
-
-  refreshSurface(renderable: Renderable): void {
-    if (renderable instanceof FrameBufferRenderable) renderable._refreshNativeSceneSurface()
   }
 
   setTextView(renderable: Renderable, view: ContextTextBufferViewHandle | null): void {

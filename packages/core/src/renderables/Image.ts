@@ -36,6 +36,13 @@ function pixelResolution(ctx: RenderContext): { width: number; height: number } 
 }
 
 export class ImageRenderable extends Renderable {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "image",
+    body: { native: this.prototype.renderSelf, buffered: true },
+    bufferComposition: "native",
+    construction: "prototype",
+  })
+
   private _source: ImageRenderableSource | undefined
   private _image: NativeImage | null = null
   private _pendingImage: NativeImage | null = null

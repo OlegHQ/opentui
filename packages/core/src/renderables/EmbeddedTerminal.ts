@@ -39,7 +39,13 @@ const MOD_CAPS_LOCK = 1 << 4
 const MOD_NUM_LOCK = 1 << 5
 
 export class EmbeddedTerminalRenderable extends Renderable {
-  public selectable: boolean = true
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "custom",
+    body: "host",
+    construction: "prototype",
+  })
+
+  declare public selectable: boolean
   private readonly lib: RenderLib
   private handle: ContextEmbeddedTerminalHandle | null = null
   private _onData?: (data: Uint8Array, source: EmbeddedTerminalDataSource) => void

@@ -139,6 +139,7 @@
     "src/tests/renderer.native-scene-image.test.ts",
     "src/tests/renderer.native-scene-surface.test.ts",
     "src/tests/renderer.native-scene-staging.test.ts",
+    "src/tests/renderer.native-scene-hooks.test.ts",
     "src/tests/renderer.native-scene-code.test.ts",
     "src/tests/renderer.native-scene-diff.test.ts",
     "src/tests/renderer.native-scene-linenumber.test.ts",

@@ -19,6 +19,12 @@ export interface SliderOptions extends RenderableOptions<SliderRenderable> {
 }
 
 export class SliderRenderable extends Renderable {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "slider",
+    body: { native: this.prototype.renderSelf },
+    construction: "prototype",
+  })
+
   private _orientation: "vertical" | "horizontal"
   private _value: number
   private _min: number
