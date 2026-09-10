@@ -620,7 +620,7 @@ test "Context editor placeholder ABI rejects malformed chunks and preserves styl
     var input = "hint".*;
     try std.testing.expectEqual(c.OT_OK, ot_editor_view_set_placeholder(&owner, &id, &input, input.len, &.{chunk}, 1));
     @memset(&input, '!');
-    const editor = try owner.core.getEditorView(view_id);
+    const editor = try owner.core.raw().getEditorView(view_id);
     const accepted = editor.view.placeholder_buffer.?;
     const epoch = accepted.getContentEpoch();
     for (0..10) |field| {
