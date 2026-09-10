@@ -1,7 +1,7 @@
 // Generated from packages/native/include/opentui.h and scripts/native-abi-pointers.ts.
 // Run `bun run generate:abi` in packages/core. Do not edit.
 // Inspect audit input: bun scripts/native-abi.ts --audit
-// ABI audit SHA-256: 4b54743a0a769c7099fe7192d99ca8817afc234d1ea3d360afdbe35c9b4dae59
+// ABI audit SHA-256: 65dd12fce6bd5e66299d22b19065403ce6a027ddf7719858210725e78ed1a1f0
 
 export const nativeSymbols = {
   ot_scene_set_hooks: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
@@ -29,11 +29,7 @@ export const nativeSymbols = {
   ot_scene_set_arrow: { args: ["ptr", "buffer", "buffer", "ptr", "u32"], returns: "i32" },
   ot_scene_get_slider_thumb: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
   ot_scene_set_text: { args: ["ptr", "buffer", "ptr", "u32"], returns: "i32" },
-  ot_scene_set_styled_text: { args: ["ptr", "buffer", "ptr", "u32", "ptr", "u32"], returns: "i32" },
-  ot_scene_set_styled_text_with_links: {
-    args: ["ptr", "buffer", "ptr", "u32", "ptr", "u32", "ptr", "u32"],
-    returns: "i32",
-  },
+  ot_scene_set_styled_text: { args: ["ptr", "buffer", "ptr", "u32", "ptr", "u32", "ptr", "u32"], returns: "i32" },
   ot_scene_set_text_options: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
   ot_scene_set_text_selection: { args: ["ptr", "buffer", "buffer", "buffer"], returns: "i32" },
   ot_scene_get_text_selection: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
@@ -333,21 +329,7 @@ export const nativeLayouts = {
       foreground: { offset: 48, size: 8, alignment: 2, type: "[4]u16" },
     },
   },
-  ot_scene_text_chunk: {
-    size: 40,
-    alignment: 4,
-    fields: {
-      struct_size: { offset: 0, size: 4, alignment: 4, type: "u32" },
-      abi_version: { offset: 4, size: 4, alignment: 4, type: "u32" },
-      byte_count: { offset: 8, size: 4, alignment: 4, type: "u32" },
-      flags: { offset: 12, size: 4, alignment: 4, type: "u32" },
-      foreground: { offset: 16, size: 8, alignment: 2, type: "[4]u16" },
-      background: { offset: 24, size: 8, alignment: 2, type: "[4]u16" },
-      attributes: { offset: 32, size: 4, alignment: 4, type: "u32" },
-      reserved: { offset: 36, size: 4, alignment: 4, type: "u32" },
-    },
-  },
-  ot_scene_linked_text_chunk: {
+  ot_styled_text_chunk: {
     size: 48,
     alignment: 4,
     fields: {

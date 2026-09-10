@@ -158,6 +158,33 @@ async function setup() {
   })
 }
 
+test("plain native text replacement uses one UTF-8 call without styled marshalling", async () => {
+  const target = await setup()
+  const text = new TextRenderable(target.renderer, { selectable: false, content: "before" })
+  target.renderer.root.add(text)
+  const lib = resolveRenderLib()
+  const symbols = (lib as unknown as { opentui: { symbols: Record<string, (...args: unknown[]) => number> } }).opentui
+    .symbols
+  const plain = spyOn(symbols, "ot_scene_set_text")
+  const styled = spyOn(symbols, "ot_scene_set_styled_text")
+  try {
+    text.content = "中e\u0301"
+    assert.equal(plain.mock.calls.length, 1)
+    assert.equal(styled.mock.calls.length, 0)
+    const bytes = plain.mock.calls[0][2]
+    assert.ok(bytes instanceof Uint8Array)
+    assert.equal(new TextDecoder().decode(bytes), "中e\u0301")
+    assert.equal(plain.mock.calls[0][3], 6)
+    await target.renderOnce()
+    assert.equal(plain.mock.calls.length, 1)
+    assert.equal(styled.mock.calls.length, 0)
+    assert.ok(target.captureCharFrame().startsWith("中e\u0301"))
+  } finally {
+    styled.mockRestore()
+    plain.mockRestore()
+  }
+})
+
 test("native checked inline rejection and failed clear retain ownership and permit explicit retry", async () => {
   const target = await setup()
   const text = new TextRenderable(target.renderer, { selectable: false })
@@ -168,13 +195,11 @@ test("native checked inline rejection and failed clear retain ownership and perm
   const before = target.captureSpans()
   const symbols = (
     resolveRenderLib() as unknown as {
-      opentui: { symbols: { ot_scene_set_styled_text_with_links(...args: unknown[]): number } }
+      opentui: { symbols: { ot_scene_set_styled_text(...args: unknown[]): number } }
     }
   ).opentui.symbols
   child.replace("replaced", 0)
-  const rejected = spyOn(symbols, "ot_scene_set_styled_text_with_links").mockImplementation(
-    () => NativeStatus.OutOfMemory,
-  )
+  const rejected = spyOn(symbols, "ot_scene_set_styled_text").mockImplementation(() => NativeStatus.OutOfMemory)
   const errors: Error[] = []
   target.renderer.on(CliRenderEvents.RENDER_ERROR, ({ error }: CliRendererErrorEvent) => errors.push(error))
   try {

@@ -1,6 +1,6 @@
 import { spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
-import { ResourceContext } from "../buffer.js"
+import { OptimizedBuffer, ResourceContext } from "../buffer.js"
 import { EditBuffer } from "../edit-buffer.js"
 import { EditorView } from "../editor-view.js"
 import { RGBA } from "../lib/RGBA.js"
@@ -62,8 +62,14 @@ test("editor placeholders copy styled input and reject links without replacing a
   const owner = new ResourceContext(options)
   const edit = EditBuffer.create("unicode", owner)
   const view = EditorView.create(edit, 8, 2)
+  const target = OptimizedBuffer.create(8, 2, "unicode", { owner })
   try {
-    const placeholder = new StyledText([{ __isChunk: true, text: "hint", fg: RGBA.fromInts(255, 0, 0) }])
+    const red = RGBA.fromInts(255, 0, 0)
+    const green = RGBA.fromInts(0, 255, 0)
+    const placeholder = new StyledText([
+      { __isChunk: true, text: "hi", fg: red },
+      { __isChunk: true, text: "nt", fg: green },
+    ])
     lib.contextEditorViewSetPlaceholder(owner.context, view._getSceneHandle(owner), placeholder)
     placeholder.chunks[0].text = "changed"
     assert.throws(
@@ -76,7 +82,20 @@ test("editor placeholders copy styled input and reject links without replacing a
       /link/i,
     )
     assert.deepEqual(view.measureForDimensions(8, 2), { lineCount: 1, widthColsMax: 4 })
+    target.drawEditorView(view, 0, 0)
+    assert.ok(
+      target
+        .getSpanLines()[0]
+        .spans.map((span) => span.text)
+        .join("")
+        .startsWith("hint"),
+    )
+    target.withBuffers(({ fg }) => {
+      assert.deepEqual(fg.slice(0, 4), red.buffer)
+      assert.deepEqual(fg.slice(8, 12), green.buffer)
+    })
   } finally {
+    target.destroy()
     view.destroy()
     edit.destroy()
     owner.destroy()

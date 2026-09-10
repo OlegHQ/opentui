@@ -360,14 +360,14 @@ impl<'session, 'context> Node<'session, 'context> {
     }
 
     /// Copies text, styles, and URL bytes; rejected replacements preserve accepted content.
-    pub fn set_styled_text_with_links(
+    pub fn set_styled_text(
         &self,
         bytes: &[u8],
-        chunks: &[ffi::ot_scene_linked_text_chunk],
+        chunks: &[ffi::ot_styled_text_chunk],
         urls: &[u8],
     ) -> Result<()> {
-        check("ot_scene_set_styled_text_with_links", unsafe {
-            ffi::ot_scene_set_styled_text_with_links(
+        check("ot_scene_set_styled_text", unsafe {
+            ffi::ot_scene_set_styled_text(
                 self.session.context.ptr(),
                 &self.handle,
                 bytes.as_ptr(),

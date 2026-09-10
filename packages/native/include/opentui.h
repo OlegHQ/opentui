@@ -163,18 +163,7 @@ typedef struct ot_scene_text_selection_options {
 #define OT_SCENE_TEXT_BACKGROUND UINT32_C(2)
 #define OT_SCENE_TEXT_LINK UINT32_C(4)
 
-typedef struct ot_scene_text_chunk {
-    uint32_t struct_size;
-    uint32_t abi_version;
-    uint32_t byte_count;
-    uint32_t flags;
-    uint16_t foreground[4];
-    uint16_t background[4];
-    uint32_t attributes;
-    uint32_t reserved;
-} ot_scene_text_chunk;
-
-typedef struct ot_scene_linked_text_chunk {
+typedef struct ot_styled_text_chunk {
     uint32_t struct_size;
     uint32_t abi_version;
     uint32_t byte_count;
@@ -185,7 +174,7 @@ typedef struct ot_scene_linked_text_chunk {
     uint32_t reserved;
     uint32_t link_offset;
     uint32_t link_byte_count;
-} ot_scene_linked_text_chunk;
+} ot_styled_text_chunk;
 
 /* Copied text metadata. text_length counts display columns, not bytes or Unicode
  * code points. width_cols_max is the longest unwrapped line. reserved is zero. */
@@ -574,23 +563,20 @@ ot_status ot_scene_get_slider_thumb(ot_context *, const ot_handle *node, ot_scen
 ot_status ot_scene_set_text(ot_context *, const ot_handle *node, const uint8_t *bytes, uint32_t byte_count);
 /* Copies a complete styled replacement. Every chunk requires exact size/version,
  * positive UTF-8 byte_count, and zero reserved. Chunk lengths sum to byte_count.
- * Only FOREGROUND/BACKGROUND flags and attributes bits 0..7 are accepted. Present
+ * Only FOREGROUND/BACKGROUND/LINK flags and attributes bits 0..7 are accepted. Present
  * colors retain terminal color intent; absent colors inherit the node defaults.
  * Chunk widths retain legacy independently measured display-column ranges.
  * All bytes, styles, and listener storage are prepared before publication.
- * Rejection preserves accepted content and resources. No links or style handles.
- * Either array may be NULL only when its count is zero. */
-ot_status ot_scene_set_styled_text(ot_context *, const ot_handle *node,
-    const uint8_t *bytes, uint32_t byte_count, const ot_scene_text_chunk *chunks, uint32_t chunk_count);
-/* Same replacement rules, with the additional LINK flag. link_offset and
+ * Rejection preserves accepted content and resources. No style handles.
+ * Each array may be NULL only when its count is zero. link_offset and
  * link_byte_count select bytes in urls; without LINK both must be zero. URLs are
  * copied raw metadata, not parsed or normalized. Empty URLs, URLs over 512 bytes,
  * and chunks with zero independently measured width produce no link. Oversized
  * URLs are not truncated. URLs and their references are prepared before publication;
  * rejection preserves accepted text, styles, and links. urls may be NULL only
  * when url_byte_count is zero. Link IDs stay local to the owning Context. */
-ot_status ot_scene_set_styled_text_with_links(ot_context *, const ot_handle *node,
-    const uint8_t *bytes, uint32_t byte_count, const ot_scene_linked_text_chunk *chunks, uint32_t chunk_count,
+ot_status ot_scene_set_styled_text(ot_context *, const ot_handle *node,
+    const uint8_t *bytes, uint32_t byte_count, const ot_styled_text_chunk *chunks, uint32_t chunk_count,
     const uint8_t *urls, uint32_t url_byte_count);
 ot_status ot_scene_set_text_options(ot_context *, const ot_handle *node, const ot_scene_text_options *);
 /* Select through the owned Text view. Coordinates are local display cells/virtual
@@ -1200,9 +1186,10 @@ ot_status ot_editor_view_get_lines(ot_context *, const ot_handle *, uint32_t log
     ot_scene_text_line *lines, uint32_t capacity, ot_editor_measure *out_info);
 ot_status ot_editor_view_measure(ot_context *, const ot_handle *, uint32_t width, uint32_t height, ot_editor_measure *out_info);
 /* Copies owned placeholder text and styles; zero chunks clears the placeholder.
- * Uses the same no-link chunk validation as ot_scene_set_styled_text. */
+ * Uses the same chunk validation as ot_scene_set_styled_text, but LINK,
+ * link_offset, and link_byte_count must be zero. */
 ot_status ot_editor_view_set_placeholder(ot_context *, const ot_handle *, const uint8_t *bytes,
-    uint32_t byte_count, const ot_scene_text_chunk *chunks, uint32_t chunk_count);
+    uint32_t byte_count, const ot_styled_text_chunk *chunks, uint32_t chunk_count);
 /* One synchronous owner-thread observer per Context, borrowed until replacement,
  * NULL clearing, or Context destruction. event is one OT_EDIT_* value, not a mask.
  * The identity names the edit buffer in this native image. Queue host work before
@@ -1345,7 +1332,7 @@ ot_status ot_text_buffer_clear(ot_context *, const ot_handle *, uint32_t reset);
 /* Empty chunks retain their ordinal for generated chunkN names, but register no
  * style or link. Unlike direct scene text, chunk_count can exceed byte_count. */
 ot_status ot_text_buffer_set_styled_text(ot_context *, const ot_handle *, const uint8_t *, uint32_t byte_count,
-    const ot_scene_linked_text_chunk *, uint32_t chunk_count, const uint8_t *urls, uint32_t url_byte_count);
+    const ot_styled_text_chunk *, uint32_t chunk_count, const uint8_t *urls, uint32_t url_byte_count);
 /* Atomic replacement of buffer-owned styled text. Every buffer appears once and
  * view must be its dependent view. Borrowed SyntaxStyles are not supported.
  * Success resets selection on each named view, retaining defaults and geometry.
@@ -1371,7 +1358,7 @@ typedef struct ot_text_buffer_replacement_info {
     uint32_t byte_count;
 } ot_text_buffer_replacement_info;
 ot_status ot_text_buffer_replace_styled_batch(ot_context *, const ot_text_buffer_replacement *, uint32_t count,
-    const uint8_t *bytes, uint32_t byte_count, const ot_scene_linked_text_chunk *, uint32_t chunk_count,
+    const uint8_t *bytes, uint32_t byte_count, const ot_styled_text_chunk *, uint32_t chunk_count,
     const uint8_t *urls, uint32_t url_byte_count, ot_text_buffer_replacement_info *out);
 ot_status ot_text_buffer_set_syntax_style(ot_context *, const ot_handle *, const ot_handle *style);
 ot_status ot_text_buffer_get_info(ot_context *, const ot_handle *, ot_text_buffer_info *);

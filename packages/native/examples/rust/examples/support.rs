@@ -147,9 +147,9 @@ pub fn text(node: &Node<'_, '_>, content: &str, color: Color, bold: bool) -> Res
         node.set_text(b"")?;
         return Ok(());
     }
-    node.set_styled_text_with_links(
+    node.set_styled_text(
         content.as_bytes(),
-        &[ffi::ot_scene_linked_text_chunk {
+        &[ffi::ot_styled_text_chunk {
             byte_count: content.len().try_into()?,
             flags: ffi::OT_SCENE_TEXT_FOREGROUND,
             foreground: color,

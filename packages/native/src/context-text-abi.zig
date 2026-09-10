@@ -74,8 +74,8 @@ pub fn ot_text_buffer_clear(context: ?*Owner, id: ?*const c.ot_handle, reset: u3
     return c.OT_OK;
 }
 
-pub fn ot_text_buffer_set_styled_text(context: ?*Owner, id: ?*const c.ot_handle, bytes: ?[*]const u8, count: u32, chunks: ?[*]const c.ot_scene_linked_text_chunk, chunk_count: u32, urls: ?[*]const u8, url_count: u32) callconv(.c) c.ot_status {
-    return abi.setStyledText(c.ot_scene_linked_text_chunk, true, context, id, bytes, count, chunks, chunk_count, urls, url_count);
+pub fn ot_text_buffer_set_styled_text(context: ?*Owner, id: ?*const c.ot_handle, bytes: ?[*]const u8, count: u32, chunks: ?[*]const c.ot_styled_text_chunk, chunk_count: u32, urls: ?[*]const u8, url_count: u32) callconv(.c) c.ot_status {
+    return abi.setStyledText(true, context, id, bytes, count, chunks, chunk_count, urls, url_count);
 }
 
 pub fn ot_text_buffer_replace_styled_batch(
@@ -84,7 +84,7 @@ pub fn ot_text_buffer_replace_styled_batch(
     count: u32,
     bytes: ?[*]const u8,
     byte_count: u32,
-    chunk_records: ?[*]const c.ot_scene_linked_text_chunk,
+    chunk_records: ?[*]const c.ot_styled_text_chunk,
     chunk_count: u32,
     urls: ?[*]const u8,
     url_count: u32,
@@ -102,17 +102,7 @@ pub fn ot_text_buffer_replace_styled_batch(
     const chunks = owner.core.allocator.alloc(ctx.StyledTextChunk, chunk_count) catch |err| return fail(owner, err);
     defer owner.core.allocator.free(chunks);
     for (chunks, 0..) |*chunk, index| {
-        const value = record(c.ot_scene_linked_text_chunk, &chunk_records.?[index]) catch |err| return fail(owner, err);
-        if (value.reserved != 0 or value.flags & ~@as(u32, c.OT_SCENE_TEXT_FOREGROUND | c.OT_SCENE_TEXT_BACKGROUND | c.OT_SCENE_TEXT_LINK) != 0 or
-            value.link_offset > url_bytes.len or value.link_byte_count > url_bytes.len - value.link_offset or
-            (value.flags & c.OT_SCENE_TEXT_LINK == 0 and (value.link_offset != 0 or value.link_byte_count != 0))) return fail(owner, error.InvalidOptions);
-        chunk.* = .{
-            .byte_count = value.byte_count,
-            .foreground = if (value.flags & c.OT_SCENE_TEXT_FOREGROUND != 0) value.foreground else null,
-            .background = if (value.flags & c.OT_SCENE_TEXT_BACKGROUND != 0) value.background else null,
-            .attributes = value.attributes,
-            .link_url = if (value.flags & c.OT_SCENE_TEXT_LINK != 0) url_bytes[value.link_offset..][0..value.link_byte_count] else null,
-        };
+        chunk.* = abi.styledTextChunkFromC(chunk_records.?[index], url_bytes) catch |err| return fail(owner, err);
     }
     var replacements: [c.OT_TEXT_REPLACEMENT_COUNT_MAX]ctx.Context.TextReplacement = undefined;
     for (replacements[0..count], 0..) |*replacement, index| {
@@ -417,7 +407,7 @@ test "Context shared text ABI rejects malformed replacement and preserves short-
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, "kept", 4));
     var output: [4]u8 = undefined;
     var count: u32 = 99;
-    const chunk: c.ot_scene_linked_text_chunk = .{ .struct_size = @sizeOf(c.ot_scene_linked_text_chunk), .abi_version = 1, .byte_count = 4, .flags = 4, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 1, .link_byte_count = 4 };
+    const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = 1, .byte_count = 4, .flags = 4, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 1, .link_byte_count = 4 };
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_text_buffer_set_styled_text(&owner, &text_id, "next", 4, &.{chunk}, 1, "url", 3));
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_get_text(&owner, &text_id, &output, output.len, &count));
     try std.testing.expectEqualStrings("kept", &output);
@@ -474,7 +464,7 @@ test "Context shared text ABI releases provisional linked replacement on allocat
         _ = try owner.core.createTextBufferView(abi.handleFromC(text_id));
         const resource = try owner.core.getTextBuffer(abi.handleFromC(text_id));
         const epoch = resource.buffer.getContentEpoch();
-        const chunk: c.ot_scene_linked_text_chunk = .{ .struct_size = @sizeOf(c.ot_scene_linked_text_chunk), .abi_version = 1, .byte_count = 4, .flags = 4, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 0, .link_byte_count = 19 };
+        const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = 1, .byte_count = 4, .flags = 4, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 0, .link_byte_count = 19 };
         failing.fail_index = failing.alloc_index + failure_offset;
         failing.resize_fail_index = failing.resize_index;
         const status = ot_text_buffer_set_styled_text(&owner, &text_id, "next", 4, &.{chunk}, 1, "https://example.com", 19);
@@ -512,8 +502,8 @@ test "Context shared text batch rejects every allocation failure including the f
         var roots: [2]*const @import("text-buffer-segment.zig").UnifiedRope.Node = undefined;
         var styles: [2]*const @import("syntax-style.zig").SyntaxStyle = undefined;
         var epochs: [2]u64 = undefined;
-        var chunk = std.mem.zeroes(c.ot_scene_linked_text_chunk);
-        chunk.struct_size = @sizeOf(c.ot_scene_linked_text_chunk);
+        var chunk = std.mem.zeroes(c.ot_styled_text_chunk);
+        chunk.struct_size = @sizeOf(c.ot_styled_text_chunk);
         chunk.abi_version = 1;
         chunk.byte_count = 4;
         chunk.flags = c.OT_SCENE_TEXT_LINK;
@@ -749,10 +739,10 @@ test "Context shared text ABI preserves empty chunk ordinals" {
     const text_id = abi.handleToC(try owner.core.createTextBuffer(.unicode));
     const style_id = try owner.core.createSyntaxStyle();
     try owner.core.textBufferSetSyntaxStyle(abi.handleFromC(text_id), style_id);
-    var chunk = std.mem.zeroes(c.ot_scene_linked_text_chunk);
-    chunk.struct_size = @sizeOf(c.ot_scene_linked_text_chunk);
+    var chunk = std.mem.zeroes(c.ot_styled_text_chunk);
+    chunk.struct_size = @sizeOf(c.ot_styled_text_chunk);
     chunk.abi_version = 1;
-    var chunks = [_]c.ot_scene_linked_text_chunk{chunk} ** 5;
+    var chunks = [_]c.ot_styled_text_chunk{chunk} ** 5;
     chunks[1].byte_count = 1;
     chunks[1].flags = c.OT_SCENE_TEXT_FOREGROUND;
     chunks[1].foreground = .{ 255, 0, 0, 255 };

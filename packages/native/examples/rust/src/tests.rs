@@ -131,14 +131,14 @@ fn styled_links_present_only_after_completed_output_then_restore() -> Result<()>
     let mut bytes = b"OpenTUI".to_vec();
     let mut url = b"https://opentui.com/native".to_vec();
     let chunks = [
-        ffi::ot_scene_linked_text_chunk {
+        ffi::ot_styled_text_chunk {
             byte_count: 4,
             flags: ffi::OT_SCENE_TEXT_FOREGROUND,
             foreground: [255, 180, 40, 255],
             attributes: 1,
             ..Default::default()
         },
-        ffi::ot_scene_linked_text_chunk {
+        ffi::ot_styled_text_chunk {
             byte_count: 3,
             flags: ffi::OT_SCENE_TEXT_FOREGROUND | ffi::OT_SCENE_TEXT_LINK,
             foreground: [80, 220, 255, 255],
@@ -147,7 +147,7 @@ fn styled_links_present_only_after_completed_output_then_restore() -> Result<()>
             ..Default::default()
         },
     ];
-    text.set_styled_text_with_links(&bytes, &chunks, &url)?;
+    text.set_styled_text(&bytes, &chunks, &url)?;
     bytes.fill(b'!');
     url.fill(b'!');
     assert_eq!(text.text()?, b"OpenTUI");
@@ -157,7 +157,7 @@ fn styled_links_present_only_after_completed_output_then_restore() -> Result<()>
     let mut invalid_chunks = chunks;
     invalid_chunks[1].link_offset = u32::MAX;
     assert_eq!(
-        text.set_styled_text_with_links(b"changed", &invalid_chunks, b"https://rejected.test").unwrap_err().status,
+        text.set_styled_text(b"changed", &invalid_chunks, b"https://rejected.test").unwrap_err().status,
         ffi::OT_INVALID_ARGUMENT
     );
     assert_eq!(text.text()?, b"OpenTUI");

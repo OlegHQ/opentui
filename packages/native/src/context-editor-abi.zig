@@ -419,26 +419,17 @@ pub fn ot_editor_view_measure(context: ?*Owner, id: ?*const c.ot_handle, width: 
     return c.OT_OK;
 }
 
-pub fn ot_editor_view_set_placeholder(context: ?*Owner, id: ?*const c.ot_handle, bytes_ptr: ?[*]const u8, byte_count: u32, chunks_ptr: ?[*]const c.ot_scene_text_chunk, chunk_count: u32) callconv(.c) c.ot_status {
+pub fn ot_editor_view_set_placeholder(context: ?*Owner, id: ?*const c.ot_handle, bytes_ptr: ?[*]const u8, byte_count: u32, chunks_ptr: ?[*]const c.ot_styled_text_chunk, chunk_count: u32) callconv(.c) c.ot_status {
     const owner = admit(context, false) catch |err| return fail(context, err);
     if (id == null or (byte_count != 0 and bytes_ptr == null) or (chunk_count != 0 and chunks_ptr == null) or chunk_count > byte_count) return fail(owner, error.InvalidOptions);
     const bytes = if (bytes_ptr) |p| p[0..byte_count] else &.{};
     const chunks = if (chunks_ptr) |p| p[0..chunk_count] else &.{};
-    for (chunks) |*chunk| {
-        _ = record(c.ot_scene_text_chunk, chunk) catch |err| return fail(owner, err);
-        if (chunk.reserved != 0 or chunk.flags & ~@as(u32, 3) != 0) return fail(owner, error.InvalidOptions);
-        rgba(chunk.foreground) catch |err| return fail(owner, err);
-        rgba(chunk.background) catch |err| return fail(owner, err);
-    }
     const decoded = owner.core.allocator.alloc(ctx.StyledTextChunk, chunks.len) catch |err| return fail(owner, err);
     defer owner.core.allocator.free(decoded);
     for (chunks, decoded) |chunk, *target| {
-        target.* = .{
-            .byte_count = chunk.byte_count,
-            .foreground = if (chunk.flags & 1 != 0) chunk.foreground else null,
-            .background = if (chunk.flags & 2 != 0) chunk.background else null,
-            .attributes = chunk.attributes,
-        };
+        target.* = abi.styledTextChunkFromC(chunk, &.{}) catch |err| return fail(owner, err);
+        rgba(chunk.foreground) catch |err| return fail(owner, err);
+        rgba(chunk.background) catch |err| return fail(owner, err);
     }
     owner.core.editorSetPlaceholder(abi.handleFromC(id.?.*), bytes, decoded) catch |err| return fail(owner, err);
     return c.OT_OK;
@@ -612,6 +603,55 @@ test "Context editor accepted deletion does not return a later layout allocation
     try std.testing.expect(failing.has_induced_failure);
 }
 
+test "Context editor placeholder ABI rejects malformed chunks and preserves styled input" {
+    var owner: Owner = .{ .gpa = .init, .io_threaded = .init_single_threaded, .core = undefined, .owner_thread = std.Thread.getCurrentId() };
+    defer owner.io_threaded.deinit();
+    owner.core = try ctx.Context.init(std.testing.allocator, owner.io_threaded.io(), .{});
+    defer owner.core.deinit() catch unreachable;
+    const edit_id = try owner.core.createEditBuffer(.unicode);
+    const view_id = try owner.core.createEditorView(edit_id, 8, 2);
+    const id = abi.handleToC(view_id);
+    var chunk = std.mem.zeroes(c.ot_styled_text_chunk);
+    chunk.struct_size = @sizeOf(c.ot_styled_text_chunk);
+    chunk.abi_version = c.OT_CONTEXT_ABI_VERSION;
+    chunk.byte_count = 4;
+    chunk.flags = c.OT_SCENE_TEXT_FOREGROUND;
+    chunk.foreground = .{ 255, 0, 0, 255 };
+    var input = "hint".*;
+    try std.testing.expectEqual(c.OT_OK, ot_editor_view_set_placeholder(&owner, &id, &input, input.len, &.{chunk}, 1));
+    @memset(&input, '!');
+    const editor = try owner.core.getEditorView(view_id);
+    const accepted = editor.view.placeholder_buffer.?;
+    const epoch = accepted.getContentEpoch();
+    for (0..10) |field| {
+        var invalid = chunk;
+        var expected: c.ot_status = c.OT_INVALID_ARGUMENT;
+        switch (field) {
+            0 => invalid.struct_size -= 1,
+            1 => {
+                invalid.abi_version += 1;
+                expected = c.OT_UNSUPPORTED_VERSION;
+            },
+            2 => invalid.flags |= c.OT_SCENE_TEXT_LINK,
+            3 => invalid.reserved = 1,
+            4 => invalid.byte_count = 0,
+            5 => invalid.byte_count = 5,
+            6 => invalid.attributes = 256,
+            7 => invalid.foreground[0] = 256,
+            8 => invalid.link_offset = 1,
+            9 => invalid.link_byte_count = 1,
+            else => unreachable,
+        }
+        try std.testing.expectEqual(expected, ot_editor_view_set_placeholder(&owner, &id, "next", 4, &.{invalid}, 1));
+        try std.testing.expectEqual(accepted, editor.view.placeholder_buffer.?);
+        try std.testing.expectEqual(epoch, accepted.getContentEpoch());
+    }
+    var bytes: [4]u8 = undefined;
+    _ = accepted.getPlainTextIntoBuffer(&bytes);
+    try std.testing.expectEqualStrings("hint", &bytes);
+    try std.testing.expectEqual(@as(u64, 0), owner.core.links.getTotalSlots());
+}
+
 test "Context editor transport allocation failures are reported and owned placeholders release" {
     for (0..3) |operation| {
         var completed = false;
@@ -629,7 +669,7 @@ test "Context editor transport allocation failures are reported and owned placeh
             const view_handle: c.ot_handle = .{ .context_id = view_id.context_id, .slot = view_id.slot, .generation = view_id.generation };
             const style_handle: c.ot_handle = .{ .context_id = style_id.context_id, .slot = style_id.slot, .generation = style_id.generation };
             const style: c.ot_editor_style = .{ .struct_size = @sizeOf(c.ot_editor_style), .abi_version = c.OT_CONTEXT_ABI_VERSION, .flags = 1, .attributes = 0, .foreground = .{ 1, 2, 3, 255 }, .background = .{ 0, 0, 0, 0 } };
-            const chunk: c.ot_scene_text_chunk = .{ .struct_size = @sizeOf(c.ot_scene_text_chunk), .abi_version = c.OT_CONTEXT_ABI_VERSION, .byte_count = 4, .flags = 1, .foreground = .{ 1, 2, 3, 255 }, .background = .{ 0, 0, 0, 0 }, .attributes = 0, .reserved = 0 };
+            const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = c.OT_CONTEXT_ABI_VERSION, .byte_count = 4, .flags = 1, .foreground = .{ 1, 2, 3, 255 }, .background = .{ 0, 0, 0, 0 }, .attributes = 0, .reserved = 0, .link_offset = 0, .link_byte_count = 0 };
             const highlight: c.ot_edit_highlight = .{ .start = 0, .end = 6, .style_id = 1, .priority = 0, .ref = 1 };
             var output: u32 = 99;
             var placeholder = "hint".*;

@@ -1988,33 +1988,21 @@ pub fn ot_scene_set_styled_text(
     node_ptr: ?*const c.ot_handle,
     bytes_ptr: ?[*]const u8,
     byte_count: u32,
-    chunks_ptr: ?[*]const c.ot_scene_text_chunk,
-    chunk_count: u32,
-) callconv(.c) c.ot_status {
-    return setStyledText(c.ot_scene_text_chunk, false, context, node_ptr, bytes_ptr, byte_count, chunks_ptr, chunk_count, null, 0);
-}
-
-pub fn ot_scene_set_styled_text_with_links(
-    context: ?*ContextHandle,
-    node_ptr: ?*const c.ot_handle,
-    bytes_ptr: ?[*]const u8,
-    byte_count: u32,
-    chunks_ptr: ?[*]const c.ot_scene_linked_text_chunk,
+    chunks_ptr: ?[*]const c.ot_styled_text_chunk,
     chunk_count: u32,
     urls_ptr: ?[*]const u8,
     url_byte_count: u32,
 ) callconv(.c) c.ot_status {
-    return setStyledText(c.ot_scene_linked_text_chunk, false, context, node_ptr, bytes_ptr, byte_count, chunks_ptr, chunk_count, urls_ptr, url_byte_count);
+    return setStyledText(false, context, node_ptr, bytes_ptr, byte_count, chunks_ptr, chunk_count, urls_ptr, url_byte_count);
 }
 
 pub fn setStyledText(
-    comptime Record: type,
     comptime shared: bool,
     context: ?*ContextHandle,
     node_ptr: ?*const c.ot_handle,
     bytes_ptr: ?[*]const u8,
     byte_count: u32,
-    chunks_ptr: ?[*]const Record,
+    chunks_ptr: ?[*]const c.ot_styled_text_chunk,
     chunk_count: u32,
     urls_ptr: ?[*]const u8,
     url_byte_count: u32,
@@ -2031,30 +2019,7 @@ pub fn setStyledText(
     const chunks = owner.core.allocator.alloc(@import("context.zig").StyledTextChunk, chunk_count) catch |err| return sessionError(owner, err);
     defer owner.core.allocator.free(chunks);
     for (records, chunks) |record, *chunk| {
-        const linked = Record == c.ot_scene_linked_text_chunk;
-        const flags: u32 = c.OT_SCENE_TEXT_FOREGROUND | c.OT_SCENE_TEXT_BACKGROUND |
-            (if (linked) @as(u32, c.OT_SCENE_TEXT_LINK) else 0);
-        if (record.struct_size != @sizeOf(Record) or record.reserved != 0 or
-            record.flags & ~flags != 0) return sessionError(owner, error.InvalidOptions);
-        if (record.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
-        var url: ?[]const u8 = null;
-        if (linked) {
-            if (record.link_offset > urls.len or record.link_byte_count > urls.len - record.link_offset) {
-                return sessionError(owner, error.InvalidOptions);
-            }
-            if (record.flags & c.OT_SCENE_TEXT_LINK != 0) {
-                url = urls[record.link_offset..][0..record.link_byte_count];
-            } else if (record.link_offset != 0 or record.link_byte_count != 0) {
-                return sessionError(owner, error.InvalidOptions);
-            }
-        }
-        chunk.* = .{
-            .byte_count = record.byte_count,
-            .foreground = if (record.flags & c.OT_SCENE_TEXT_FOREGROUND != 0) record.foreground else null,
-            .background = if (record.flags & c.OT_SCENE_TEXT_BACKGROUND != 0) record.background else null,
-            .attributes = record.attributes,
-            .link_url = url,
-        };
+        chunk.* = styledTextChunkFromC(record, urls) catch |err| return sessionError(owner, err);
     }
     if (shared) {
         owner.core.textBufferSetStyledText(handleFromC(node.*), bytes, chunks) catch |err| return sessionError(owner, err);
@@ -2062,6 +2027,22 @@ pub fn setStyledText(
         owner.core.sceneSetStyledText(handleFromC(node.*), bytes, chunks) catch |err| return sessionError(owner, err);
     }
     return c.OT_OK;
+}
+
+pub fn styledTextChunkFromC(record: c.ot_styled_text_chunk, urls: []const u8) !@import("context.zig").StyledTextChunk {
+    const flags: u32 = c.OT_SCENE_TEXT_FOREGROUND | c.OT_SCENE_TEXT_BACKGROUND | c.OT_SCENE_TEXT_LINK;
+    if (record.struct_size != @sizeOf(c.ot_styled_text_chunk)) return error.InvalidOptions;
+    if (record.abi_version != c.OT_CONTEXT_ABI_VERSION) return error.UnsupportedVersion;
+    if (record.reserved != 0 or record.flags & ~flags != 0 or
+        record.link_offset > urls.len or record.link_byte_count > urls.len - record.link_offset or
+        (record.flags & c.OT_SCENE_TEXT_LINK == 0 and (record.link_offset != 0 or record.link_byte_count != 0))) return error.InvalidOptions;
+    return .{
+        .byte_count = record.byte_count,
+        .foreground = if (record.flags & c.OT_SCENE_TEXT_FOREGROUND != 0) record.foreground else null,
+        .background = if (record.flags & c.OT_SCENE_TEXT_BACKGROUND != 0) record.background else null,
+        .attributes = record.attributes,
+        .link_url = if (record.flags & c.OT_SCENE_TEXT_LINK != 0) urls[record.link_offset..][0..record.link_byte_count] else null,
+    };
 }
 
 pub fn ot_scene_set_text_options(context: ?*ContextHandle, node_ptr: ?*const c.ot_handle, options_ptr: ?*const c.ot_scene_text_options) callconv(.c) c.ot_status {
@@ -3729,7 +3710,7 @@ test "Scene ABI paint layout preserves prepared coordinates through reparenting"
     try std.testing.expectEqualDeep(before, layout);
 }
 
-test "Scene styled text ABI validates linked chunk bounds and preserves the legacy record" {
+test "Scene styled text ABI validates optional links and preserves rejected replacements" {
     const handle: ?*ContextHandle = try createTestContext(.{ .object_capacity = 4, .render_cells_max = 16 });
     defer std.testing.expectEqual(c.OT_OK, ot_context_destroy(handle)) catch unreachable;
     const owner = handle.?.core;
@@ -3738,16 +3719,14 @@ test "Scene styled text ABI validates linked chunk bounds and preserves the lega
     const root = try owner.sceneCreateNode(session, 0, 1);
     const node = try owner.sceneCreateNode(session, 2, 2);
     const id = handleToC(node);
-    var legacy = std.mem.zeroes(c.ot_scene_text_chunk);
-    legacy.struct_size = @sizeOf(c.ot_scene_text_chunk);
-    legacy.abi_version = c.OT_CONTEXT_ABI_VERSION;
-    legacy.byte_count = 4;
-    legacy.attributes = 1;
-    try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text(handle, &id, "kept", 4, &.{legacy}, 1));
-    legacy.flags = c.OT_SCENE_TEXT_LINK;
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, "next", 4, &.{legacy}, 1));
-    var linked = std.mem.zeroes(c.ot_scene_linked_text_chunk);
-    linked.struct_size = @sizeOf(c.ot_scene_linked_text_chunk);
+    var unlinked = std.mem.zeroes(c.ot_styled_text_chunk);
+    unlinked.struct_size = @sizeOf(c.ot_styled_text_chunk);
+    unlinked.abi_version = c.OT_CONTEXT_ABI_VERSION;
+    unlinked.byte_count = 4;
+    unlinked.attributes = 1;
+    try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text(handle, &id, "kept", 4, &.{unlinked}, 1, null, 0));
+    var linked = std.mem.zeroes(c.ot_styled_text_chunk);
+    linked.struct_size = @sizeOf(c.ot_styled_text_chunk);
     linked.abi_version = c.OT_CONTEXT_ABI_VERSION;
     linked.byte_count = 4;
     linked.flags = c.OT_SCENE_TEXT_LINK;
@@ -3782,26 +3761,26 @@ test "Scene styled text ABI validates linked chunk bounds and preserves the lega
             },
             else => unreachable,
         }
-        try std.testing.expectEqual(expected, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, &.{invalid}, 1, &urls, urls.len));
+        try std.testing.expectEqual(expected, ot_scene_set_styled_text(handle, &id, "next", 4, &.{invalid}, 1, &urls, urls.len));
         try std.testing.expectEqual(style, text.owned_style);
         try std.testing.expectEqual(epoch, text.buffer.getContentEpoch());
         try std.testing.expectEqual(@as(u64, 0), owner.links.getTotalSlots());
     }
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(null, &id, "next", 4, &.{linked}, 1, &urls, urls.len));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, null, "next", 4, &.{linked}, 1, &urls, urls.len));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, &id, null, 4, &.{linked}, 1, &urls, urls.len));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, null, 1, &urls, urls.len));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, &.{linked}, 5, &urls, urls.len));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, &.{linked}, 1, null, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(null, &id, "next", 4, &.{linked}, 1, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, null, "next", 4, &.{linked}, 1, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, null, 4, &.{linked}, 1, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, "next", 4, null, 1, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, "next", 4, &.{linked}, 5, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, "next", 4, &.{linked}, 1, null, urls.len));
     linked.byte_count = 2;
     var invalid_tail = linked;
     invalid_tail.byte_count = 1;
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, &.{ linked, invalid_tail }, 2, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, "next", 4, &.{ linked, invalid_tail }, 2, &urls, urls.len));
     invalid_tail.byte_count = 3;
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, &.{ linked, invalid_tail }, 2, &urls, urls.len));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text_with_links(handle, &id, "a\xc3\xa9b", 4, &.{ linked, linked }, 2, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, "next", 4, &.{ linked, invalid_tail }, 2, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_styled_text(handle, &id, "a\xc3\xa9b", 4, &.{ linked, linked }, 2, &urls, urls.len));
     try std.testing.expectEqual(@as(u64, 0), owner.links.getTotalSlots());
-    try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, &.{ linked, linked }, 2, &urls, urls.len));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text(handle, &id, "next", 4, &.{ linked, linked }, 2, &urls, urls.len));
     @memset(&urls, '!');
     try owner.sceneMoveNode(node, root, 0);
     const frame = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
@@ -3810,8 +3789,16 @@ test "Scene styled text ABI validates linked chunk bounds and preserves the lega
     try std.testing.expectEqualStrings("\xff\x00\x1b", try owner.links.get(link_id));
     try std.testing.expectEqual(link_id, @import("ansi.zig").TextAttributes.getLinkId(target.get(3, 0).?.attributes));
     try std.testing.expectEqual(@as(u32, 2), try owner.links.getRefcount(link_id));
-    try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text_with_links(handle, &id, null, 0, null, 0, null, 0));
+    unlinked.flags = c.OT_SCENE_TEXT_FOREGROUND;
+    unlinked.foreground = .{ 255, 0, 0, 255 };
+    try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text(handle, &id, "bare", 4, &.{unlinked}, 1, null, 0));
     try owner.sceneFrameCancel(session, frame.frame_id);
+    const unlinked_frame = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
+    try std.testing.expectEqual(@as(u32, 0), @import("ansi.zig").TextAttributes.getLinkId(target.get(0, 0).?.attributes));
+    try std.testing.expectEqualDeep(unlinked.foreground, target.get(0, 0).?.fg);
+    try std.testing.expectEqual(@as(u64, 0), owner.links.getLiveSlotCount());
+    try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text(handle, &id, null, 0, null, 0, null, 0));
+    try owner.sceneFrameCancel(session, unlinked_frame.frame_id);
     _ = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
     try std.testing.expectEqual(@as(u64, 0), owner.links.getLiveSlotCount());
 }
@@ -4342,9 +4329,7 @@ comptime {
     std.debug.assert(c.OT_EDIT_CURSOR_CHANGED == @intFromEnum(@import("context.zig").EditEvent.cursor_changed));
     std.debug.assert(c.OT_EDIT_CONTENT_CHANGED == @intFromEnum(@import("context.zig").EditEvent.content_changed));
     std.debug.assert(c.OT_EDIT_HISTORY_CURSOR_CHANGED == @intFromEnum(@import("context.zig").EditEvent.history_cursor_changed));
-    for (std.meta.fields(c.ot_scene_text_chunk)) |field| {
-        std.debug.assert(@offsetOf(c.ot_scene_text_chunk, field.name) == @offsetOf(c.ot_scene_linked_text_chunk, field.name));
-    }
+    std.debug.assert(@sizeOf(c.ot_styled_text_chunk) == 48);
     std.debug.assert(@sizeOf(c.ot_scene_text_options) == 72);
     std.debug.assert(@alignOf(c.ot_scene_text_options) == 8);
     std.debug.assert(@offsetOf(c.ot_scene_text_options, "foreground") == 8);

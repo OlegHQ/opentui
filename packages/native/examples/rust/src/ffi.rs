@@ -178,7 +178,7 @@ records! {
         reserved: u32,
         deadline_ns: u64,
     }
-    ot_scene_linked_text_chunk {
+    ot_styled_text_chunk {
         byte_count: u32,
         flags: u32,
         foreground: [u16; 4],
@@ -319,12 +319,12 @@ unsafe extern "C" {
         capacity: u32,
         count: *mut u32,
     ) -> ot_status;
-    pub fn ot_scene_set_styled_text_with_links(
+    pub fn ot_scene_set_styled_text(
         context: *mut ot_context,
         node: *const ot_handle,
         bytes: *const u8,
         byte_count: u32,
-        chunks: *const ot_scene_linked_text_chunk,
+        chunks: *const ot_styled_text_chunk,
         chunk_count: u32,
         urls: *const u8,
         url_byte_count: u32,

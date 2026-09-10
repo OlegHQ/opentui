@@ -3247,7 +3247,7 @@ export class FFIRenderLib {
   }
 
   public encodeTextBufferStyledText(content: StyledText): NativeEncodedStyledText {
-    return this.encodeSceneStyledText(content, true, true)
+    return this.encodeStyledText(content, true, true)
   }
 
   public contextTextBufferSetEncodedStyledText(
@@ -3304,7 +3304,7 @@ export class FFIRenderLib {
       return null
     }
     const layout = nativeLayouts.ot_text_buffer_replacement
-    const chunkLayout = nativeLayouts.ot_scene_linked_text_chunk
+    const chunkLayout = nativeLayouts.ot_styled_text_chunk
     const records = new Uint32Array((count * layout.size) / 4)
     const handles = new BigUint64Array(records.buffer)
     const bytes = new Uint8Array(byteCount)
@@ -4493,7 +4493,7 @@ export class FFIRenderLib {
     content: StyledText,
   ): void {
     const handle = encodeContextHandle(context, view)
-    const { bytes, records, count } = this.encodeSceneStyledText(content, false)
+    const { bytes, records, count } = this.encodeStyledText(content, false)
     this.getYogaHost().runMutation(() => {
       const pointer = this.nativeContextPointer(context, "ot_editor_view_set_placeholder")
       nativeResult(
@@ -6241,11 +6241,11 @@ export class FFIRenderLib {
   public sceneSetStyledText(context: NativeContextHandle, node: SceneNodeHandle, content: StyledText): void {
     this.getYogaHost().assertMutable()
     const handle = encodeContextHandle(context, node)
-    const { bytes, records, count, urlBytes } = this.encodeSceneStyledText(content)
-    const pointer = this.nativeContextPointer(context, "ot_scene_set_styled_text_with_links")
+    const { bytes, records, count, urlBytes } = this.encodeStyledText(content)
+    const pointer = this.nativeContextPointer(context, "ot_scene_set_styled_text")
     nativeResult(
-      "ot_scene_set_styled_text_with_links",
-      this.opentui.symbols.ot_scene_set_styled_text_with_links(
+      "ot_scene_set_styled_text",
+      this.opentui.symbols.ot_scene_set_styled_text(
         pointer,
         handle,
         viewOrNull(bytes),
@@ -6258,14 +6258,14 @@ export class FFIRenderLib {
     )
   }
 
-  private encodeSceneStyledText(content: StyledText, allowLinks = true, preserveChunkOrdinals = false) {
+  private encodeStyledText(content: StyledText, allowLinks = true, preserveChunkOrdinals = false) {
     if (typeof content !== "object" || content === null || isStyledText(content) !== true) {
       throw new TypeError("Native scene text requires a string or branded StyledText")
     }
     const chunks = content.chunks
     if (!Array.isArray(chunks)) throw new TypeError("Native scene StyledText requires a chunk array")
     const count = toSafeFFIU32Length(chunks.length, "Scene styled chunk count")
-    const layout = allowLinks ? nativeLayouts.ot_scene_linked_text_chunk : nativeLayouts.ot_scene_text_chunk
+    const layout = nativeLayouts.ot_styled_text_chunk
     const stride = layout.size / 4
     const records = new Uint32Array(count * stride)
     const colors = new Uint16Array(records.buffer)
@@ -6304,8 +6304,8 @@ export class FFIRenderLib {
       if (background) colors.set(background, offset * 2 + layout.fields.background.offset / 2)
       records[offset + layout.fields.attributes.offset / 4] = attrs
       if (urlBytes) {
-        records[offset + nativeLayouts.ot_scene_linked_text_chunk.fields.link_offset.offset / 4] = urlByteCount
-        records[offset + nativeLayouts.ot_scene_linked_text_chunk.fields.link_byte_count.offset / 4] = urlBytes.length
+        records[offset + layout.fields.link_offset.offset / 4] = urlByteCount
+        records[offset + layout.fields.link_byte_count.offset / 4] = urlBytes.length
         urlByteCount = toSafeFFIU32Length(urlByteCount + urlBytes.length, "Scene styled URL length")
         urls.push(urlBytes)
       }

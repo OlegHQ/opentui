@@ -128,10 +128,10 @@ test("native links own transient ABI URL bytes before emitting OSC8", async () =
   const target = await setup()
   const symbols = (
     resolveRenderLib() as unknown as {
-      opentui: { symbols: { ot_scene_set_styled_text_with_links(...args: unknown[]): number } }
+      opentui: { symbols: { ot_scene_set_styled_text(...args: unknown[]): number } }
     }
   ).opentui.symbols
-  const submitted = spyOn(symbols, "ot_scene_set_styled_text_with_links")
+  const submitted = spyOn(symbols, "ot_scene_set_styled_text")
   try {
     target.renderer.stdin.emit("data", Buffer.from(kitty))
     const text = new TextRenderable(target.renderer, { selectable: false, content: linked(firstUrl) })
