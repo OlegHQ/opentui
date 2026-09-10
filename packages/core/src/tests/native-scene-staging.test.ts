@@ -133,7 +133,7 @@ test("staging enum boundaries match the checked scene vocabulary", () => {
           staging.stageStyle(context, node, c.OT_STYLE_ENUM, kind, c.OT_EDGE_NONE, c.OT_UNIT_UNDEFINED, maximum + 1, 0),
         NativeError,
       )
-      assert.equal(staging.styleCount, 0)
+      assert.equal(staging.count, 0)
     }
   } finally {
     lib.destroyContext(context)
