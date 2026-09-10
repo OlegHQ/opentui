@@ -832,8 +832,8 @@ export class NativeImagePool {
 
   public dispose(): void {
     if (this.disposed) return
-    this.disposed = true
     for (const image of this.images) image.dispose()
     this.images.length = 0
+    this.disposed = true
   }
 }

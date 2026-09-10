@@ -127,6 +127,29 @@ test("Context capacity failures preserve image owners and pooled publications", 
   }
 })
 
+test("rejected image pool disposal remains retryable and releases Context capacity", () => {
+  const owner = new ResourceContext({ objectCapacity: 2, renderCellsMax: 1 })
+  const pool = new NativeImagePool({ width: 1, height: 1, capacity: 1, owner })
+  const pixels = Uint8Array.of(1, 2, 3, 255)
+  const images: NativeImage[] = []
+  try {
+    pool.publishRgba(pixels)!.dispose()
+    const host = resolveRenderLib().getYogaHost()
+    host.invokeCallback(() => {
+      expect(() => pool.dispose()).toThrow("Cannot mutate Yoga during a callback")
+    })
+    host.throwCallbackError()
+    pool.dispose()
+    pool.dispose()
+    for (let index = 0; index < 2; index++) images.push(NativeImage.fromPixels(pixels, 1, 1, { owner }))
+    expect(images).toHaveLength(2)
+  } finally {
+    for (const image of images) image.dispose()
+    pool.dispose()
+    owner.destroy()
+  }
+})
+
 test("same-Context pool publications stay immutable while buffers retain them", () => {
   const owner = new ResourceContext({ objectCapacity: 8, renderCellsMax: 1 })
   const pool = new NativeImagePool({ width: 1, height: 1, capacity: 1, owner })
