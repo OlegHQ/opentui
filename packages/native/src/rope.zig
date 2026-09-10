@@ -1007,28 +1007,25 @@ pub fn Rope(comptime T: type) type {
             try self.applyEndsInvariant();
         }
 
-        pub const WeightFindResult = struct { leaf: *const T, start_weight: u32 };
+        pub const WeightFindResult = struct { leaf: *const T, start_weight: u32, leaf_index: u32 };
 
         pub fn findByWeight(self: *const Self, weight: u32) ?WeightFindResult {
-            return self.findByWeightInNode(self.root, weight, 0);
-        }
-
-        fn findByWeightInNode(self: *const Self, node: *const Node, target_weight: u32, current_weight: u32) ?WeightFindResult {
-            return switch (node.*) {
+            if (weight >= self.totalWeight()) return null;
+            var node = self.root;
+            var start_weight: u32 = 0;
+            var leaf_index: u32 = 0;
+            while (true) switch (node.*) {
                 .branch => |*b| {
                     const left_weight = b.left_metrics.weight();
-                    if (target_weight < current_weight + left_weight) {
-                        return self.findByWeightInNode(b.left, target_weight, current_weight);
+                    if (weight < start_weight + left_weight) {
+                        node = b.left;
+                    } else {
+                        node = b.right;
+                        start_weight += left_weight;
+                        leaf_index += b.left_metrics.count;
                     }
-                    return self.findByWeightInNode(b.right, target_weight, current_weight + left_weight);
                 },
-                .leaf => |*l| {
-                    const leaf_weight = node.metrics().weight();
-                    if (target_weight < current_weight + leaf_weight) {
-                        return .{ .leaf = &l.data, .start_weight = current_weight };
-                    }
-                    return null;
-                },
+                .leaf => |*l| return .{ .leaf = &l.data, .start_weight = start_weight, .leaf_index = leaf_index },
             };
         }
 

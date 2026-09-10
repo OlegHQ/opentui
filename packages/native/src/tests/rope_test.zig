@@ -1635,18 +1635,21 @@ test "Rope - findByWeight" {
     try std.testing.expect(result0 != null);
     try std.testing.expectEqual(@as(u32, 1), result0.?.leaf.value);
     try std.testing.expectEqual(@as(u32, 0), result0.?.start_weight);
+    try std.testing.expectEqual(@as(u32, 0), result0.?.leaf_index);
 
     // Find leaf containing weight 15 (second item)
     const result15 = rope.findByWeight(15);
     try std.testing.expect(result15 != null);
     try std.testing.expectEqual(@as(u32, 2), result15.?.leaf.value);
     try std.testing.expectEqual(@as(u32, 10), result15.?.start_weight);
+    try std.testing.expectEqual(@as(u32, 1), result15.?.leaf_index);
 
     // Find leaf containing weight 35 (third item)
     const result35 = rope.findByWeight(35);
     try std.testing.expect(result35 != null);
     try std.testing.expectEqual(@as(u32, 3), result35.?.leaf.value);
     try std.testing.expectEqual(@as(u32, 30), result35.?.start_weight);
+    try std.testing.expectEqual(@as(u32, 2), result35.?.leaf_index);
 
     // Out of bounds
     const result100 = rope.findByWeight(100);
