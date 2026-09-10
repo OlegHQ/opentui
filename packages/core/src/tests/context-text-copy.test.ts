@@ -6,6 +6,33 @@ import { TextBufferView } from "../text-buffer-view.js"
 import { EditBuffer } from "../edit-buffer.js"
 import { EditorView } from "../editor-view.js"
 import { resolveRenderLib } from "../zig.js"
+import { TextRenderable } from "../renderables/Text.js"
+import { createTestRenderer } from "../testing/test-renderer.js"
+
+test("empty scene and edit text reads finish after one exact-size query", async () => {
+  const { renderer } = await createTestRenderer({ width: 2, height: 1 })
+  const symbols = (resolveRenderLib() as any).opentui.symbols
+  const sceneCopy = spyOn(symbols, "ot_scene_get_text")
+  const editCopy = spyOn(symbols, "ot_edit_buffer_get_text")
+  try {
+    const text = new TextRenderable(renderer, { content: "" })
+    renderer.root.add(text)
+    const edit = EditBuffer.create("unicode", renderer.nativeScene)
+    assert.equal(renderer.nativeScene.getText(text), "")
+    assert.equal(edit.getText(), "")
+    for (const copy of [sceneCopy, editCopy]) {
+      assert.deepEqual(
+        copy.mock.calls.map((args) => args[3]),
+        [0],
+      )
+    }
+  } finally {
+    sceneCopy.mockRestore()
+    editCopy.mockRestore()
+    renderer.destroy()
+    await renderer.closed
+  }
+})
 
 test("small text selections allocate only selected UTF-8 bytes across document and editor views", () => {
   const owner = new ResourceContext({ objectCapacity: 16, renderCellsMax: 128 })

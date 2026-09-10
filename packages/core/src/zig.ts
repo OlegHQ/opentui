@@ -3453,12 +3453,11 @@ export class FFIRenderLib {
 
   private readText(
     operation: string,
-    count: Uint32Array,
     read: (bytes: Uint8Array | null, capacity: number, count: Uint32Array) => number,
-    copyEmpty = false,
   ): string {
+    const count = new Uint32Array(1)
     nativeResult(operation, read(null, 0, count))
-    if (count[0] === 0 && !copyEmpty) return ""
+    if (count[0] === 0) return ""
     const bytes = new Uint8Array(count[0])
     nativeResult(operation, read(viewOrNull(bytes), bytes.length, count))
     if (count[0] !== bytes.length) {
@@ -3469,9 +3468,8 @@ export class FFIRenderLib {
 
   public contextTextBufferGetText(context: NativeContextHandle, text: ContextTextBufferHandle): string {
     const handle = encodeContextHandle(context, text)
-    const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_text_buffer_get_text")
-    return this.readText("ot_text_buffer_get_text", count, (bytes, capacity, count) =>
+    return this.readText("ot_text_buffer_get_text", (bytes, capacity, count) =>
       this.opentui.symbols.ot_text_buffer_get_text(pointer, handle, bytes, capacity, count),
     )
   }
@@ -3485,9 +3483,8 @@ export class FFIRenderLib {
     const handle = encodeContextHandle(context, text)
     const startOffset = toSafeFFIU32Length(start, "Text range start")
     const endOffset = toSafeFFIU32Length(end, "Text range end")
-    const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_text_buffer_get_range")
-    return this.readText("ot_text_buffer_get_range", count, (bytes, capacity, count) =>
+    return this.readText("ot_text_buffer_get_range", (bytes, capacity, count) =>
       this.opentui.symbols.ot_text_buffer_get_range(pointer, handle, startOffset, endOffset, bytes, capacity, count),
     )
   }
@@ -3673,9 +3670,8 @@ export class FFIRenderLib {
 
   public contextTextBufferViewGetSelectedText(context: NativeContextHandle, view: ContextTextBufferViewHandle): string {
     const handle = encodeContextHandle(context, view)
-    const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_text_buffer_view_get_selected_text")
-    return this.readText("ot_text_buffer_view_get_selected_text", count, (bytes, capacity, count) =>
+    return this.readText("ot_text_buffer_view_get_selected_text", (bytes, capacity, count) =>
       this.opentui.symbols.ot_text_buffer_view_get_selected_text(pointer, handle, bytes, capacity, count),
     )
   }
@@ -4011,13 +4007,9 @@ export class FFIRenderLib {
 
   public contextEditBufferGetText(context: NativeContextHandle, editBuffer: ContextEditBufferHandle): string {
     const handle = encodeContextHandle(context, editBuffer)
-    const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_edit_buffer_get_text")
-    return this.readText(
-      "ot_edit_buffer_get_text",
-      count,
-      (bytes, capacity, count) => this.opentui.symbols.ot_edit_buffer_get_text(pointer, handle, bytes, capacity, count),
-      true,
+    return this.readText("ot_edit_buffer_get_text", (bytes, capacity, count) =>
+      this.opentui.symbols.ot_edit_buffer_get_text(pointer, handle, bytes, capacity, count),
     )
   }
 
@@ -4145,9 +4137,8 @@ export class FFIRenderLib {
     const colStart = toSafeFFIU32Length(startCol, "Edit buffer range start column")
     const rowEnd = toSafeFFIU32Length(endRow, "Edit buffer range end row")
     const colEnd = toSafeFFIU32Length(endCol, "Edit buffer range end column")
-    const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_edit_buffer_get_range")
-    return this.readText("ot_edit_buffer_get_range", count, (bytes, capacity, count) =>
+    return this.readText("ot_edit_buffer_get_range", (bytes, capacity, count) =>
       this.opentui.symbols.ot_edit_buffer_get_range(
         pointer,
         handle,
@@ -4457,9 +4448,8 @@ export class FFIRenderLib {
 
   public contextEditorViewGetSelectedText(context: NativeContextHandle, view: ContextEditorViewHandle): string {
     const handle = encodeContextHandle(context, view)
-    const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_editor_view_get_selected_text")
-    return this.readText("ot_editor_view_get_selected_text", count, (bytes, capacity, count) =>
+    return this.readText("ot_editor_view_get_selected_text", (bytes, capacity, count) =>
       this.opentui.symbols.ot_editor_view_get_selected_text(pointer, handle, bytes, capacity, count),
     )
   }
@@ -6556,9 +6546,8 @@ export class FFIRenderLib {
 
   public sceneGetSelectedText(context: NativeContextHandle, node: SceneNodeHandle): string {
     const handle = encodeContextHandle(context, node)
-    const count = new Uint32Array(1)
     const pointer = this.nativeContextPointer(context, "ot_scene_get_selected_text")
-    return this.readText("ot_scene_get_selected_text", count, (bytes, capacity, count) =>
+    return this.readText("ot_scene_get_selected_text", (bytes, capacity, count) =>
       this.opentui.symbols.ot_scene_get_selected_text(pointer, handle, bytes, capacity, count),
     )
   }
@@ -6583,19 +6572,14 @@ export class FFIRenderLib {
 
   public sceneGetText(context: NativeContextHandle, node: SceneNodeHandle): string {
     const handle = encodeContextHandle(context, node)
-    const count = new Uint32Array(1)
-    return this.readText(
-      "ot_scene_get_text",
-      count,
-      (bytes, capacity, count) =>
-        this.opentui.symbols.ot_scene_get_text(
-          this.nativeContextPointer(context, "ot_scene_get_text"),
-          handle,
-          bytes,
-          capacity,
-          count,
-        ),
-      true,
+    return this.readText("ot_scene_get_text", (bytes, capacity, count) =>
+      this.opentui.symbols.ot_scene_get_text(
+        this.nativeContextPointer(context, "ot_scene_get_text"),
+        handle,
+        bytes,
+        capacity,
+        count,
+      ),
     )
   }
 
