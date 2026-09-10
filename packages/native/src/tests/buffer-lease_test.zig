@@ -27,7 +27,7 @@ test "Resolved buffer capture uses the checked Session snapshot pool and exact c
     const lease = try owner.acquireSessionBufferLease(session, .next);
     defer owner.releaseBufferLease(lease) catch unreachable;
     const snapshot = try owner.bufferLeaseSnapshot(lease);
-    try std.testing.expectEqual((try peer.getBuffer(other)).buffer.char[0], snapshot.buffer.char[0]);
+    try std.testing.expectEqual((try peer.raw().getBuffer(other)).buffer.char[0], snapshot.buffer.char[0]);
     try peer.destroy(other);
     for ([_]bool{ false, true }) |line_breaks| {
         const expected = if (line_breaks)

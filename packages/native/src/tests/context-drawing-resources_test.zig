@@ -12,7 +12,7 @@ test "Context drawing preserves indexed and default color intent" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
     const target = try owner.createBuffer(256, 2, .{});
-    const value = try owner.getBuffer(target);
+    const value = try owner.raw().getBuffer(target);
     const default = ansi.defaultColor(11, 22, 33, 255);
     const indexed = ansi.indexedColor(255, 44, 55, 66);
     try owner.clearBuffer(target, default);
@@ -46,7 +46,7 @@ test "Context encoded Unicode owns display cells until explicit destruction" {
     const peer = try context.Context.init(testing.allocator, testing.io, .{});
     defer peer.deinit() catch unreachable;
     const encoded = try owner.createUnicode("A\u{4e2d}e\u{301}\t", .unicode);
-    const data = (try owner.getUnicode(encoded)).chars;
+    const data = (try owner.raw().getUnicode(encoded)).chars;
     try testing.expectEqual(@as(usize, 4), data.len);
     try testing.expectEqual(@as(u32, 'A'), data[0].char);
     try testing.expectEqual(@as(u8, 2), data[1].width);
@@ -57,22 +57,22 @@ test "Context encoded Unicode owns display cells until explicit destruction" {
     try testing.expectEqual(@as(u32, 1), try owner.graphemes.getRefcount(id));
     const target = try owner.createBuffer(6, 1, .{});
     const foreign = try peer.createUnicode("\u{8a9e}", .unicode);
-    try testing.expectError(error.WrongContext, peer.getUnicode(encoded));
-    try testing.expectError(error.WrongKind, owner.getUnicode(target));
+    try testing.expectError(error.WrongContext, peer.raw().getUnicode(encoded));
+    try testing.expectError(error.WrongKind, owner.raw().getUnicode(target));
     try testing.expectError(error.WrongContext, peer.drawBufferUnicode(target, null, encoded, 1, 0, 0, foreground, background, 0));
     try testing.expectError(error.WrongContext, owner.drawBufferUnicode(target, null, foreign, 0, 0, 0, foreground, background, 0));
     try testing.expectError(error.InvalidOptions, owner.drawBufferUnicode(target, null, encoded, 4, 0, 0, foreground, background, 0));
     try testing.expectError(error.InvalidOptions, owner.drawBufferUnicode(target, null, encoded, 1, 0, 0, foreground, background, 0x100));
     try owner.drawBufferUnicode(target, null, encoded, 1, 0, 0, foreground, background, 0);
-    try testing.expect(gp.isContinuationChar((try owner.getBuffer(target)).get(1, 0).?.char));
+    try testing.expect(gp.isContinuationChar((try owner.raw().getBuffer(target)).get(1, 0).?.char));
     try testing.expectEqual(@as(u32, 2), try owner.graphemes.getRefcount(id));
     try owner.destroy(encoded);
-    try testing.expectError(error.StaleHandle, owner.getUnicode(encoded));
+    try testing.expectError(error.StaleHandle, owner.raw().getUnicode(encoded));
     try testing.expectEqualStrings("\u{4e2d}", try owner.graphemes.get(id));
     try owner.destroy(target);
     try testing.expectError(error.InvalidId, owner.graphemes.get(id));
     const empty = try owner.createUnicode("", .unicode);
-    try testing.expectEqual(@as(usize, 0), (try owner.getUnicode(empty)).chars.len);
+    try testing.expectEqual(@as(usize, 0), (try owner.raw().getUnicode(empty)).chars.len);
     try testing.expect(encoded.generation != empty.generation or encoded.slot != empty.slot);
 }
 
@@ -81,7 +81,7 @@ test "Context encoded Unicode preserves width modes and rejects invalid input wi
     defer owner.deinit() catch unreachable;
     inline for (std.meta.tags(utf8.WidthMethod)) |method| {
         const encoded = try owner.createUnicode("\u{301}A\u{1f469}\u{200d}\u{1f4bb}B", method);
-        const data = (try owner.getUnicode(encoded)).chars;
+        const data = (try owner.raw().getUnicode(encoded)).chars;
         try testing.expectEqual(@as(u32, 'A'), data[0].char);
         try testing.expectEqual(@as(u32, 'B'), data[data.len - 1].char);
         for (data) |cell| try testing.expect(cell.width > 0);
@@ -114,9 +114,9 @@ test "Context encoded Unicode drawing rejection preserves cells and producer ref
     defer owner.deinit() catch unreachable;
     const encoded = try owner.createUnicode("\u{4e2d}", .unicode);
     const target = try owner.createBuffer(2, 1, .{});
-    const value = try owner.getBuffer(target);
+    const value = try owner.raw().getBuffer(target);
     const before = value.buffer.char[0..2].*;
-    const glyph = gp.graphemeIdFromChar((try owner.getUnicode(encoded)).chars[0].char);
+    const glyph = gp.graphemeIdFromChar((try owner.raw().getUnicode(encoded)).chars[0].char);
     failing.fail_index = failing.alloc_index;
     try testing.expectError(error.OutOfMemory, owner.drawBufferUnicode(target, null, encoded, 0, 0, 0, foreground, background, 0));
     failing.fail_index = std.math.maxInt(usize);
@@ -130,7 +130,7 @@ test "Context encoded Unicode clips the whole display span before drawing" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
     const target = try owner.createBuffer(4, 1, .{});
-    const value = try owner.getBuffer(target);
+    const value = try owner.raw().getBuffer(target);
     const encoded = try owner.createUnicode("\u{4e2d}", .unicode);
     try owner.drawBufferText(target, "ABCD", 0, 0, foreground, background, 0);
     const outside = value.get(2, 0).?;
@@ -159,7 +159,7 @@ test "Context synchronous text drawing reports failed preparation without retain
         const node = try owner.sceneCreateNode(session, 2, 2);
         const edit = try owner.createEditBuffer(.unicode);
         const source = if (is_editor) try owner.createEditorView(edit, 4, 1) else node;
-        const view = if (is_editor) (try owner.getEditorView(source)).view.getTextBufferView() else (try owner.getRenderable(node)).scene_node.?.text.?.view;
+        const view = if (is_editor) (try owner.raw().getEditorView(source)).view.getTextBufferView() else (try owner.raw().getRenderable(node)).scene_node.?.text.?.view;
         if (is_editor) try owner.editSetText(edit, "text", false) else try owner.sceneSetText(node, "text");
         const target = try owner.createBuffer(4, 1, .{});
         try draw(owner, target, null, source, 0, 0);
@@ -173,10 +173,10 @@ test "Context synchronous text drawing reports failed preparation without retain
         view.virtual_lines_dirty = true;
         try testing.expectError(error.OutOfMemory, draw(owner, target, null, source, 0, 0));
         try testing.expect(!owner.mutating);
-        try testing.expectEqual(@as(u32, ' '), (try owner.getBuffer(target)).get(0, 0).?.char);
+        try testing.expectEqual(@as(u32, ' '), (try owner.raw().getBuffer(target)).get(0, 0).?.char);
         arena.child_allocator = allocator;
         try draw(owner, target, null, source, 0, 0);
-        try testing.expectEqual(@as(u32, 't'), (try owner.getBuffer(target)).get(0, 0).?.char);
+        try testing.expectEqual(@as(u32, 't'), (try owner.raw().getBuffer(target)).get(0, 0).?.char);
     }
 }
 
@@ -202,14 +202,14 @@ test "Context editor background fill clips large extents and negative origins be
     defer owner.deinit() catch unreachable;
     const edit = try owner.createEditBuffer(.unicode);
     const color = ansi.rgbColor(80, 120, 160, 255);
-    (try owner.getEditBuffer(edit)).buffer.getTextBuffer().setDefaultBg(color);
+    (try owner.raw().getEditBuffer(edit)).buffer.getTextBuffer().setDefaultBg(color);
     try owner.editSetText(edit, "x", false);
     for (cases, 0..) |case, index| {
         const view = try owner.createEditorView(edit, case.width, case.height);
         defer owner.destroy(view) catch unreachable;
         const target = try owner.createBuffer(8, if (case.height > 1) 4 else 1, .{});
         defer owner.destroy(target) catch unreachable;
-        const buffer = try owner.getBuffer(target);
+        const buffer = try owner.raw().getBuffer(target);
         buffer.clear(background, null);
         try owner.drawEditorView(target, null, view, case.x, case.y);
         if (index == 0) try testing.expectEqual(@as(u32, 'x'), buffer.get(2, 0).?.char);
@@ -235,7 +235,7 @@ test "Context embedded terminal owns parsing and retains composed glyphs after t
     const selected = try owner.embeddedTerminalGetSelectedText(terminal, &bytes);
     try testing.expectEqualStrings("A\u{4e2d}B", bytes[0..selected]);
     try owner.embeddedTerminalCompose(terminal, target, null, 0, 0);
-    const value = try owner.getBuffer(target);
+    const value = try owner.raw().getBuffer(target);
     const glyph = gp.graphemeIdFromChar(value.get(1, 0).?.char);
     try owner.destroy(terminal);
     try testing.expectError(error.StaleHandle, owner.embeddedTerminalWrite(terminal, "stale"));
@@ -249,12 +249,12 @@ test "Context embedded terminal rejects dimensions and stale generations before 
     try testing.expectError(error.InvalidDimensions, owner.createEmbeddedTerminal(3, 3, 0));
     const id = try owner.createEmbeddedTerminal(4, 2, 0);
     try testing.expectError(error.InvalidDimensions, owner.embeddedTerminalResize(id, 3, 3));
-    try testing.expectEqual(@as(u16, 4), (try owner.getEmbeddedTerminal(id)).cols);
+    try testing.expectEqual(@as(u16, 4), (try owner.raw().getEmbeddedTerminal(id)).cols);
     try owner.destroy(id);
     const replacement = try owner.createEmbeddedTerminal(4, 2, 0);
     try testing.expectEqual(id.slot, replacement.slot);
     try testing.expect(id.generation != replacement.generation);
-    try testing.expectError(error.StaleHandle, owner.getEmbeddedTerminal(id));
+    try testing.expectError(error.StaleHandle, owner.raw().getEmbeddedTerminal(id));
     try testing.expectError(error.StaleHandle, owner.destroy(id));
     const encoded = try owner.createUnicode("A", .unicode);
     try testing.expectError(error.ObjectLimit, owner.createEmbeddedTerminal(1, 1, 0));
@@ -332,14 +332,14 @@ test "Context embedded terminal VT column modes cannot resize the caller viewpor
     defer owner.deinit() catch unreachable;
     const id = try owner.createEmbeddedTerminal(8, 3, 0);
     const target = try owner.createBuffer(8, 3, .{});
-    const terminal = try owner.getEmbeddedTerminal(id);
+    const terminal = try owner.raw().getEmbeddedTerminal(id);
     for ([_][]const u8{ "\x1b[?40h\x1b[?3h", "\x1b[?3l", "\x1b[?3s\x1b[?3h\x1b[?3r", "\x1bc\x1b[?40;3h" }) |input| {
         try owner.embeddedTerminalWrite(id, input);
         try testing.expectEqual(@as(u16, 8), terminal.terminal.cols);
         try testing.expectEqual(@as(u16, 3), terminal.terminal.rows);
         try owner.embeddedTerminalWrite(id, "\x1b[Husable");
         try owner.embeddedTerminalCompose(id, target, null, 0, 0);
-        try testing.expectEqual(@as(u32, 'u'), (try owner.getBuffer(target)).get(0, 0).?.char);
+        try testing.expectEqual(@as(u32, 'u'), (try owner.raw().getBuffer(target)).get(0, 0).?.char);
     }
     try owner.embeddedTerminalResize(id, 6, 4);
     try testing.expectEqual(@as(u16, 6), terminal.terminal.cols);

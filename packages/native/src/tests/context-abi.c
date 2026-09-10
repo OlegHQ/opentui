@@ -141,8 +141,10 @@ static void rendered_output(ot_context *context) {
     assert(ot_session_attach_renderer(context, &session, &renderer) == OT_OK);
     assert(ot_scene_create_node(context, &session, OT_SCENE_ROOT, 100, &root) == OT_OK);
     assert(ot_scene_create_node(context, &session, OT_SCENE_BOX, 101, &box) == OT_OK);
-    assert(ot_scene_set_style(context, &box, 4, 0, 0, 1, 4, 1) == OT_OK);
-    assert(ot_scene_set_style(context, &box, 4, 1, 0, 1, 2, 1) == OT_OK);
+    assert(ot_scene_set_style(context, &box, OT_STYLE_DIMENSION, OT_DIMENSION_WIDTH,
+        OT_EDGE_NONE, OT_UNIT_POINT, 4, OT_STYLE_DISABLE_FLEX_SHRINK) == OT_OK);
+    assert(ot_scene_set_style(context, &box, OT_STYLE_DIMENSION, OT_DIMENSION_HEIGHT,
+        OT_EDGE_NONE, OT_UNIT_POINT, 2, OT_STYLE_DISABLE_FLEX_SHRINK) == OT_OK);
     assert(ot_scene_move_node(context, &box, &root, 0) == OT_OK);
     const uint16_t background[4] = {0, 0, 0, 255};
     ot_scene_frame_request frame = {.struct_size = sizeof(frame), .abi_version = OT_CONTEXT_ABI_VERSION};
@@ -150,7 +152,7 @@ static void rendered_output(ot_context *context) {
     assert(ot_scene_paint(context, &session, background, 1, 0, &frame) == OT_OK);
     assert(frame.kind == OT_SCENE_FRAME_DONE);
     ot_scene_layout layout = {.struct_size = sizeof(layout), .abi_version = OT_CONTEXT_ABI_VERSION};
-    assert(ot_scene_get_layout(context, &box, 0, &layout) == OT_OK);
+    assert(ot_scene_get_layout(context, &box, OT_LAYOUT_PUBLIC, &layout) == OT_OK);
     assert(layout.width == 4 && layout.height == 2);
     uint32_t result = UINT32_MAX;
     assert(ot_session_render(context, &session, 1, &result) == OT_FRAME_BUSY && result == UINT32_MAX);

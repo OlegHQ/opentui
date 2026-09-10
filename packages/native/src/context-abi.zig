@@ -209,7 +209,7 @@ pub fn ot_edit_buffer_destroy(context: ?*ContextHandle, edit_ptr: ?*const c.ot_h
     const owner = context.?;
     const id = edit_ptr orelse return sessionError(owner, error.InvalidOptions);
     const handle = handleFromC(id.*);
-    _ = owner.core.getEditBuffer(handle) catch |err| return sessionError(owner, err);
+    _ = owner.core.raw().getEditBuffer(handle) catch |err| return sessionError(owner, err);
     owner.core.destroy(handle) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
@@ -231,7 +231,7 @@ pub fn ot_editor_view_destroy(context: ?*ContextHandle, view_ptr: ?*const c.ot_h
     const owner = context.?;
     const id = view_ptr orelse return sessionError(owner, error.InvalidOptions);
     const handle = handleFromC(id.*);
-    _ = owner.core.getEditorView(handle) catch |err| return sessionError(owner, err);
+    _ = owner.core.raw().getEditorView(handle) catch |err| return sessionError(owner, err);
     owner.core.destroy(handle) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
@@ -251,7 +251,7 @@ pub fn ot_syntax_style_destroy(context: ?*ContextHandle, style_ptr: ?*const c.ot
     const owner = context.?;
     const id = style_ptr orelse return sessionError(owner, error.InvalidOptions);
     const handle = handleFromC(id.*);
-    _ = owner.core.getSyntaxStyle(handle) catch |err| return sessionError(owner, err);
+    _ = owner.core.raw().getSyntaxStyle(handle) catch |err| return sessionError(owner, err);
     owner.core.destroy(handle) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
@@ -312,7 +312,7 @@ pub fn ot_edit_buffer_get_text(context: ?*ContextHandle, edit_ptr: ?*const c.ot_
     const id = edit_ptr orelse return sessionError(owner, error.InvalidOptions);
     const out = out_ptr orelse return sessionError(owner, error.InvalidOptions);
     if (capacity != 0 and bytes_ptr == null) return sessionError(owner, error.InvalidOptions);
-    const edit = owner.core.getEditBuffer(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const edit = owner.core.raw().getEditBuffer(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     const byte_count = edit.buffer.tb.getByteSize();
     if (capacity != 0 and capacity < byte_count) return sessionError(owner, error.BufferTooSmall);
     out.* = if (capacity == 0) byte_count else @intCast(edit.buffer.getText(bytes_ptr.?[0..capacity]));
@@ -327,7 +327,7 @@ pub fn ot_edit_buffer_get_info(context: ?*ContextHandle, edit_ptr: ?*const c.ot_
     const out = out_ptr orelse return sessionError(owner, error.InvalidOptions);
     if (out.struct_size != @sizeOf(c.ot_edit_buffer_info)) return sessionError(owner, error.InvalidOptions);
     if (out.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
-    const edit = owner.core.getEditBuffer(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const edit = owner.core.raw().getEditBuffer(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     const cursor = edit.buffer.getPrimaryCursor();
     out.* = .{
         .struct_size = @sizeOf(c.ot_edit_buffer_info),
@@ -392,7 +392,7 @@ pub fn ot_image_destroy(context: ?*ContextHandle, image_ptr: ?*const c.ot_handle
     const owner = context.?;
     const id = image_ptr orelse return sessionError(owner, error.InvalidOptions);
     const handle = handleFromC(id.*);
-    _ = owner.core.getImage(handle) catch |err| return sessionError(owner, err);
+    _ = owner.core.raw().getImage(handle) catch |err| return sessionError(owner, err);
     owner.core.destroy(handle) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
@@ -589,7 +589,7 @@ pub fn ot_buffer_destroy(context: ?*ContextHandle, buffer_ptr: ?*const c.ot_hand
     const owner = context.?;
     const id = buffer_ptr orelse return sessionError(owner, error.InvalidOptions);
     const buffer = handleFromC(id.*);
-    _ = owner.core.getBuffer(buffer) catch |err| return sessionError(owner, err);
+    _ = owner.core.raw().getBuffer(buffer) catch |err| return sessionError(owner, err);
     owner.core.destroy(buffer) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
@@ -867,7 +867,7 @@ pub fn ot_session_get_write_limit(
     const owner = context.?;
     const id = session_ptr orelse return sessionError(owner, error.InvalidOptions);
     const out = out_bytes_ptr orelse return sessionError(owner, error.InvalidOptions);
-    const value = owner.core.getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const value = owner.core.raw().getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     out.* = @min(value.output.atomicByteLimit(), std.math.maxInt(u32));
     return c.OT_OK;
 }
@@ -1057,7 +1057,7 @@ pub fn ot_session_get_renderer_state(
     const out = out_state_ptr orelse return sessionError(owner, error.InvalidOptions);
     if (out.struct_size != @sizeOf(c.ot_session_renderer_state)) return sessionError(owner, error.InvalidOptions);
     if (out.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
-    const value = owner.core.getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const value = owner.core.raw().getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     const attached = value.renderer orelse return sessionError(owner, error.RendererNotAttached);
     out.* = .{
         .struct_size = @sizeOf(c.ot_session_renderer_state),
@@ -1300,7 +1300,7 @@ pub fn ot_session_pump_exit(
     const out = out_status_ptr orelse return sessionError(owner, error.InvalidOptions);
     owner.core.beginMutation() catch |err| return sessionError(owner, err);
     defer owner.core.mutating = false;
-    const session = owner.core.getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const session = owner.core.raw().getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     const result = session.pumpExit() catch |err| return sessionError(owner, err);
     out.* = switch (result) {
         .again => c.OT_PUMP_AGAIN,
@@ -1417,7 +1417,7 @@ pub fn ot_session_set_palette_state(context: ?*ContextHandle, session_ptr: ?*con
     }
     owner.core.beginMutation() catch |err| return sessionError(owner, err);
     defer owner.core.mutating = false;
-    const value = owner.core.getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const value = owner.core.raw().getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     value.setPaletteState(palette, foreground.*, background.*, epoch) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
@@ -1432,7 +1432,7 @@ pub fn ot_session_notification(context: ?*ContextHandle, session_ptr: ?*const c.
     if ((message_len != 0 and message_ptr == null) or (title_len != 0 and title_ptr == null)) return sessionError(owner, error.InvalidOptions);
     owner.core.beginMutation() catch |err| return sessionError(owner, err);
     defer owner.core.mutating = false;
-    const value = owner.core.getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const value = owner.core.raw().getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     out.* = @intFromBool(value.triggerNotification(if (message_ptr) |ptr| ptr[0..message_len] else &.{}, if (title_ptr) |ptr| ptr[0..title_len] else null) catch |err| return sessionError(owner, err));
     return c.OT_OK;
 }
@@ -1449,7 +1449,7 @@ pub fn ot_session_get_capabilities(
     const out = out_capabilities_ptr orelse return sessionError(owner, error.InvalidOptions);
     if (out.struct_size != @sizeOf(c.ot_session_capabilities)) return sessionError(owner, error.InvalidOptions);
     if (out.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
-    const value = owner.core.getSessionRenderer(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const value = owner.core.raw().getSessionRenderer(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     const term = &value.terminal;
     const caps = term.getCapabilities();
     var result = std.mem.zeroes(c.ot_session_capabilities);
@@ -1538,7 +1538,7 @@ pub fn ot_session_get_state(
     const owner = context.?;
     const id = session_ptr orelse return sessionError(owner, error.InvalidOptions);
     const out = out_state_ptr orelse return sessionError(owner, error.InvalidOptions);
-    const session = owner.core.getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
+    const session = owner.core.raw().getSession(handleFromC(id.*)) catch |err| return sessionError(owner, err);
     out.* = switch (session.state) {
         .open => c.OT_SESSION_OPEN,
         .closing => c.OT_SESSION_CLOSING,
@@ -1555,7 +1555,7 @@ pub fn ot_session_destroy(context: ?*ContextHandle, session_ptr: ?*const c.ot_ha
     const owner = context.?;
     const id = session_ptr orelse return sessionError(owner, error.InvalidOptions);
     const session = handleFromC(id.*);
-    _ = owner.core.getSession(session) catch |err| return sessionError(owner, err);
+    _ = owner.core.raw().getSession(session) catch |err| return sessionError(owner, err);
     owner.core.destroy(session) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
@@ -1837,7 +1837,7 @@ test "Context Box details ABI validates records before publishing titles and sty
     var title = "owned".*;
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_box_details(&owner, &id, &details, &title, title.len, null, 0));
     @memset(&title, 'x');
-    const node = (try owner.core.getRenderable(box)).scene_node.?;
+    const node = (try owner.core.raw().getRenderable(box)).scene_node.?;
     try std.testing.expectEqualStrings("owned", node.control.box.?.title);
     for (0..8) |field| {
         var invalid = details;
@@ -1888,7 +1888,7 @@ pub fn ot_scene_set_focus(context: ?*ContextHandle, node_ptr: ?*const c.ot_handl
     return c.OT_OK;
 }
 
-pub fn ot_scene_get_layout(context: ?*ContextHandle, node_ptr: ?*const c.ot_handle, raw_yoga: u32, out_ptr: ?*c.ot_scene_layout) callconv(.c) c.ot_status {
+pub fn ot_scene_get_layout(context: ?*ContextHandle, node_ptr: ?*const c.ot_handle, observation: u32, out_ptr: ?*c.ot_scene_layout) callconv(.c) c.ot_status {
     const status = sceneReadStatus(context);
     if (status != c.OT_OK) return status;
     const owner = context.?;
@@ -1896,11 +1896,12 @@ pub fn ot_scene_get_layout(context: ?*ContextHandle, node_ptr: ?*const c.ot_hand
     const out = out_ptr orelse return sessionError(owner, error.InvalidOptions);
     if (out.struct_size != @sizeOf(c.ot_scene_layout)) return sessionError(owner, error.InvalidOptions);
     if (out.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
-    if (raw_yoga > 2) return sessionError(owner, error.InvalidOptions);
-    const result = (if (raw_yoga == 2)
-        owner.core.sceneGetPaintLayout(handleFromC(id.*))
-    else
-        owner.core.sceneGetLayout(handleFromC(id.*), raw_yoga == 1)) catch |err| return sessionError(owner, err);
+    const result = (switch (observation) {
+        c.OT_LAYOUT_PUBLIC => owner.core.sceneGetLayout(handleFromC(id.*), false),
+        c.OT_LAYOUT_YOGA => owner.core.sceneGetLayout(handleFromC(id.*), true),
+        c.OT_LAYOUT_PAINT => owner.core.sceneGetPaintLayout(handleFromC(id.*)),
+        else => return sessionError(owner, error.InvalidOptions),
+    }) catch |err| return sessionError(owner, err);
     out.* = sceneLayoutToC(result);
     return c.OT_OK;
 }
@@ -2534,7 +2535,7 @@ test "Context synchronous text drawing ABI validates sources and frame records b
     const view = try core.createEditorView(edit, 4, 1);
     try core.editSetText(edit, "text", false);
     const target = handleToC(try core.createBuffer(4, 1, .{}));
-    const buffer = try core.getBuffer(handleFromC(target));
+    const buffer = try core.raw().getBuffer(handleFromC(target));
     inline for ([_]bool{ false, true }) |is_editor| {
         const draw = if (is_editor) ot_buffer_draw_editor_view else ot_buffer_draw_scene_text;
         const source = handleToC(if (is_editor) view else node);
@@ -2649,10 +2650,10 @@ test "Context image ABI rejects invalid records identities and mutation reentry"
             8 => invalid.source_x = 2,
             else => unreachable,
         }
-        const before = (try core.getBuffer(handleFromC(target))).buffer.char[0];
+        const before = (try core.raw().getBuffer(handleFromC(target))).buffer.char[0];
         try std.testing.expectEqual(if (field == 1) c.OT_UNSUPPORTED_VERSION else c.OT_INVALID_ARGUMENT, ot_buffer_draw_image(context, &target, null, &image, &invalid, &drawn));
         try std.testing.expectEqual(99, drawn);
-        try std.testing.expectEqual(before, (try core.getBuffer(handleFromC(target))).buffer.char[0]);
+        try std.testing.expectEqual(before, (try core.raw().getBuffer(handleFromC(target))).buffer.char[0]);
     }
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw_image(null, &target, null, &image, &draw, &drawn));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw_image(context, null, null, &image, &draw, &drawn));
@@ -2766,7 +2767,7 @@ test "Context console ABI validates rectangle frame and diagnostic arguments" {
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_frame_draw_buffer(handle, &session, &frame, &buffer, 0, 0));
     frame.reserved[0] = 0;
     try std.testing.expectEqual(c.OT_OK, ot_scene_frame_draw_buffer(handle, &session, &frame, &buffer, 1, 0));
-    try std.testing.expectEqual(red, (try core.getSessionRenderer(handleFromC(session))).getNextBuffer().buffer.bg[1]);
+    try std.testing.expectEqual(red, (try core.raw().getSessionRenderer(handleFromC(session))).getNextBuffer().buffer.bg[1]);
     var draw = std.mem.zeroes(c.ot_buffer_draw_options);
     draw.struct_size = @sizeOf(c.ot_buffer_draw_options);
     draw.abi_version = c.OT_CONTEXT_ABI_VERSION;
@@ -2780,7 +2781,7 @@ test "Context console ABI validates rectangle frame and diagnostic arguments" {
     draw.reserved = 1;
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, &buffer, null, &draw, null, null, 0, null, 0));
     draw.reserved = 0;
-    try std.testing.expectEqualSlices(u32, &.{ 'C', 'D' }, (try core.getSessionRenderer(handleFromC(session))).getNextBuffer().buffer.char[0..2]);
+    try std.testing.expectEqualSlices(u32, &.{ 'C', 'D' }, (try core.raw().getSessionRenderer(handleFromC(session))).getNextBuffer().buffer.char[0..2]);
     core.mutating = true;
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_buffer_draw(handle, &buffer, null, &draw, null, null, 0, null, 0));
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_session_dump_hit_grid(handle, &session));
@@ -2806,7 +2807,7 @@ test "Context editor transport commands preserve provider unset and reject reent
     try core.sceneSetMeasure(node, null);
     try std.testing.expectEqual(c.OT_OK, ot_edit_buffer_set_text(handle, &edit, "ab", 2, 0));
     try std.testing.expectEqual(c.OT_OK, ot_edit_buffer_command(handle, &edit, c.OT_EDIT_MOVE_RIGHT, 0));
-    try std.testing.expectEqual(1, (try core.getEditBuffer(handleFromC(edit))).buffer.getPrimaryCursor().col);
+    try std.testing.expectEqual(1, (try core.raw().getEditBuffer(handleFromC(edit))).buffer.getPrimaryCursor().col);
     try std.testing.expect(!try core.sceneHasMeasure(node));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_edit_buffer_command(handle, &edit, c.OT_EDIT_MOVE_RIGHT, 1));
     core.mutating = true;
@@ -2965,7 +2966,7 @@ test "Context editor ABI validates bindings records and readonly admission" {
         .reserved2 = 0,
     };
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_editor_options(handle, &node, &paint));
-    const accepted = (try core.getRenderable(handleFromC(node))).scene_node.?.control.editor;
+    const accepted = (try core.raw().getRenderable(handleFromC(node))).scene_node.?.control.editor;
     for (0..8) |field| {
         var invalid = paint;
         switch (field) {
@@ -2980,7 +2981,7 @@ test "Context editor ABI validates bindings records and readonly admission" {
             else => unreachable,
         }
         try std.testing.expectEqual(if (field == 1) c.OT_UNSUPPORTED_VERSION else c.OT_INVALID_ARGUMENT, ot_scene_set_editor_options(handle, &node, &invalid));
-        try std.testing.expectEqualDeep(accepted, (try core.getRenderable(handleFromC(node))).scene_node.?.control.editor);
+        try std.testing.expectEqualDeep(accepted, (try core.raw().getRenderable(handleFromC(node))).scene_node.?.control.editor);
     }
     var info = std.mem.zeroes(c.ot_edit_buffer_info);
     info.struct_size = 0;
@@ -2999,7 +3000,7 @@ test "Context editor ABI validates bindings records and readonly admission" {
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_editor_view(handle, &node, null));
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_editor_view(handle, &peer, &view));
     try std.testing.expectEqual(c.OT_OK, ot_editor_view_destroy(handle, &view));
-    try std.testing.expect((try core.getRenderable(handleFromC(peer))).scene_node.?.editor == null);
+    try std.testing.expect((try core.raw().getRenderable(handleFromC(peer))).scene_node.?.editor == null);
     try std.testing.expectEqual(c.OT_STALE_HANDLE, ot_scene_set_editor_view(handle, &node, &view));
     try std.testing.expectEqual(c.OT_OK, ot_edit_buffer_destroy(handle, &edit));
 }
@@ -3031,7 +3032,7 @@ test "Scene flush ABI copies background and preserves paint on acceptance and re
         .focusedBorderColor = .{ 60, 40, 20, 255 },
     };
     try core.sceneSetPaint(box, accepted);
-    const node = (try core.getRenderable(box)).scene_node.?;
+    const node = (try core.raw().getRenderable(box)).scene_node.?;
     var input: [1]c.ot_scene_background_update = .{.{ .node = id, .background = undefined, .fields = c.OT_SCENE_UPDATE_APPLY, .reserved = 0 }};
     var applied: u32 = 0;
     for ([_]ansi.RGBA{ ansi.rgbColor(0, 200, 0, 128), ansi.indexedColor(255, 10, 20, 30), ansi.defaultColor(30, 20, 10, 255) }) |color| {
@@ -3101,7 +3102,7 @@ test "Scene flush ABI paints live copied background during a host hook pause" {
     @memset(&input[0].background, 0);
     const done = try core.sceneFrameStep(session, before, options);
     try std.testing.expectEqual(c.OT_SCENE_FRAME_DONE, done.kind);
-    const target = (try core.getSessionRenderer(session)).getNextBuffer();
+    const target = (try core.raw().getSessionRenderer(session)).getNextBuffer();
     try std.testing.expectEqual(color, target.get(1, 1).?.bg);
     try std.testing.expectEqual(options.background, target.get(0, 0).?.bg);
     try core.sceneFrameCancel(session, done.frame_id);
@@ -3122,15 +3123,15 @@ test "Scene viewport and focus ABI validate copied bindings and expanded paint r
     try std.testing.expectEqual(c.OT_WRONG_KIND, ot_scene_set_viewport(handle, &viewport, &node));
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_viewport(handle, &node, &viewport));
     viewport.generation += 1;
-    try std.testing.expectEqual(root, (try owner.getRenderable(box)).scene_node.?.viewport.?);
+    try std.testing.expectEqual(root, (try owner.raw().getRenderable(box)).scene_node.?.viewport.?);
     try std.testing.expectEqual(c.OT_STALE_HANDLE, ot_scene_set_viewport(handle, &node, &viewport));
-    try std.testing.expectEqual(root, (try owner.getRenderable(box)).scene_node.?.viewport.?);
+    try std.testing.expectEqual(root, (try owner.raw().getRenderable(box)).scene_node.?.viewport.?);
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_viewport(handle, &node, null));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_focus(handle, null, 1));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_focus(handle, &node, 2));
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_focus(handle, &node, 1));
     try std.testing.expectEqual(c.OT_STALE_HANDLE, ot_scene_set_focus(handle, &viewport, 1));
-    try std.testing.expectEqual(box, (try owner.getSession(session)).scene.?.focus.?);
+    try std.testing.expectEqual(box, (try owner.raw().getSession(session)).scene.?.focus.?);
 
     var paint = std.mem.zeroes(c.ot_scene_paint_options);
     paint.struct_size = @sizeOf(c.ot_scene_paint_options);
@@ -3139,7 +3140,7 @@ test "Scene viewport and focus ABI validate copied bindings and expanded paint r
     paint.focusable = 1;
     paint.focused_border_color = .{ 12, 34, 56, 255 };
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_paint(handle, &node, &paint));
-    const accepted = (try owner.getRenderable(box)).scene_node.?.paint;
+    const accepted = (try owner.raw().getRenderable(box)).scene_node.?.paint;
     try std.testing.expect(accepted.focusable);
     try std.testing.expectEqual(paint.focused_border_color, accepted.focusedBorderColor);
     for (0..4) |field| {
@@ -3152,12 +3153,12 @@ test "Scene viewport and focus ABI validate copied bindings and expanded paint r
             else => unreachable,
         }
         try std.testing.expectEqual(if (field == 3) c.OT_UNSUPPORTED_VERSION else c.OT_INVALID_ARGUMENT, ot_scene_set_paint(handle, &node, &invalid));
-        try std.testing.expectEqualDeep(accepted, (try owner.getRenderable(box)).scene_node.?.paint);
+        try std.testing.expectEqualDeep(accepted, (try owner.raw().getRenderable(box)).scene_node.?.paint);
     }
     try owner.cancelSession(session);
     try std.testing.expectEqual(c.OT_SESSION_CLOSED, ot_scene_set_focus(handle, &node, 1));
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_focus(handle, &node, 0));
-    try std.testing.expect((try owner.getSession(session)).scene.?.focus == null);
+    try std.testing.expect((try owner.raw().getSession(session)).scene.?.focus == null);
 }
 
 test "Scene Slider and Arrow ABI validate fixed records without changing accepted state or outputs" {
@@ -3196,8 +3197,8 @@ test "Scene Slider and Arrow ABI validate fixed records without changing accepte
     };
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_slider(handle, &slider, &slider_options));
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_arrow(handle, &arrow, &arrow_options, null, 0));
-    const accepted_slider = (try owner.getRenderable(handleFromC(slider))).scene_node.?.control.slider;
-    const accepted_arrow = (try owner.getRenderable(handleFromC(arrow))).scene_node.?.control.arrow;
+    const accepted_slider = (try owner.raw().getRenderable(handleFromC(slider))).scene_node.?.control.slider;
+    const accepted_arrow = (try owner.raw().getRenderable(handleFromC(arrow))).scene_node.?.control.arrow;
     try std.testing.expectEqual(@as(f64, 0.125), accepted_slider.min);
     try std.testing.expectEqual(slider_options.foreground, accepted_slider.foreground);
     try std.testing.expectEqual(arrow_options.background, accepted_arrow.background);
@@ -3251,8 +3252,8 @@ test "Scene Slider and Arrow ABI validate fixed records without changing accepte
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_slider(handle, &slider, null));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_set_arrow(handle, &arrow, null, null, 0));
     try std.testing.expectEqualDeep(before, output);
-    try std.testing.expectEqualDeep(accepted_slider, (try owner.getRenderable(handleFromC(slider))).scene_node.?.control.slider);
-    try std.testing.expectEqualDeep(accepted_arrow, (try owner.getRenderable(handleFromC(arrow))).scene_node.?.control.arrow);
+    try std.testing.expectEqualDeep(accepted_slider, (try owner.raw().getRenderable(handleFromC(slider))).scene_node.?.control.slider);
+    try std.testing.expectEqualDeep(accepted_arrow, (try owner.raw().getRenderable(handleFromC(arrow))).scene_node.?.control.arrow);
     try std.testing.expectEqual(c.OT_OK, ot_scene_destroy_node(handle, &slider));
     try std.testing.expectEqual(c.OT_STALE_HANDLE, ot_scene_get_slider_thumb(handle, &slider, &output));
     try std.testing.expectEqualDeep(before, output);
@@ -3627,7 +3628,7 @@ test "Scene ABI records preserve rejected outputs and read real Session metadata
     var cursor: c.ot_scene_cursor_state = std.mem.zeroes(c.ot_scene_cursor_state);
     cursor.struct_size = @sizeOf(c.ot_scene_cursor_state);
     cursor.abi_version = c.OT_CONTEXT_ABI_VERSION;
-    const cli = try owner.core.getSessionRenderer(session);
+    const cli = try owner.core.raw().getSessionRenderer(session);
     cli.terminal.setCursorPosition(3, 2, true);
     cli.terminal.setCursorStyle(.underline, false);
     try std.testing.expectEqual(c.OT_OK, ot_scene_get_cursor_state(handle, &session_c, &cursor));
@@ -3733,7 +3734,7 @@ test "Scene styled text ABI validates optional links and preserves rejected repl
     linked.link_offset = 1;
     linked.link_byte_count = 3;
     var urls = [_]u8{ '_', 0xff, 0, 0x1b };
-    const text = (try owner.getRenderable(node)).scene_node.?.text.?;
+    const text = (try owner.raw().getRenderable(node)).scene_node.?.text.?;
     const style = text.owned_style;
     const epoch = text.buffer.getContentEpoch();
     for (0..13) |field| {
@@ -3784,7 +3785,7 @@ test "Scene styled text ABI validates optional links and preserves rejected repl
     @memset(&urls, '!');
     try owner.sceneMoveNode(node, root, 0);
     const frame = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
-    const target = (try owner.getSessionRenderer(session)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(session)).getNextBuffer();
     const link_id = @import("ansi.zig").TextAttributes.getLinkId(target.get(0, 0).?.attributes);
     try std.testing.expectEqualStrings("\xff\x00\x1b", try owner.links.get(link_id));
     try std.testing.expectEqual(link_id, @import("ansi.zig").TextAttributes.getLinkId(target.get(3, 0).?.attributes));
@@ -4276,7 +4277,7 @@ test "Session exit pump ABI validates ownership and preserves rejected outputs" 
     owner.core.mutating = false;
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, busy_status);
     try std.testing.expectEqual(@as(u32, 99), result);
-    try std.testing.expectEqual(.open, (try owner.core.getSession(handleFromC(id))).state);
+    try std.testing.expectEqual(.open, (try owner.core.raw().getSession(handleFromC(id))).state);
     try std.testing.expectEqual(c.OT_OK, ot_session_pump_exit(handle, &id, &result));
     try std.testing.expectEqual(c.OT_PUMP_CLOSED, result);
     try owner.core.destroy(handleFromC(id));

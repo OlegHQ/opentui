@@ -53,7 +53,7 @@ test "Scene custom paint entered destruction retains self after and lease author
         defer f.deinit();
         const child = try node(f.owner, f.id, f.root, kind, 2, 0);
         if (kind == 1) try f.owner.sceneSetBoxDetails(child, .{ .title = "owned title" });
-        const token = (try f.owner.getRenderable(child)).scene_node.?.token;
+        const token = (try f.owner.raw().getRenderable(child)).scene_node.?.token;
         try f.owner.sceneSetHooks(child, 56, 1, 2, 1);
         const before = try f.step(null, options, 4, null);
         try f.owner.sceneSetHooks(child, 56, 2, 2, 1);
@@ -138,7 +138,7 @@ test "Scene custom paint admits self on every nonroot kind and custom nodes have
         const child = try node(f.owner, f.id, f.root, @intCast(kind), @intCast(kind + 1), 0);
         if (kind == 2) try f.owner.sceneSetText(child, "native text");
         try f.owner.sceneSetHooks(child, 32, 1, 2, 1);
-        const registration = (try f.owner.getRenderable(child)).scene_node.?;
+        const registration = (try f.owner.raw().getRenderable(child)).scene_node.?;
         const hook_count = f.state.hook_count;
         for ([_]u32{ 256, 288, 312, 447 }) |flags| {
             try testing.expectError(error.InvalidOptions, f.owner.sceneSetHooks(child, flags, 2, 99, 99));
@@ -151,7 +151,7 @@ test "Scene custom paint admits self on every nonroot kind and custom nodes have
         try testing.expectError(error.UnsupportedResource, f.owner.scenePaint(f.id, options.background, true, 0));
         try testing.expect(f.state.attempt == null);
         const self = try f.step(null, options, 7, null);
-        const target = (try f.owner.getSessionRenderer(f.id)).getNextBuffer();
+        const target = (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer();
         try testing.expectEqual(@as(u32, ' '), target.get(0, 0).?.char);
         try testing.expectEqual(ansi.rgbColor(0, 0, 0, 255), target.get(0, 0).?.bg);
         const done = try f.step(self, options, 0, null);
@@ -162,7 +162,7 @@ test "Scene custom paint admits self on every nonroot kind and custom nodes have
     const custom = try node(f.owner, f.id, f.root, 6, 10, 0);
     const done = try f.step(null, options, 0, null);
     try testing.expectEqual(ansi.rgbColor(0, 0, 0, 255), f.cli.getNextBuffer().get(0, 0).?.bg);
-    try testing.expectEqual((try f.owner.getRenderable(custom)).scene_node.?.token, f.cli.nextHitGrid[0]);
+    try testing.expectEqual((try f.owner.raw().getRenderable(custom)).scene_node.?.token, f.cli.nextHitGrid[0]);
     try f.owner.sceneFrameCancel(f.id, done.frame_id);
 }
 
@@ -173,7 +173,7 @@ test "Scene custom paint text and editor before hooks require host self without 
         const child = try node(f.owner, f.id, f.state.root.?.scene_node.?.handle, kind, kind + 2, 0);
         if (kind == 2) try f.owner.sceneSetText(child, "T");
         try f.owner.sceneSetHooks(child, 16, 1, 2, 1);
-        const registration = (try f.owner.getRenderable(child)).scene_node.?;
+        const registration = (try f.owner.raw().getRenderable(child)).scene_node.?;
         const hook_count = f.state.hook_count;
         for ([_]u32{ 8, 24 }) |flags| {
             try testing.expectError(error.InvalidOptions, f.owner.sceneSetHooks(child, flags, 2, 99, 99));
@@ -184,7 +184,7 @@ test "Scene custom paint text and editor before hooks require host self without 
             try testing.expectEqual(hook_count, f.state.hook_count);
         }
         var request = try f.step(null, options, 5, null);
-        if (kind == 2) try testing.expectEqual(@as(u32, 'T'), (try f.owner.getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.char);
+        if (kind == 2) try testing.expectEqual(@as(u32, 'T'), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.char);
         try f.owner.sceneFrameCancel(f.id, request.frame_id);
         try f.owner.sceneSetHooks(child, 56, 2, 2, 1);
         request = try f.step(null, options, 4, null);

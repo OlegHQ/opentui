@@ -18,7 +18,7 @@ fn drain(owner: *context.Context, id: context.Handle, out: []u8) ![]const u8 {
         len += ticket.len;
         try owner.completeOutput(id, ticket, .written);
     }
-    try testing.expect((try owner.getSession(id)).isDrained());
+    try testing.expect((try owner.raw().getSession(id)).isDrained());
     return out[0..len];
 }
 
@@ -32,13 +32,13 @@ test "Session renderer completes its byte endpoint between raw writes" {
     defer owner.deinit() catch unreachable;
     const id = try owner.createSession(transport);
     defer owner.cancelSession(id) catch unreachable;
-    const value = try owner.getSession(id);
+    const value = try owner.raw().getSession(id);
     var bytes: [1024]u8 = undefined;
     try owner.writeSession(id, "before");
     const prefix = (try owner.readOutput(id, bytes[0..2])).?;
     const raw_stats = value.getStats();
     try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
-    const cli = try owner.getSessionRenderer(id);
+    const cli = try owner.raw().getSessionRenderer(id);
     try testing.expectEqualDeep(raw_stats, value.getStats());
     try testing.expect(!cli.terminalSetup);
     try testing.expect(value.output.callback == null);
@@ -85,7 +85,7 @@ test "Session renderer completes its byte endpoint between raw writes" {
     try testing.expectError(error.ContextBusy, owner.destroy(id));
     try testing.expectError(error.ContextBusy, owner.deinit());
     try testing.expect(!owner.closing and !owner.mutating);
-    try testing.expect(cli == try owner.getSessionRenderer(id));
+    try testing.expect(cli == try owner.raw().getSessionRenderer(id));
     try testing.expectEqual(@as(u32, 1), owner.objects.live_count);
     try testing.expectEqualStrings("after", try drain(owner, id, &bytes));
     try testing.expectEqual(value.getStats().bytes_written, value.completed_bytes);
@@ -104,8 +104,8 @@ test "Session renderer no-byte frames wait only for earlier output" {
     const id = try owner.createSession(transport);
     defer owner.cancelSession(id) catch unreachable;
     try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
-    const cli = try owner.getSessionRenderer(id);
-    const value = try owner.getSession(id);
+    const cli = try owner.raw().getSessionRenderer(id);
+    const value = try owner.raw().getSession(id);
     var bytes: [1024]u8 = undefined;
     try paint(cli, "same", 11);
     try testing.expectEqual(.pending, try owner.renderSession(id, true));
@@ -155,8 +155,8 @@ test "Session renderer failure and cancellation retain the last completed presen
             const id = try owner.createSession(transport);
             defer owner.cancelSession(id) catch unreachable;
             try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
-            const cli = try owner.getSessionRenderer(id);
-            const value = try owner.getSession(id);
+            const cli = try owner.raw().getSessionRenderer(id);
+            const value = try owner.raw().getSession(id);
             var bytes: [1024]u8 = undefined;
             try paint(cli, "old", 11);
             try testing.expectEqual(.pending, try owner.renderSession(id, true));
@@ -213,8 +213,8 @@ test "Session renderer backpressure is bounded and frame rejection needs explici
         const id = try owner.createSession(.{ .chunk_size = 64, .chunk_count = 8, .span_capacity = 8 });
         defer owner.cancelSession(id) catch unreachable;
         try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
-        const cli = try owner.getSessionRenderer(id);
-        const value = try owner.getSession(id);
+        const cli = try owner.raw().getSessionRenderer(id);
+        const value = try owner.raw().getSession(id);
         const blocker = [_]u8{'x'} ** 512;
         try owner.writeSession(id, blocker[0..size]);
         const queued = value.getStats();
@@ -266,8 +266,8 @@ test "Session renderer attachment and resize reject invalid dimensions and dupli
     defer owner.deinit() catch unreachable;
     const id = try owner.createSession(transport);
     defer owner.cancelSession(id) catch unreachable;
-    const value = try owner.getSession(id);
-    try testing.expectError(error.RendererNotAttached, owner.getSessionRenderer(id));
+    const value = try owner.raw().getSession(id);
+    try testing.expectError(error.RendererNotAttached, owner.raw().getSessionRenderer(id));
     try testing.expectError(error.RendererNotAttached, owner.renderSession(id, true));
     try testing.expectError(error.RendererNotAttached, owner.resizeSessionRenderer(id, 1, 1));
     try owner.writeSession(id, "safe");
@@ -284,9 +284,9 @@ test "Session renderer attachment and resize reject invalid dimensions and dupli
     try testing.expectError(error.ContextBusy, owner.resizeSessionRenderer(id, 4, 2));
     owner.mutating = false;
     try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
-    const cli = try owner.getSessionRenderer(id);
+    const cli = try owner.raw().getSessionRenderer(id);
     try testing.expectError(error.RendererAlreadyAttached, owner.attachSessionRenderer(id, 2, 4, .{}));
-    try testing.expect(cli == try owner.getSessionRenderer(id));
+    try testing.expect(cli == try owner.raw().getSessionRenderer(id));
     try testing.expectEqual(@as(u32, 1), owner.objects.live_count);
     try testing.expectEqualDeep(queued, value.getStats());
     var bytes: [4]u8 = undefined;
@@ -311,7 +311,7 @@ fn attachWithAllocationFailures(allocator: std.mem.Allocator) !void {
     defer owner.deinit() catch unreachable;
     const id = try owner.createSession(transport);
     defer owner.cancelSession(id) catch unreachable;
-    const value = try owner.getSession(id);
+    const value = try owner.raw().getSession(id);
     try owner.writeSession(id, "safe");
     var bytes: [2]u8 = undefined;
     const ticket = (try owner.readOutput(id, &bytes)).?;
@@ -321,7 +321,7 @@ fn attachWithAllocationFailures(allocator: std.mem.Allocator) !void {
         .{ .key = "OPENTUI_FORCE_WCWIDTH", .value = "1" },
         .{ .key = "COLORTERM", .value = "truecolor" },
     } });
-    try testing.expect(value == try owner.getSession(id));
+    try testing.expect(value == try owner.raw().getSession(id));
     try testing.expectEqualDeep(queued, value.getStats());
     try testing.expectEqualDeep(ticket, value.pending.?);
     try testing.expectEqual(@as(u64, 0), value.completed_bytes);
@@ -330,10 +330,10 @@ fn attachWithAllocationFailures(allocator: std.mem.Allocator) !void {
     try testing.expectEqual(.open, value.state);
     try testing.expect(!owner.mutating);
     if (result) |_| {
-        const cli = try owner.getSessionRenderer(id);
+        const cli = try owner.raw().getSessionRenderer(id);
         try testing.expect(cli.backend.feed.feed == value.output);
     } else |_| {
-        try testing.expectError(error.RendererNotAttached, owner.getSessionRenderer(id));
+        try testing.expectError(error.RendererNotAttached, owner.raw().getSessionRenderer(id));
     }
     try owner.completeOutput(id, ticket, .written);
     try testing.expectEqualStrings("fe", try drain(owner, id, &bytes));

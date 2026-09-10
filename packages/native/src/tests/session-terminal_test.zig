@@ -60,8 +60,8 @@ pub const Fixture = struct {
         return .{
             .owner = owner,
             .id = id,
-            .value = try owner.getSession(id),
-            .cli = try owner.getSessionRenderer(id),
+            .value = try owner.raw().getSession(id),
+            .cli = try owner.raw().getSessionRenderer(id),
         };
     }
 
@@ -288,7 +288,7 @@ test "Session early width replies preserve forced text widths during setup and r
     try owner.attachSessionRenderer(id, 8, 2, .{ .forwarded_env = &.{
         .{ .key = "OPENTUI_FORCE_WCWIDTH", .value = "1" },
     } });
-    const f: Fixture = .{ .owner = owner, .id = id, .value = try owner.getSession(id), .cli = try owner.getSessionRenderer(id) };
+    const f: Fixture = .{ .owner = owner, .id = id, .value = try owner.raw().getSession(id), .cli = try owner.raw().getSessionRenderer(id) };
     const root = try owner.sceneCreateNode(id, 0, 1);
     var now_ns: u64 = 0;
     var bytes: [16 * 1024]u8 = undefined;
@@ -385,7 +385,7 @@ test "Session suspended snapshots preserve restoration through deferred presenta
         const restored = f.cli.terminal.state;
         const frames = f.cli.renderStats.frameCount;
         const split_state = f.cli.splitScrollback;
-        const snapshot = try f.owner.getBuffer(try f.owner.createBuffer(8, 1, .{}));
+        const snapshot = try f.owner.raw().getBuffer(try f.owner.createBuffer(8, 1, .{}));
         try snapshot.drawTextChecked("late", 0, 0, ansi.rgbColor(255, 255, 255, 255), null, 0);
         const commits = [_]renderer.SplitSnapshot{.{ .snapshot = snapshot, .row_columns = 4, .trailing_newline = false }};
         try f.value.write("raw-");
@@ -440,8 +440,8 @@ test "Session terminal rejects invalid setup and preserves a rejected control dr
             .control_capacity = capacity,
         });
         try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
-        const value = try owner.getSession(id);
-        const cli = try owner.getSessionRenderer(id);
+        const value = try owner.raw().getSession(id);
+        const cli = try owner.raw().getSessionRenderer(id);
         const before = cli.terminal;
         try testing.expectError(error.NoSpace, owner.setupSessionTerminal(id, .{}));
         try testing.expectEqualDeep(before, cli.terminal);
@@ -981,8 +981,8 @@ test "Session terminal pumps are allocation-free clock-free and independent afte
     const other: Fixture = .{
         .owner = f.owner,
         .id = sibling,
-        .value = try f.owner.getSession(sibling),
-        .cli = try f.owner.getSessionRenderer(sibling),
+        .value = try f.owner.raw().getSession(sibling),
+        .cli = try f.owner.raw().getSessionRenderer(sibling),
     };
     failing.fail_index = failing.alloc_index;
     failing.resize_fail_index = failing.resize_index;

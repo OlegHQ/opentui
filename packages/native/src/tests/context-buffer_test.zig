@@ -22,7 +22,7 @@ test "Context color matrices keep masked and uniform effects allocation-free wit
     const before = try owner.bufferLeaseSnapshot(lease);
     const chars = before.buffer.char[0..10].*;
     const attributes = before.buffer.attributes[0..10].*;
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     const glyph = grapheme.graphemeIdFromChar(chars[1]);
     const references = try owner.graphemes.getRefcount(glyph);
     var matrix_bytes: [65]u8 align(4) = undefined;
@@ -62,7 +62,7 @@ test "Context color matrices reject invalid input before changing accepted cells
     const owner = try context.Context.init(testing.allocator, testing.io, .{ .render_cells_max = 4 });
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(4, 1, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     const background = ansi.rgbColor(200, 40, 20, 255);
     try owner.clearBuffer(id, background);
     const before = target.buffer.bg[0..4].*;
@@ -97,7 +97,7 @@ test "Context color matrices require the exact active frame even for zero-streng
     const peer = try foreign.createBuffer(1, 1, .{});
     try testing.expectError(error.WrongContext, owner.colorMatrixBuffer(peer, null, &swap_red_blue, null, 1, 3));
     try owner.colorMatrixBuffer(session, frame, &swap_red_blue, null, 1, 3);
-    const target = (try owner.getSessionRenderer(session)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(session)).getNextBuffer();
     try testing.expectEqual(ansi.rgbColor(20, 40, 200, 255), target.buffer.bg[0]);
     var altered = frame;
     altered.frame_id += 1;
@@ -116,8 +116,8 @@ test "Context checked character drawing rejects colliding encoded IDs from disti
     const color = ansi.rgbColor(255, 255, 255, 255);
     try owner.drawBufferText(id, "\u{754c}", 0, 0, color, null, 0);
     try foreign.drawBufferText(peer, "\u{8a9e}", 0, 0, color, null, 0);
-    const target = try owner.getBuffer(id);
-    const foreign_buffer = try foreign.getBuffer(peer);
+    const target = try owner.raw().getBuffer(id);
+    const foreign_buffer = try foreign.raw().getBuffer(peer);
     const char = foreign_buffer.buffer.char[0];
     try testing.expectEqual(char, target.buffer.char[0]);
     try testing.expectError(error.InvalidOptions, owner.drawBuffer(id, null, .{ .operation = .char, .char = char }, "", ""));
@@ -129,7 +129,7 @@ test "Context checked Box drawing decodes partial borders with the public side m
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(3, 3, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     for (0..16) |mask| {
         try owner.clearBuffer(id, ansi.rgbColor(0, 0, 0, 255));
         try owner.drawBuffer(id, null, .{
@@ -192,13 +192,13 @@ test "Context frame buffer composition checks tickets and retains source resourc
     const options: scene.FrameOptions = .{ .background = .{ 0, 0, 0, 255 }, .use_mouse = false, .excluded_hit_num = 0, .max_layout_rounds = 8, .max_host_requests = 64 };
     const source = try owner.createBuffer(4, 1, .{});
     const peer = try foreign.createBuffer(4, 1, .{});
-    const source_buffer = try owner.getBuffer(source);
+    const source_buffer = try owner.raw().getBuffer(source);
     const link_id = try owner.links.alloc("https://example.test/frame-buffer");
     try source_buffer.drawText("\u{754c}AB", 0, 0, ansi.rgbColor(255, 255, 255, 255), ansi.rgbColor(200, 0, 0, 255), ansi.TextAttributes.setLinkId(0, link_id));
     const glyph = source_buffer.buffer.char[0] & grapheme.GRAPHEME_ID_MASK;
     const frame = try owner.sceneFrameStep(session, null, options);
     try testing.expectEqual(@as(u32, 4), frame.kind);
-    const target = (try owner.getSessionRenderer(session)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(session)).getNextBuffer();
     const before = target.buffer.char[0..4].*;
     var altered = frame;
     altered.request_id += 1;
@@ -257,8 +257,8 @@ test "Context frame composition applies prefix opacity to ASCII memcpy candidate
     const frame = try owner.sceneFrameStep(session, null, .{ .background = .{ 0, 0, 0, 255 }, .use_mouse = false, .excluded_hit_num = 0, .max_layout_rounds = 8, .max_host_requests = 64 });
     defer owner.sceneFrameCancel(session, frame.frame_id) catch unreachable;
     try testing.expectEqual(@as(u32, 4), frame.kind);
-    const target = (try owner.getSessionRenderer(session)).getNextBuffer();
-    const source_buffer = try owner.getBuffer(source);
+    const target = (try owner.raw().getSessionRenderer(session)).getNextBuffer();
+    const source_buffer = try owner.raw().getBuffer(source);
     try testing.expect(!source_buffer.respectAlpha and !source_buffer.grapheme_tracker.hasAny() and !source_buffer.link_tracker.hasAny());
     // Cover the contiguous and row-by-row memcpy eligibility conditions.
     for ([_]u32{ 4, 2 }) |width| {
@@ -284,14 +284,14 @@ test "Context frame composition replaces right-clipped wide glyphs without writi
     _ = try owner.sceneCreateNode(session, 0, 1);
     const source = try owner.createBuffer(2, 1, .{});
     const red = ansi.rgbColor(200, 0, 0, 255);
-    const source_buffer = try owner.getBuffer(source);
+    const source_buffer = try owner.raw().getBuffer(source);
     const link_id = try owner.links.alloc("https://example.test/clipped-wide");
     const attributes = ansi.TextAttributes.setLinkId(1, link_id);
     try source_buffer.drawText("\u{754c}", 0, 0, red, red, attributes);
     const source_chars = source_buffer.buffer.char[0..2].*;
     const frame = try owner.sceneFrameStep(session, null, .{ .background = .{ 0, 0, 0, 255 }, .use_mouse = false, .excluded_hit_num = 0, .max_layout_rounds = 8, .max_host_requests = 64 });
     defer owner.sceneFrameCancel(session, frame.frame_id) catch unreachable;
-    const target = (try owner.getSessionRenderer(session)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(session)).getNextBuffer();
     try target.drawText("ABCD", 0, 0, red, ansi.rgbColor(0, 0, 0, 255), 0);
     const outside = target.get(2, 0).?;
     try target.pushScissorRect(1, 0, 1, 1);
@@ -314,7 +314,7 @@ test "Context frame composition fills clipped tails of repeated four-cell spans"
     try owner.attachSessionRenderer(session, 8, 1, .{ .remote_mode = .remote });
     _ = try owner.sceneCreateNode(session, 0, 1);
     const source = try owner.createBuffer(8, 1, .{});
-    const source_buffer = try owner.getBuffer(source);
+    const source_buffer = try owner.raw().getBuffer(source);
     const red = ansi.rgbColor(200, 0, 0, 255);
     for ([_]u32{ 0, 4 }) |x| try source_buffer.drawGrapheme("wide", 4, x, 0, red, red, 1);
     const source_chars = source_buffer.buffer.char[0..8].*;
@@ -322,7 +322,7 @@ test "Context frame composition fills clipped tails of repeated four-cell spans"
     try testing.expectEqual(glyph, grapheme.graphemeIdFromChar(source_chars[4]));
     const frame = try owner.sceneFrameStep(session, null, .{ .background = .{ 0, 0, 0, 255 }, .use_mouse = false, .excluded_hit_num = 0, .max_layout_rounds = 8, .max_host_requests = 64 });
     defer owner.sceneFrameCancel(session, frame.frame_id) catch unreachable;
-    const target = (try owner.getSessionRenderer(session)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(session)).getNextBuffer();
     for ([_]bool{ false, true }) |source_crop| {
         for ([_]u32{ 5, 6, 7, 8 }) |width| {
             target.clear(ansi.rgbColor(0, 0, 0, 255), 'X');
@@ -357,19 +357,19 @@ test "Context buffer copy rejects invalid owners phases and tracker failure befo
     const peer = try foreign.createBuffer(4, 1, .{});
     try testing.expectError(error.RendererNotAttached, owner.drawSessionBuffer(session, id, 0, 0));
     try owner.attachSessionRenderer(session, 4, 1, .{ .remote_mode = .remote });
-    const cli = try owner.getSessionRenderer(session);
+    const cli = try owner.raw().getSessionRenderer(session);
     const target = cli.getNextBuffer();
-    const source = try owner.getBuffer(id);
+    const source = try owner.raw().getBuffer(id);
     const source_lease = try owner.acquireOwnedBufferLease(id);
     defer owner.releaseBufferLease(source_lease) catch unreachable;
     try owner.clearBuffer(id, ansi.rgbColor(0, 0, 0, 255));
     try owner.drawBufferText(id, "\u{754c}A", 0, 0, ansi.rgbColor(255, 255, 255, 255), null, 0);
-    const other = try foreign.getBuffer(peer);
+    const other = try foreign.raw().getBuffer(peer);
     try other.drawText("\u{8a9e}B", 0, 0, ansi.rgbColor(255, 255, 255, 255), null, 0);
     try testing.expectEqual(source.buffer.char[0], other.buffer.char[0]);
     const before = target.buffer.char[0..4].*;
     const source_before_rejection = source.buffer.char[0..4].*;
-    const stats = (try owner.getSession(session)).getStats();
+    const stats = (try owner.raw().getSession(session)).getStats();
     try testing.expectError(error.WrongContext, owner.drawSessionBuffer(session, peer, 0, 0));
     try testing.expectError(error.WrongKind, owner.drawSessionBuffer(session, session, 0, 0));
     try testing.expectError(error.WrongContext, owner.clearBuffer(peer, ansi.rgbColor(0, 0, 0, 255)));
@@ -386,7 +386,7 @@ test "Context buffer copy rejects invalid owners phases and tracker failure befo
     try testing.expectError(error.OutOfMemory, owner.drawSessionBuffer(session, id, 0, 0));
     try testing.expect(failing.has_induced_failure);
     try testing.expectEqualSlices(u32, &before, target.buffer.char);
-    try testing.expectEqualDeep(stats, (try owner.getSession(session)).getStats());
+    try testing.expectEqualDeep(stats, (try owner.raw().getSession(session)).getStats());
     try testing.expect(!owner.mutating);
     failing.fail_index = std.math.maxInt(usize);
     failing.resize_fail_index = std.math.maxInt(usize);

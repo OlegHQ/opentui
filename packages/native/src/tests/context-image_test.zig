@@ -17,7 +17,7 @@ test "Context image import owns lazy PNG and rejects stale foreign and exhausted
     const encoded = try original.ensureEncodedPng();
     const lazy = try image.decode(testing.allocator, encoded, .{});
     const first = try owner.importImage(lazy);
-    const copy = try owner.getImage(first);
+    const copy = try owner.raw().getImage(first);
     try testing.expectEqual(@as(usize, 0), copy.pixels.len);
     try testing.expect(copy.encoded_png.?.ptr != lazy.encoded_png.?.ptr);
     try testing.expectEqual(owner.objects.context_id, copy.owner_context_id);
@@ -25,15 +25,15 @@ test "Context image import owns lazy PNG and rejects stale foreign and exhausted
     const render_id = copy.render_id;
     lazy.deinit();
     try testing.expectEqualSlices(u8, &.{ 255, 0, 0, 255 }, try copy.ensurePixels());
-    try testing.expectError(error.WrongContext, foreign.getImage(first));
+    try testing.expectError(error.WrongContext, foreign.raw().getImage(first));
     const wrong_kind = try owner.createBuffer(1, 1, .{});
-    try testing.expectError(error.WrongKind, owner.getImage(wrong_kind));
+    try testing.expectError(error.WrongKind, owner.raw().getImage(wrong_kind));
     try owner.destroy(first);
     const second = try owner.importImage(original);
     try testing.expectEqual(first.slot, second.slot);
     try testing.expect(first.generation != second.generation);
-    try testing.expect((try owner.getImage(second)).render_id > render_id);
-    try testing.expectError(error.StaleHandle, owner.getImage(first));
+    try testing.expect((try owner.raw().getImage(second)).render_id > render_id);
+    try testing.expectError(error.StaleHandle, owner.raw().getImage(first));
     owner.last_image_id = std.math.maxInt(u32);
     try testing.expectError(error.ObjectLimit, owner.importImage(original));
 }
@@ -56,12 +56,12 @@ test "Context image failed imports and checked composition preserve accepted sta
         try testing.expect(!owner.mutating);
     }
     const imported = try owner.importImage(original);
-    const pixels = try owner.getImage(imported);
+    const pixels = try owner.raw().getImage(imported);
     const source = try owner.createBuffer(3, 1, .{});
     const destination = try owner.createBuffer(3, 1, .{});
     try owner.clearBuffer(destination, ansi.rgbColor(0, 0, 0, 255));
     try testing.expect(try owner.drawBufferImage(source, null, imported, .{ .width = 3, .height = 1 }));
-    const target = try owner.getBuffer(destination);
+    const target = try owner.raw().getBuffer(destination);
     const before = target.buffer.char[0..3].*;
     const refs = pixels.ref_count;
     for (0..2) |offset| {
@@ -128,7 +128,7 @@ test "Context image scene paints native fit cover fill and resolution with retai
             try testing.expectEqual(@as(u32, if (fit == .cover) 1 else 4), placements[0].source_width);
             try testing.expectEqual(@as(u32, if (fit == .cover) 1 else 0), placements[0].source_x);
             if (retained) |id| {
-                const local = try owner.getBuffer(id);
+                const local = try owner.raw().getBuffer(id);
                 try testing.expectEqual(@as(u32, 4), local.width);
                 try testing.expectEqual(@as(i32, 0), local.image_placements.items[0].x);
             }
@@ -203,7 +203,7 @@ test "Context image entered node destruction releases continuation ownership on 
             const original = try image.createFromRgba(testing.allocator, &.{ 255, 0, 0, 255 }, 1, 1, 4);
             defer original.deinit();
             const imported = try owner.importImage(original);
-            const resource = try owner.getImage(imported);
+            const resource = try owner.raw().getImage(imported);
             resource.retain();
             defer resource.deinit();
             const retained = try owner.createBuffer(4, 4, .{});
@@ -235,7 +235,7 @@ test "Context image checked draw rejects invalid input and survives pending pres
     defer original.deinit();
     const imported = try owner.importImage(original);
     const frame = try owner.sceneFrameStep(session, null, frame_options);
-    const target = (try owner.getSessionRenderer(session)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(session)).getNextBuffer();
     const before = target.buffer.char[0..8].*;
     var stale = frame;
     stale.frame_id += 1;
@@ -246,7 +246,7 @@ test "Context image checked draw rejects invalid input and survives pending pres
     try testing.expect(!try owner.drawBufferImage(session, frame, imported, .{ .x = std.math.minInt(i32), .width = 4, .height = 2 }));
     try testing.expectEqualSlices(u32, &before, target.buffer.char);
     try testing.expect(try owner.drawBufferImage(session, frame, imported, .{ .width = 4, .height = 2, .protocol = .kitty }));
-    const resource = try owner.getImage(imported);
+    const resource = try owner.raw().getImage(imported);
     resource.retain();
     defer resource.deinit();
     const lease = try owner.sceneFrameAcquireBufferLease(session, frame, .next);
@@ -268,7 +268,7 @@ test "Context image placement capacity is charged to checked leases and retired 
     const original = try image.createFromRgba(testing.allocator, &.{ 255, 0, 0, 255 }, 1, 1, 4);
     defer original.deinit();
     const imported = try owner.importImage(original);
-    const resource = try owner.getImage(imported);
+    const resource = try owner.raw().getImage(imported);
     const handle = try owner.createBuffer(1, 1, .{});
     const lease = try owner.acquireOwnedBufferLease(handle);
     const charged = owner.lease_bytes;
@@ -294,7 +294,7 @@ test "Context image transparent grid occludes image cells only and respects zero
     defer original.deinit();
     const imported = try owner.importImage(original);
     const handle = try owner.createBuffer(3, 3, .{});
-    const target = try owner.getBuffer(handle);
+    const target = try owner.raw().getBuffer(handle);
     try owner.clearBuffer(handle, ansi.rgbColor(0, 0, 0, 255));
     try owner.drawBufferText(handle, "X", 1, 0, ansi.rgbColor(255, 255, 255, 255), null, 0);
     try testing.expect(try owner.drawBufferImage(handle, null, imported, .{ .width = 1, .height = 1 }));
@@ -327,7 +327,7 @@ test "Context image compose and grayscale overlays ignore unrelated glyph and li
             defer original.deinit();
             const imported = try owner.importImage(original);
             const handle = try owner.createBuffer(6, 2, .{});
-            const target = try owner.getBuffer(handle);
+            const target = try owner.raw().getBuffer(handle);
             const blue = ansi.rgbColor(0, 0, 255, 128);
             const white = ansi.rgbColor(255, 255, 255, 255);
             try owner.clearBuffer(handle, ansi.rgbColor(0, 0, 0, 255));
@@ -367,7 +367,7 @@ test "Context image custom self keeps native clearing and composition across hoo
         try owner.sceneSetHooks(node, 32, 1, 4, 4);
         const body = try owner.sceneFrameStep(f.id, null, frame_options);
         try testing.expectEqual(@as(u32, 7), body.kind);
-        try testing.expectEqual(@as(u32, ' '), (try owner.getBuffer(retained)).get(0, 0).?.char);
+        try testing.expectEqual(@as(u32, ' '), (try owner.raw().getBuffer(retained)).get(0, 0).?.char);
         try testing.expect(try owner.drawBufferImage(retained, null, imported, .{ .width = 4, .height = 4 }));
         try owner.sceneSetHooks(node, 0, 2, 4, 4);
         if (destroyed) try owner.sceneDestroyNode(node);

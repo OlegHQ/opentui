@@ -492,12 +492,26 @@ impl Model {
 
 // These small layout helpers use the checked Yoga groups/kinds from opentui.h.
 fn height(node: &Node<'_, '_>, rows: usize) -> Result<()> {
-    node.set_style(4, 1, 0, 1, rows as f32, 1)?;
+    node.set_style(
+        ffi::OT_STYLE_DIMENSION,
+        ffi::OT_DIMENSION_HEIGHT,
+        ffi::OT_EDGE_NONE,
+        ffi::OT_UNIT_POINT,
+        rows as f32,
+        ffi::OT_STYLE_DISABLE_FLEX_SHRINK,
+    )?;
     Ok(())
 }
 
 fn visible(node: &Node<'_, '_>, show: bool) -> Result<()> {
-    node.set_style(0, 9, 0, 0, if show { 0.0 } else { 1.0 }, 0)?;
+    node.set_style(
+        ffi::OT_STYLE_ENUM,
+        ffi::OT_STYLE_ENUM_DISPLAY,
+        ffi::OT_EDGE_NONE,
+        ffi::OT_UNIT_UNDEFINED,
+        if show { ffi::OT_DISPLAY_FLEX } else { ffi::OT_DISPLAY_NONE } as f32,
+        ffi::OT_STYLE_FLAGS_NONE,
+    )?;
     Ok(())
 }
 
@@ -511,8 +525,23 @@ fn child<'s, 'c>(
     let node = Node::new(session, kind, *next)?;
     *next += 1;
     node.mount_at(parent, index)?;
-    node.set_style(2, 2, 0, 1, 0.0, 0)?; // min-width = 0; labels must not force columns wider.
-    node.set_style(2, 3, 0, 1, 0.0, 0)?;
+    // Labels must not force columns wider.
+    node.set_style(
+        ffi::OT_STYLE_VALUE,
+        ffi::OT_STYLE_VALUE_MIN_WIDTH,
+        ffi::OT_EDGE_NONE,
+        ffi::OT_UNIT_POINT,
+        0.0,
+        ffi::OT_STYLE_FLAGS_NONE,
+    )?;
+    node.set_style(
+        ffi::OT_STYLE_VALUE,
+        ffi::OT_STYLE_VALUE_MIN_HEIGHT,
+        ffi::OT_EDGE_NONE,
+        ffi::OT_UNIT_POINT,
+        0.0,
+        ffi::OT_STYLE_FLAGS_NONE,
+    )?;
     if kind == ffi::OT_SCENE_TEXT {
         height(&node, 1)?;
     }
@@ -522,7 +551,7 @@ fn child<'s, 'c>(
 fn paint_box(node: &Node<'_, '_>, border: bool, background: Color) -> Result<()> {
     node.set_paint(&ffi::ot_scene_paint_options {
         opacity: 1.0,
-        border_sides: if border { 15 } else { 0 },
+        border_sides: if border { ffi::OT_BORDER_ALL } else { ffi::OT_BORDER_NONE },
         border_color: BORDER,
         should_fill: 1,
         background,
@@ -546,7 +575,14 @@ impl<'s, 'c> Panel<'s, 'c> {
     fn new(session: &'s Session<'c>, parent: &Node<'_, '_>, index: u32, count: usize, next: &mut u32) -> Result<Self> {
         let node = child(session, parent, ffi::OT_SCENE_BOX, index, next)?;
         paint_box(&node, true, PANEL)?;
-        node.set_style(0, 8, 0, 0, 1.0, 0)?; // Clip children at the panel edge.
+        node.set_style(
+            ffi::OT_STYLE_ENUM,
+            ffi::OT_STYLE_ENUM_OVERFLOW,
+            ffi::OT_EDGE_NONE,
+            ffi::OT_UNIT_UNDEFINED,
+            ffi::OT_OVERFLOW_HIDDEN as f32,
+            ffi::OT_STYLE_FLAGS_NONE,
+        )?;
         let heading = child(session, &node, ffi::OT_SCENE_TEXT, 0, next)?;
         let mut lines = Vec::with_capacity(count);
         for index in 0..count {
@@ -593,12 +629,40 @@ impl<'s, 'c> View<'s, 'c> {
         let tabs = child(session, &root, ffi::OT_SCENE_TEXT, 1, &mut next)?;
         let summary = child(session, &root, ffi::OT_SCENE_TEXT, 2, &mut next)?;
         let body = child(session, &root, ffi::OT_SCENE_BOX, 3, &mut next)?;
-        body.set_style(0, 1, 0, 0, 2.0, 0)?; // Horizontal flex layout.
-        body.set_style(1, 1, 0, 0, 1.0, 0)?;
+        body.set_style(
+            ffi::OT_STYLE_ENUM,
+            ffi::OT_STYLE_ENUM_FLEX_DIRECTION,
+            ffi::OT_EDGE_NONE,
+            ffi::OT_UNIT_UNDEFINED,
+            ffi::OT_FLEX_DIRECTION_ROW as f32,
+            ffi::OT_STYLE_FLAGS_NONE,
+        )?;
+        body.set_style(
+            ffi::OT_STYLE_FLOAT,
+            ffi::OT_STYLE_FLOAT_FLEX_GROW,
+            ffi::OT_EDGE_NONE,
+            ffi::OT_UNIT_UNDEFINED,
+            1.0,
+            ffi::OT_STYLE_FLAGS_NONE,
+        )?;
         let list = Panel::new(session, &body, 0, 64, &mut next)?;
-        list.node.set_style(1, 1, 0, 0, 1.0, 0)?;
+        list.node.set_style(
+            ffi::OT_STYLE_FLOAT,
+            ffi::OT_STYLE_FLOAT_FLEX_GROW,
+            ffi::OT_EDGE_NONE,
+            ffi::OT_UNIT_UNDEFINED,
+            1.0,
+            ffi::OT_STYLE_FLAGS_NONE,
+        )?;
         let inspector = Panel::new(session, &body, 1, 19, &mut next)?;
-        inspector.node.set_style(4, 0, 0, 1, 34.0, 1)?;
+        inspector.node.set_style(
+            ffi::OT_STYLE_DIMENSION,
+            ffi::OT_DIMENSION_WIDTH,
+            ffi::OT_EDGE_NONE,
+            ffi::OT_UNIT_POINT,
+            34.0,
+            ffi::OT_STYLE_DISABLE_FLEX_SHRINK,
+        )?;
         let debug = Panel::new(session, &root, 4, 4, &mut next)?;
         height(&debug.node, 7)?;
         let prompt = child(session, &root, ffi::OT_SCENE_TEXT, 5, &mut next)?;

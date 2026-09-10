@@ -15,7 +15,7 @@ pub fn ot_unicode_destroy(context: ?*abi.ContextHandle, id: ?*const c.ot_handle)
     const status = abi.sessionContextStatus(context);
     if (status != c.OT_OK) return status;
     const handle = abi.handleFromC((id orelse return fail(context, error.InvalidOptions)).*);
-    _ = context.?.core.getUnicode(handle) catch |err| return fail(context, err);
+    _ = context.?.core.raw().getUnicode(handle) catch |err| return fail(context, err);
     context.?.core.destroy(handle) catch |err| return fail(context, err);
     return c.OT_OK;
 }
@@ -24,7 +24,7 @@ pub fn ot_unicode_get(context: ?*abi.ContextHandle, id: ?*const c.ot_handle, cha
     const status = abi.sessionContextStatus(context);
     if (status != c.OT_OK) return status;
     if (id == null or out == null or (capacity != 0 and characters == null)) return fail(context, error.InvalidOptions);
-    const value = context.?.core.getUnicode(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
+    const value = context.?.core.raw().getUnicode(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
     if (capacity != 0 and capacity < value.chars.len) return fail(context, error.BufferTooSmall);
     if (capacity != 0) for (value.chars, 0..) |char, index| {
         characters.?[index] = .{ .width = char.width, .character = char.char };

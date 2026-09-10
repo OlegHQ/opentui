@@ -302,7 +302,7 @@ test "Context image import ABI clones compatibility sources and rejects wrong th
     const thread = try std.Thread.spawn(.{}, Worker.run, .{ context.?, source });
     thread.join();
     try std.testing.expectEqual(c.OT_OK, ot_image_import_compat(context, source, &output));
-    const copied = try context.?.core.getImage(context_abi.handleFromC(output));
+    const copied = try context.?.core.raw().getImage(context_abi.handleFromC(output));
     try std.testing.expect(copied != acquireImage(source).?);
     try std.testing.expectEqual(1, acquireImage(source).?.ref_count);
     imageDestroy(source);

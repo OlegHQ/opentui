@@ -10,7 +10,7 @@ test "Session output copies input and advances only completed prefixes in byte o
     defer owner.deinit() catch unreachable;
     const id = try owner.createSession(small);
     defer owner.cancelSession(id) catch unreachable;
-    const value = try owner.getSession(id);
+    const value = try owner.raw().getSession(id);
     var input = "abcdef".*;
     try owner.writeSession(id, &input);
     try owner.writeSession(id, "Z");
@@ -71,7 +71,7 @@ test "Session completion rejects whole foreign stale and modified tickets includ
     const ticket = (try owner.readOutput(id, &out)).?;
     const sibling_ticket = (try owner.readOutput(sibling, &out)).?;
     const foreign_ticket = (try other.readOutput(foreign, &out)).?;
-    const value = try owner.getSession(id);
+    const value = try owner.raw().getSession(id);
     const before = value.getStats();
     var invalid = [_]session.OutputTicket{ foreign_ticket, sibling_ticket, ticket, ticket, ticket, ticket };
     invalid[2].session.generation += 1;
@@ -116,7 +116,7 @@ test "Session completion rejects whole foreign stale and modified tickets includ
     try testing.expectError(error.StaleHandle, owner.completeOutput(replacement, ticket, .written));
     try testing.expectError(error.WrongSession, owner.completeOutput(replacement, sibling_ticket, .written));
     try testing.expectError(error.WrongContext, owner.completeOutput(replacement, foreign_ticket, .written));
-    try testing.expectEqualDeep(current, (try owner.getSession(replacement)).pending.?);
+    try testing.expectEqualDeep(current, (try owner.raw().getSession(replacement)).pending.?);
     try owner.completeOutput(replacement, current, .written);
     try owner.completeOutput(sibling, sibling_ticket, .written);
     try other.completeOutput(foreign, foreign_ticket, .written);
@@ -128,7 +128,7 @@ test "Session request and byte counters never wrap or consume rejected output" {
         defer owner.deinit() catch unreachable;
         const id = try owner.createSession(small);
         defer owner.cancelSession(id) catch unreachable;
-        const value = try owner.getSession(id);
+        const value = try owner.raw().getSession(id);
         try owner.writeSession(id, "ab");
         value.last_request_id = std.math.maxInt(u64) - @as(u64, @intFromBool(partial));
         var out: [1]u8 = undefined;
@@ -157,7 +157,7 @@ fn createWithAllocationFailures(allocator: std.mem.Allocator) !void {
     const id = try owner.createSession(small);
     defer owner.cancelSession(id) catch unreachable;
     try owner.writeSession(id, "safe");
-    const value = try owner.getSession(id);
+    const value = try owner.raw().getSession(id);
     const before = value.getStats();
     const next = owner.createSession(.{
         .chunk_size = 4,
@@ -174,7 +174,7 @@ fn createWithAllocationFailures(allocator: std.mem.Allocator) !void {
         try owner.completeOutput(id, ticket, .written);
         return err;
     };
-    try testing.expect(value == try owner.getSession(id));
+    try testing.expect(value == try owner.raw().getSession(id));
     try testing.expectEqualDeep(before, value.getStats());
     try owner.destroy(next);
 }
@@ -203,7 +203,7 @@ test "Session creation validates finite limits and unwinds every allocation fail
     const id = try owner.createSession(small);
     defer owner.cancelSession(id) catch unreachable;
     try owner.writeSession(id, "kept");
-    const before = (try owner.getSession(id)).getStats();
+    const before = (try owner.raw().getSession(id)).getStats();
     try testing.expectError(error.ObjectLimit, owner.createSession(small));
-    try testing.expectEqualDeep(before, (try owner.getSession(id)).getStats());
+    try testing.expectEqualDeep(before, (try owner.raw().getSession(id)).getStats());
 }

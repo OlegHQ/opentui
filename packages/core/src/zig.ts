@@ -84,7 +84,13 @@ export type NativeAudioStreamFormat = NativeAudioStreamFormatType
 import { isBunfsPath } from "./lib/bunfs.js"
 import { resolveNativeLibraryPath } from "#opentui/runtime-assets"
 import { allocStruct } from "bun-ffi-structs"
-import { nativeSymbols, nativeCallbacks, nativeLayouts, nativeConstants } from "./native-abi.generated.js"
+import {
+  nativeSymbols,
+  nativeCallbacks,
+  nativeLayouts,
+  nativeConstants,
+  nativeStyleEnumMaxima,
+} from "./native-abi.generated.js"
 
 registerEnvVar({
   name: "OPENTUI_LIBC",
@@ -1165,34 +1171,46 @@ function encodeScenePaint(paint: NativeScenePaint, scratch: ReturnType<typeof cr
   contextBufferColor(paint.focusedBorderColor, colors, layout.fields.focused_border_color.offset / 2)
 }
 
-// Match checked Yoga's kind/enum/unit rules before deferring native admission.
-const sceneStyleEnumMaxima = [2, 3, 5, 8, 8, 8, 2, 2, 2, 1, 1] as const
-
 function validateSceneStyle(group: number, kind: number, edge: number, unit: number, value: number, flags: number) {
-  if (group > 4 || group === 3 || (group !== 4 && flags !== 0) || flags > 1) {
+  const c = nativeConstants
+  if (
+    group > c.OT_STYLE_DIMENSION ||
+    group === c.OT_STYLE_BORDER ||
+    (group !== c.OT_STYLE_DIMENSION && flags !== 0) ||
+    flags > c.OT_STYLE_DISABLE_FLEX_SHRINK
+  ) {
     throw new NativeError("ot_scene_set_style", NativeStatus.InvalidArgument)
   }
-  if ((group === 0 || group === 1) && (edge !== 0 || unit !== 0)) {
+  if (
+    (group === c.OT_STYLE_ENUM || group === c.OT_STYLE_FLOAT) &&
+    (edge !== c.OT_EDGE_NONE || unit !== c.OT_UNIT_UNDEFINED)
+  ) {
     throw new NativeError("ot_scene_set_style", NativeStatus.InvalidArgument)
   }
-  if (group === 4 && edge !== 0) throw new NativeError("ot_scene_set_style", NativeStatus.InvalidArgument)
+  if (group === c.OT_STYLE_DIMENSION && edge !== c.OT_EDGE_NONE)
+    throw new NativeError("ot_scene_set_style", NativeStatus.InvalidArgument)
   let valid = false
   switch (group) {
-    case 0:
-      valid = kind < sceneStyleEnumMaxima.length && value <= sceneStyleEnumMaxima[kind]
+    case c.OT_STYLE_ENUM:
+      valid = kind < nativeStyleEnumMaxima.length && value <= nativeStyleEnumMaxima[kind]
       break
-    case 1:
-      valid = kind <= 3
+    case c.OT_STYLE_FLOAT:
+      valid = kind <= c.OT_STYLE_FLOAT_ASPECT_RATIO
       break
-    case 2:
+    case c.OT_STYLE_VALUE:
       valid =
-        kind <= 10 &&
-        unit <= 3 &&
-        (kind < 7 || edge <= (kind === 10 ? 2 : 8)) &&
-        !(unit === 3 && ((kind >= 2 && kind <= 5) || kind === 8 || kind === 10))
+        kind <= c.OT_STYLE_VALUE_GAP &&
+        unit <= c.OT_UNIT_AUTO &&
+        (kind < c.OT_STYLE_VALUE_MARGIN || edge <= (kind === c.OT_STYLE_VALUE_GAP ? c.OT_GUTTER_ALL : c.OT_EDGE_ALL)) &&
+        !(
+          unit === c.OT_UNIT_AUTO &&
+          ((kind >= c.OT_STYLE_VALUE_MIN_WIDTH && kind <= c.OT_STYLE_VALUE_MAX_HEIGHT) ||
+            kind === c.OT_STYLE_VALUE_PADDING ||
+            kind === c.OT_STYLE_VALUE_GAP)
+        )
       break
-    case 4:
-      valid = kind <= 1 && unit <= 3
+    case c.OT_STYLE_DIMENSION:
+      valid = kind <= c.OT_DIMENSION_HEIGHT && unit <= c.OT_UNIT_AUTO
       break
   }
   if (!valid) throw new NativeError("ot_scene_set_style", NativeStatus.InvalidArgument)
@@ -6570,19 +6588,24 @@ export class FFIRenderLib {
   public sceneGetLayout(
     context: NativeContextHandle,
     node: SceneNodeHandle,
-    rawYoga: boolean | "paint" = false,
+    observation: boolean | "paint" = false,
   ): NativeSceneLayout {
     const layout = nativeLayouts.ot_scene_layout
     const scratch = this.sceneLayoutRecord ?? createSceneLayoutRecord()
     this.sceneLayoutRecord = undefined
     try {
       const handle = encodeContextHandle(context, node, scratch.handle.record, scratch.handle.words)
-      const raw = rawYoga === "paint" ? 2 : toFFIBool(rawYoga, "Scene raw Yoga layout")
+      const mode =
+        observation === "paint"
+          ? nativeConstants.OT_LAYOUT_PAINT
+          : toFFIBool(observation, "Scene Yoga layout observation")
+            ? nativeConstants.OT_LAYOUT_YOGA
+            : nativeConstants.OT_LAYOUT_PUBLIC
       const { output, values, coordinates } = scratch
       output[layout.fields.struct_size.offset / 4] = layout.size
       output[layout.fields.abi_version.offset / 4] = nativeConstants.OT_CONTEXT_ABI_VERSION
       const pointer = this.nativeContextPointer(context, "ot_scene_get_layout")
-      nativeResult("ot_scene_get_layout", this.opentui.symbols.ot_scene_get_layout(pointer, handle, raw, output))
+      nativeResult("ot_scene_get_layout", this.opentui.symbols.ot_scene_get_layout(pointer, handle, mode, output))
       return decodeSceneLayout(values, coordinates)
     } finally {
       this.sceneLayoutRecord ??= scratch

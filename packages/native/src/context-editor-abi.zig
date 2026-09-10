@@ -39,11 +39,11 @@ pub fn record(comptime T: type, ptr: ?*const T) !*const T {
 }
 
 fn edit(owner: *Owner, id: ?*const c.ot_handle) !*ctx.Edit {
-    return owner.core.getEditBuffer(abi.handleFromC((id orelse return error.InvalidOptions).*));
+    return owner.core.raw().getEditBuffer(abi.handleFromC((id orelse return error.InvalidOptions).*));
 }
 
 fn view(owner: *Owner, id: ?*const c.ot_handle) !*ctx.Editor {
-    return owner.core.getEditorView(abi.handleFromC((id orelse return error.InvalidOptions).*));
+    return owner.core.raw().getEditorView(abi.handleFromC((id orelse return error.InvalidOptions).*));
 }
 
 pub const prepareBuffer = ctx.Context.prepareTextBuffer;
@@ -309,7 +309,7 @@ test "Context editor selection query avoids preparation and preserves checked re
     try core.editSetText(buffer, "a\xe4\xb8\xadb\nc", false);
     _ = try core.editorSelect(id, .{ .operation = .set, .start = 1, .end = 3 });
     _ = try core.editorSelect(id, .{ .operation = .occupancy, .occupancy = .boundary });
-    const editor = try core.getEditorView(id);
+    const editor = try core.raw().getEditorView(id);
     const viewport = editor.view.getViewport();
     const arena = editor.view.text_buffer_view.virtual_lines_arena;
     _ = arena.reset(.free_all);
@@ -483,7 +483,7 @@ pub fn ot_edit_buffer_get_highlights(context: ?*Owner, id: ?*const c.ot_handle, 
 pub fn ot_syntax_style_resolve(context: ?*Owner, id: ?*const c.ot_handle, bytes: ?[*]const u8, count: u32, out: ?*u32) callconv(.c) c.ot_status {
     const owner = admit(context, true) catch |err| return fail(context, err);
     if (id == null or out == null or (count != 0 and bytes == null)) return fail(owner, error.InvalidOptions);
-    const value = owner.core.getSyntaxStyle(abi.handleFromC(id.?.*)) catch |err| return fail(owner, err);
+    const value = owner.core.raw().getSyntaxStyle(abi.handleFromC(id.?.*)) catch |err| return fail(owner, err);
     out.?.* = value.resolveByName(if (bytes) |p| p[0..count] else &.{}) orelse 0;
     return c.OT_OK;
 }
@@ -491,7 +491,7 @@ pub fn ot_syntax_style_resolve(context: ?*Owner, id: ?*const c.ot_handle, bytes:
 pub fn ot_syntax_style_get_count(context: ?*Owner, id: ?*const c.ot_handle, out: ?*u32) callconv(.c) c.ot_status {
     const owner = admit(context, true) catch |err| return fail(context, err);
     if (id == null or out == null) return fail(owner, error.InvalidOptions);
-    const value = owner.core.getSyntaxStyle(abi.handleFromC(id.?.*)) catch |err| return fail(owner, err);
+    const value = owner.core.raw().getSyntaxStyle(abi.handleFromC(id.?.*)) catch |err| return fail(owner, err);
     out.?.* = @intCast(value.getStyleCount());
     return c.OT_OK;
 }
@@ -565,8 +565,8 @@ test "Context checked history matches ABI metadata cursor and observer order" {
             try std.testing.expectEqualSlices(ctx.EditEvent, &.{ .cursor_changed, .history_cursor_changed }, events[0..count]);
             try std.testing.expectEqual(error.ContextBusy, probe.rejection.?);
         }
-        const first = (try owner.core.getEditBuffer(direct)).buffer;
-        const second = (try owner.core.getEditBuffer(checked)).buffer;
+        const first = (try owner.core.raw().getEditBuffer(direct)).buffer;
+        const second = (try owner.core.raw().getEditBuffer(checked)).buffer;
         var first_text: [3]u8 = undefined;
         var second_text: [3]u8 = undefined;
         try std.testing.expectEqualStrings(first_text[0..first.getText(&first_text)], second_text[0..second.getText(&second_text)]);
@@ -582,7 +582,7 @@ test "Context editor accepted deletion does not return a later layout allocation
     const edit_id = try owner.core.createEditBuffer(.unicode);
     try owner.core.editSetText(edit_id, "abcdef", false);
     const view_id = try owner.core.createEditorView(edit_id, 4, 2);
-    const editor = try owner.core.getEditorView(view_id);
+    const editor = try owner.core.raw().getEditorView(view_id);
     editor.view.setWrapMode(.char);
     editor.view.setSelection(0, 3, null, null);
     try editor.prepareView();
@@ -688,16 +688,16 @@ test "Context editor transport allocation failures are reported and owned placeh
                 try std.testing.expectEqual(c.OT_OUT_OF_MEMORY, status);
                 if (operation == 0) {
                     try std.testing.expectEqual(99, output);
-                    try std.testing.expectEqual(0, (try owner.core.getSyntaxStyle(style_id)).getStyleCount());
+                    try std.testing.expectEqual(0, (try owner.core.raw().getSyntaxStyle(style_id)).getStyleCount());
                 }
-                if (operation == 1) try std.testing.expect((try owner.core.getEditorView(view_id)).view.placeholder_buffer == null);
-                if (operation == 2) try std.testing.expectEqual(@as(u32, 0), (try owner.core.getEditBuffer(edit_id)).buffer.tb.getHighlightCount());
+                if (operation == 1) try std.testing.expect((try owner.core.raw().getEditorView(view_id)).view.placeholder_buffer == null);
+                if (operation == 2) try std.testing.expectEqual(@as(u32, 0), (try owner.core.raw().getEditBuffer(edit_id)).buffer.tb.getHighlightCount());
             } else {
                 try std.testing.expectEqual(c.OT_OK, status);
                 if (operation == 1) {
                     @memset(&placeholder, 'x');
                     try owner.core.editSetText(edit_id, "", false);
-                    const editor = try owner.core.getEditorView(view_id);
+                    const editor = try owner.core.raw().getEditorView(view_id);
                     try std.testing.expect(editor.view.placeholder_active);
                     var bytes: [4]u8 = undefined;
                     _ = editor.view.placeholder_buffer.?.getPlainTextIntoBuffer(&bytes);

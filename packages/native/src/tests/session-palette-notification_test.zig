@@ -15,7 +15,7 @@ const Fixture = struct {
         errdefer owner.deinit() catch unreachable;
         const id = try owner.createSession(.{ .chunk_size = 4096, .chunk_count = 4, .span_capacity = 4, .control_capacity = 4096 });
         try owner.attachSessionRenderer(id, 4, 2, .{ .remote_mode = .remote });
-        return .{ .owner = owner, .value = try owner.getSession(id) };
+        return .{ .owner = owner, .value = try owner.raw().getSession(id) };
     }
 
     fn deinit(self: *Fixture) void {

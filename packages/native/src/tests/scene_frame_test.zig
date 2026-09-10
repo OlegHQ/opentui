@@ -37,7 +37,7 @@ test "Scene frame authority checks every field in layout update prefix paint and
     const id = try setup(owner);
     const other = try setup(owner);
     const foreign = try setup(peer);
-    const state = (try owner.getSession(id)).scene.?;
+    const state = (try owner.raw().getSession(id)).scene.?;
     const root = state.root.?.scene_node.?.handle;
     try owner.sceneSetHooks(root, 5, 1, 4, 1);
     for (0..2) |index| {
@@ -158,7 +158,7 @@ test "Scene frame cancellation revokes painted and prefix authority but pins scr
         try f.owner.sceneFrameCancel(f.id, frame.frame_id);
         try testing.expectEqual(@as(u32, 2), try f.owner.sceneHitTest(f.id, 0, 0));
         try testing.expectEqual(@as(u32, 0), try f.owner.sceneHitTest(f.id, 1, 0));
-        for ((try f.owner.getSessionRenderer(f.id)).nextHitGrid) |hit| try testing.expectEqual(@as(u32, 0), hit);
+        for ((try f.owner.raw().getSessionRenderer(f.id)).nextHitGrid) |hit| try testing.expectEqual(@as(u32, 0), hit);
         try testing.expectEqual(@as(usize, 0), f.cli.getNextBuffer().scissor_stack.items.len);
         try testing.expectEqual(@as(usize, 0), f.cli.getNextBuffer().opacity_stack.items.len);
         try testing.expectError(error.StaleLease, f.owner.bufferLeaseSnapshot(lease));
@@ -175,8 +175,8 @@ test "Scene frame cancellation revokes painted and prefix authority but pins scr
         try testing.expectError(error.StaleFrame, f.owner.renderSession(f.id, true));
         const retained = try f.owner.createBuffer(4, 1, .{});
         try f.owner.drawBufferText(retained, "safe", 0, 0, .{ 255, 255, 255, 255 }, null, 0);
-        const commits = [_]@import("../renderer.zig").SplitSnapshot{.{ .snapshot = try f.owner.getBuffer(retained), .row_columns = 4 }};
-        try testing.expectEqual(.pending, try (try f.owner.getSession(f.id)).renderSplit(null, &commits, 0, true));
+        const commits = [_]@import("../renderer.zig").SplitSnapshot{.{ .snapshot = try f.owner.raw().getBuffer(retained), .row_columns = 4 }};
+        try testing.expectEqual(.pending, try (try f.owner.raw().getSession(f.id)).renderSplit(null, &commits, 0, true));
         var bytes: [4096]u8 = undefined;
         var length: usize = 0;
         while (try f.owner.readOutput(f.id, bytes[length..])) |ticket| {
@@ -260,7 +260,7 @@ test "Scene painted commit admission rejection retains the draft for retry" {
     try testing.expectError(error.SplitRenderPending, f.owner.sceneFrameCommit(f.id, frame, true));
     f.cli.splitBatchActive = false;
     try testing.expectError(error.FrameBusy, f.owner.renderSession(f.id, true));
-    try testing.expectEqual(@as(u64, 0), (try f.owner.getSession(f.id)).getStats().bytes_written);
+    try testing.expectEqual(@as(u64, 0), (try f.owner.raw().getSession(f.id)).getStats().bytes_written);
     _ = try f.owner.sceneFrameCommit(f.id, frame, true);
     try drain(f.owner, f.id);
 }
@@ -290,7 +290,7 @@ test "Scene commit statuses consume normal and split drafts but earlier pending 
             });
             defer f.deinit();
             defer f.owner.cancelSession(f.id) catch unreachable;
-            const value = try f.owner.getSession(f.id);
+            const value = try f.owner.raw().getSession(f.id);
             if (expected == .presented) {
                 const initial = try f.owner.scenePaint(f.id, options.background, true, 0);
                 _ = try f.owner.sceneFrameCommit(f.id, initial, true);
@@ -324,7 +324,7 @@ test "Scene commit statuses consume normal and split drafts but earlier pending 
 }
 
 fn prefix(owner: *context.Context, id: context.Handle) !context.Handle {
-    const root = (try owner.getSession(id)).scene.?.root.?.scene_node.?.handle;
+    const root = (try owner.raw().getSession(id)).scene.?.root.?.scene_node.?.handle;
     const child = try owner.sceneCreateNode(id, 1, 2);
     try owner.sceneSetStyle(child, 4, 0, 0, 1, 1, 1);
     try owner.sceneSetHooks(child, 8 | 16, 1, 1, 1);
@@ -424,10 +424,10 @@ test "Scene idle update metadata keeps the native one call path and excludes hos
     try testing.expectEqual(@as(u32, 0), f.state.hook_count);
     try testing.expectEqual(@as(u32, 0), f.state.layout_hook_count);
     try testing.expectError(error.InvalidOptions, f.owner.sceneSetHooks(child, 65, 2, 0, 0));
-    try testing.expectEqual(@as(u64, 1), (try f.owner.getRenderable(child)).scene_node.?.hook_generation);
+    try testing.expectEqual(@as(u64, 1), (try f.owner.raw().getRenderable(child)).scene_node.?.hook_generation);
     const frame = try f.step(null, options, 0, null);
     try testing.expectEqual(@as(usize, 0), f.state.feedback.capacity);
-    for ([_]context.Handle{ f.root, child }) |node| try testing.expectEqual(frame.frame_id, (try f.owner.getRenderable(node)).scene_node.?.update_frame);
+    for ([_]context.Handle{ f.root, child }) |node| try testing.expectEqual(frame.frame_id, (try f.owner.raw().getRenderable(node)).scene_node.?.update_frame);
     try f.owner.sceneFrameCancel(f.id, frame.frame_id);
     _ = try f.owner.scenePaint(f.id, options.background, true, 0);
     try f.owner.sceneSetHooks(child, 64 | 8, 2, 0, 0);

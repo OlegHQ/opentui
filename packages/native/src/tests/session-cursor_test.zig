@@ -168,7 +168,7 @@ test "Session cursor ABI accepts copied unaligned updates and rejects malformed 
     const bytes = storage[1..];
     @memcpy(bytes, std.mem.asBytes(&update));
     try testing.expectEqual(c.OT_OK, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, bytes.len));
-    const cli = try owner.getSessionRenderer(id);
+    const cli = try owner.raw().getSessionRenderer(id);
     const accepted = cli.terminal.state;
     try testing.expectEqual(@as(u32, 4), accepted.cursor.x);
     try testing.expectEqual(@as(u32, 2), accepted.cursor.y);
@@ -176,7 +176,7 @@ test "Session cursor ABI accepts copied unaligned updates and rejects malformed 
     try testing.expectEqual(.underline, accepted.cursor.style);
     try testing.expectEqual(.crosshair, accepted.mouse_pointer);
     try testing.expectEqualDeep(update.color, accepted.cursor.color);
-    const stats = (try owner.getSession(id)).getStats();
+    const stats = (try owner.raw().getSession(id)).getStats();
     for ([_]u32{ 0, 23, 25 }) |len| {
         try testing.expectEqual(c.OT_INVALID_ARGUMENT, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, len));
     }
@@ -186,7 +186,7 @@ test "Session cursor ABI accepts copied unaligned updates and rejects malformed 
         bytes[invalid[0]] = invalid[1];
         try testing.expectEqual(c.OT_INVALID_ARGUMENT, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, bytes.len));
         try testing.expectEqualDeep(accepted, cli.terminal.state);
-        try testing.expectEqualDeep(stats, (try owner.getSession(id)).getStats());
+        try testing.expectEqualDeep(stats, (try owner.raw().getSession(id)).getStats());
     }
     @memset(bytes, 0);
     bytes[0] = c.OT_CURSOR_BLINKING;

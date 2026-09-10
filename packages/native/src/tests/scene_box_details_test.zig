@@ -52,7 +52,7 @@ test "Scene box details rejects invalid replacement before publication" {
     const oversized = "a" ** (buffer.text_bytes_max + 1);
     try testing.expectError(error.TextLimit, owner.sceneSetBoxDetails(fixture.box, .{ .title = oversized }));
     try repaint(owner, fixture.session, options.background, true, 0);
-    try expectRow((try owner.getSessionRenderer(fixture.session)).getNextBuffer(), 0, "A-old------B");
+    try expectRow((try owner.raw().getSessionRenderer(fixture.session)).getNextBuffer(), 0, "A-old------B");
 }
 
 test "Scene box details allocation failure preserves old titles and releases replacements" {
@@ -70,7 +70,7 @@ test "Scene box details allocation failure preserves old titles and releases rep
             try testing.expectEqual(error.OutOfMemory, err);
             failures += 1;
             try repaint(owner, fixture.session, options.background, true, 0);
-            const target = (try owner.getSessionRenderer(fixture.session)).getNextBuffer();
+            const target = (try owner.raw().getSessionRenderer(fixture.session)).getNextBuffer();
             try expectRow(target, 0, "A-old------B");
             try expectRow(target, 2, "C-old------D");
         }
@@ -108,7 +108,7 @@ test "Scene box details prefix replacement destruction cancellation and teardown
         }
         const after = try owner.sceneFrameStep(fixture.session, before, options);
         try testing.expectEqual(@as(u32, 5), after.kind);
-        const target = (try owner.getSessionRenderer(fixture.session)).getNextBuffer();
+        const target = (try owner.raw().getSessionRenderer(fixture.session)).getNextBuffer();
         try expectRow(target, 0, "A-new------B");
         try expectRow(target, 2, "C-end------D");
         try testing.expectEqual(@as(u32, 0), (try owner.sceneFrameStep(fixture.session, after, options)).kind);
@@ -122,8 +122,8 @@ test "Scene box details checked title draw reports allocation failure and defaul
     try owner.resizeSessionRenderer(fixture.session, 5000, 5);
     try owner.sceneSetStyle(fixture.box, 4, 0, 0, 1, 5000, 1);
     try repaint(owner, fixture.session, options.background, true, 0);
-    const state = (try owner.getSession(fixture.session)).scene.?;
-    const target = (try owner.getSessionRenderer(fixture.session)).getNextBuffer();
+    const state = (try owner.raw().getSession(fixture.session)).scene.?;
+    const target = (try owner.raw().getSessionRenderer(fixture.session)).getNextBuffer();
     var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
     const allocator = target.allocator;
     target.allocator = failing.allocator();
@@ -156,7 +156,7 @@ test "Scene box details checked drawing allocation failures release title graphe
             const fixture = try setup(owner);
             try repaint(owner, fixture.session, options.background, true, 0);
             try owner.sceneSetBoxDetails(fixture.box, .{ .title = "e\u{301}", .bottom_title = "\u{4e16}" });
-            try owner.sceneFrameCancel(fixture.session, (try owner.getSession(fixture.session)).scene.?.last_frame_id);
+            try owner.sceneFrameCancel(fixture.session, (try owner.raw().getSession(fixture.session)).scene.?.last_frame_id);
             var before: ?scene.FrameRequest = null;
             if (prefix) {
                 try owner.sceneSetHooks(fixture.box, 8, 1, 12, 3);
@@ -170,7 +170,7 @@ test "Scene box details checked drawing allocation failures release title graphe
             failing.resize_fail_index = std.math.maxInt(usize);
             if (result) |_| break else |err| {
                 try testing.expectEqual(error.OutOfMemory, err);
-                const state = (try owner.getSession(fixture.session)).scene.?;
+                const state = (try owner.raw().getSession(fixture.session)).scene.?;
                 try testing.expect(state.attempt == null and state.prefix == null);
                 failures += 1;
             }

@@ -14,7 +14,7 @@ test "Session painted snapshot copy replaces transparent cells and retains refer
     defer owner.cancelSession(handle) catch unreachable;
     try owner.attachSessionRenderer(handle, 8, 1, .{ .remote_mode = .remote, .forwarded_env = &.{} });
     _ = try owner.sceneCreateNode(handle, 0, 1);
-    const value = try owner.getSession(handle);
+    const value = try owner.raw().getSession(handle);
     const frame = try owner.sceneFrameStep(handle, null, .{
         .background = .{ 0, 0, 0, 0 },
         .use_mouse = false,
@@ -23,7 +23,7 @@ test "Session painted snapshot copy replaces transparent cells and retains refer
         .max_host_requests = 64,
     });
     const source = value.renderer.?.getNextBuffer();
-    const target = try owner.getBuffer(try owner.createBuffer(8, 1, .{}));
+    const target = try owner.raw().getBuffer(try owner.createBuffer(8, 1, .{}));
     const link = try owner.links.acquire("https://snapshot.example");
     defer owner.links.decref(link) catch unreachable;
     const fg = ansi.rgbColor(17, 34, 51, 128);
@@ -56,12 +56,12 @@ test "Session split output rejects pressure without mutating image snapshots" {
     const handle = try owner.createSession(.{ .chunk_size = 4096, .chunk_count = 2, .span_capacity = 2 });
     defer owner.cancelSession(handle) catch unreachable;
     try owner.attachSessionRenderer(handle, 8, 2, .{ .remote_mode = .remote, .forwarded_env = &.{} });
-    const value = try owner.getSession(handle);
+    const value = try owner.raw().getSession(handle);
     const buffer_handle = try owner.createBuffer(8, 1, .{});
-    const snapshot = try owner.getBuffer(buffer_handle);
+    const snapshot = try owner.raw().getBuffer(buffer_handle);
     const decoded = try image.createFromRgba(testing.allocator, &.{ 255, 0, 0, 255 }, 1, 1, 4);
     defer decoded.deinit();
-    const pixels = try owner.getImage(try owner.importImage(decoded));
+    const pixels = try owner.raw().getImage(try owner.importImage(decoded));
     try testing.expect(try snapshot.drawImage(pixels, 1, 0, 0, 8, 1, 0, 0, 0, 0, 1, 1, .kitty));
     const before = snapshot.buffer.char[0..8].*;
     const refs = pixels.ref_count;
@@ -88,14 +88,14 @@ test "Session snapshot-only output preserves footer cells and invalidates the ne
     const handle = try owner.createSession(.{});
     defer owner.cancelSession(handle) catch unreachable;
     try owner.attachSessionRenderer(handle, 8, 1, .{ .remote_mode = .remote, .forwarded_env = &.{} });
-    const value = try owner.getSession(handle);
+    const value = try owner.raw().getSession(handle);
     const cli = value.renderer.?;
     try cli.getNextBuffer().drawTextChecked("footer", 0, 0, ansi.rgbColor(255, 255, 255, 255), null, 0);
     _ = try value.render(true);
     var out: [4096]u8 = undefined;
     while (try owner.readOutput(handle, &out)) |ticket| try owner.completeOutput(handle, ticket, .written);
     try testing.expect(!cli.force_full_repaint);
-    const snapshot = try owner.getBuffer(try owner.createBuffer(8, 1, .{}));
+    const snapshot = try owner.raw().getBuffer(try owner.createBuffer(8, 1, .{}));
     try snapshot.drawTextChecked("snapshot", 0, 0, ansi.rgbColor(255, 255, 255, 255), null, 0);
     const commits = [_]renderer.SplitSnapshot{.{ .snapshot = snapshot, .row_columns = 8 }};
     _ = try value.renderSplit(null, &commits, 5, false);
@@ -111,7 +111,7 @@ fn copyWithAllocationFailures(allocator: std.mem.Allocator, split: bool) !void {
     defer owner.cancelSession(handle) catch unreachable;
     try owner.attachSessionRenderer(handle, 8, 1, .{ .remote_mode = .remote, .forwarded_env = &.{} });
     _ = try owner.sceneCreateNode(handle, 0, 1);
-    const value = try owner.getSession(handle);
+    const value = try owner.raw().getSession(handle);
     const frame = try owner.sceneFrameStep(handle, null, .{
         .background = .{ 0, 0, 0, 255 },
         .use_mouse = false,
@@ -128,7 +128,7 @@ fn copyWithAllocationFailures(allocator: std.mem.Allocator, split: bool) !void {
     cell.attributes = ansi.TextAttributes.setLinkId(0, link);
     source.set(0, 0, cell);
     const target_handle = try owner.createBuffer(8, 1, .{});
-    const target = try owner.getBuffer(target_handle);
+    const target = try owner.raw().getBuffer(target_handle);
     if (split) {
         try context.Context.drawContextBuffer(target, source, 0, 0, .{});
         const commits = [_]renderer.SplitSnapshot{.{ .snapshot = target, .row_columns = 8 }};

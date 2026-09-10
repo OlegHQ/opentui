@@ -1,7 +1,7 @@
 import { spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
 import { RGBA } from "../lib/RGBA.js"
-import { nativeLayouts } from "../native-abi.generated.js"
+import { nativeConstants as c, nativeLayouts, nativeStyleEnumMaxima } from "../native-abi.generated.js"
 import { toArrayBuffer } from "../platform/ffi.js"
 import {
   NATIVE_SCENE_MUTATIONS_MAX,
@@ -44,6 +44,26 @@ function setup(capacity = 4) {
 function symbols() {
   return (lib as any).opentui.symbols as Record<string, (...args: unknown[]) => number>
 }
+
+test("staging enum boundaries match the checked scene vocabulary", () => {
+  const { context, node } = setup()
+  try {
+    const staging = new SceneStaging()
+    for (const [kind, maximum] of nativeStyleEnumMaxima.entries()) {
+      staging.stageStyle(context, node, c.OT_STYLE_ENUM, kind, c.OT_EDGE_NONE, c.OT_UNIT_UNDEFINED, maximum, 0)
+      lib.sceneFlush(context, staging)
+      assert.equal(lib.sceneGetStyle(context, node, c.OT_STYLE_ENUM, kind, c.OT_EDGE_NONE).value, maximum)
+      assert.throws(
+        () =>
+          staging.stageStyle(context, node, c.OT_STYLE_ENUM, kind, c.OT_EDGE_NONE, c.OT_UNIT_UNDEFINED, maximum + 1, 0),
+        NativeError,
+      )
+      assert.equal(staging.styleCount, 0)
+    }
+  } finally {
+    lib.destroyContext(context)
+  }
+})
 
 test("staging encodes every entry kind and applies them in one native admission", () => {
   const { context, node } = setup()

@@ -7,17 +7,9 @@ const renderer = @import("renderer.zig");
 const fail = transport.fail;
 
 pub fn ot_scene_measure_layout(context: ?*abi.ContextHandle, id: ?*const c.ot_handle, root: ?*const c.ot_handle) callconv(.c) c.ot_status {
-    const owner = transport.beginMutation(context) catch |err| return fail(context, err);
-    defer owner.core.mutating = false;
+    const owner = transport.admit(context, false) catch |err| return fail(context, err);
     if (id == null or root == null) return fail(context, error.InvalidOptions);
-    const value = owner.core.getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
-    value.checkRendering() catch |err| return fail(context, err);
-    value.checkFrameIdle() catch |err| return fail(context, err);
-    const attached = value.renderer orelse return fail(context, error.RendererNotAttached);
-    const owned = value.scene orelse return fail(context, error.SceneNotAttached);
-    if (value.frame_end_offset != null or attached.pendingPresentation != null) return fail(context, error.PresentationPending);
-    if (attached.width > std.math.maxInt(i32) or attached.height > std.math.maxInt(i32)) return fail(context, error.InvalidDimensions);
-    owned.measureLayout(&owner.core.objects, attached, abi.handleFromC(root.?.*)) catch |err| return fail(context, err);
+    owner.core.sceneMeasureLayout(abi.handleFromC(id.?.*), abi.handleFromC(root.?.*)) catch |err| return fail(context, err);
     return c.OT_OK;
 }
 
@@ -26,8 +18,8 @@ pub fn ot_scene_frame_copy_buffer(context: ?*abi.ContextHandle, id: ?*const c.ot
     defer owner.core.mutating = false;
     if (id == null or target == null or frame_ptr == null) return fail(context, error.InvalidOptions);
     const frame = abi.frameRequestFromC(frame_ptr.?.*) catch |err| return fail(context, err);
-    const value = owner.core.getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
-    const buffer = owner.core.getBuffer(abi.handleFromC(target.?.*)) catch |err| return fail(context, err);
+    const value = owner.core.raw().getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
+    const buffer = owner.core.raw().getBuffer(abi.handleFromC(target.?.*)) catch |err| return fail(context, err);
     value.copySceneFrame(frame, buffer) catch |err| return fail(context, err);
     return c.OT_OK;
 }
@@ -36,14 +28,14 @@ pub fn ot_session_render_split(context: ?*abi.ContextHandle, id: ?*const c.ot_ha
     const owner = transport.beginMutation(context) catch |err| return fail(context, err);
     defer owner.core.mutating = false;
     if (id == null or out_status == null or out_offset == null or force > 1 or count > session.split_snapshots_max or (count != 0 and snapshots_ptr == null)) return fail(context, error.InvalidOptions);
-    const value = owner.core.getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
+    const value = owner.core.raw().getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
     const frame = if (frame_ptr) |record| abi.frameRequestFromC(record.*) catch |err| return fail(context, err) else null;
     var snapshots: [session.split_snapshots_max]renderer.SplitSnapshot = undefined;
     for (snapshots[0..count], 0..) |*snapshot, index| {
         const record = snapshots_ptr.?[index];
         if (record.flags & ~@as(u32, 3) != 0) return fail(context, error.InvalidOptions);
         snapshot.* = .{
-            .snapshot = owner.core.getBuffer(abi.handleFromC(record.buffer)) catch |err| return fail(context, err),
+            .snapshot = owner.core.raw().getBuffer(abi.handleFromC(record.buffer)) catch |err| return fail(context, err),
             .row_columns = record.row_columns,
             .start_on_new_line = record.flags & 1 != 0,
             .trailing_newline = record.flags & 2 != 0,
@@ -89,7 +81,7 @@ pub fn ot_session_split_control(context: ?*abi.ContextHandle, id: ?*const c.ot_h
         5 => .clear_transition,
         else => unreachable,
     };
-    const value = owner.core.getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
+    const value = owner.core.raw().getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
     out.?.* = value.splitControl(command) catch |err| return fail(context, err);
     return c.OT_OK;
 }
@@ -99,7 +91,7 @@ pub fn ot_session_set_screen(context: ?*abi.ContextHandle, id: ?*const c.ot_hand
     defer owner.core.mutating = false;
     if (id == null or alternate > 1 or byte_count > session.control_packet_bytes_max or (byte_count != 0 and trailing_output == null)) return fail(context, error.InvalidOptions);
     owner.core.checkBufferDimensions(width, height) catch |err| return fail(context, err);
-    const value = owner.core.getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
+    const value = owner.core.raw().getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
     const bytes = if (trailing_output) |ptr| ptr[0..byte_count] else &.{};
     value.setScreen(alternate == 1, width, height, bytes) catch |err| return fail(context, err);
     return c.OT_OK;
@@ -109,8 +101,8 @@ pub fn ot_session_sync_detached(context: ?*abi.ContextHandle, id: ?*const c.ot_h
     const owner = transport.beginMutation(context) catch |err| return fail(context, err);
     defer owner.core.mutating = false;
     if (id == null or parent == null) return fail(context, error.InvalidOptions);
-    const value = owner.core.getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
-    const source = owner.core.getSession(abi.handleFromC(parent.?.*)) catch |err| return fail(context, err);
+    const value = owner.core.raw().getSession(abi.handleFromC(id.?.*)) catch |err| return fail(context, err);
+    const source = owner.core.raw().getSession(abi.handleFromC(parent.?.*)) catch |err| return fail(context, err);
     value.syncDetached(source) catch |err| return fail(context, err);
     return c.OT_OK;
 }
@@ -155,6 +147,13 @@ test "Context output ABI holds mutation ownership through scene measurement call
     try std.testing.expectEqual(@as(?anyerror, error.ContextBusy), probe.rejection);
     try std.testing.expect(!owner.core.mutating and !owner.core.scene_measuring);
     try std.testing.expectEqual(@as(f32, 1), (try owner.core.sceneGetLayout(child, true)).height);
+    probe.calls = 0;
+    try owner.core.sceneMarkDirty(child);
+    try owner.core.sceneMeasureLayout(id, root);
+    try std.testing.expect(probe.calls > 0);
+    try std.testing.expect(probe.mutating);
+    try std.testing.expectEqual(@as(?anyerror, error.ContextBusy), probe.rejection);
+    try std.testing.expect(!owner.core.mutating and !owner.core.scene_measuring);
 }
 
 test "Context output ABI preserves outer mutation ownership on every rejection" {
@@ -227,7 +226,7 @@ test "Context layout-only measurement validates ownership and preserves frame pr
     const session_c = abi.handleToC(id);
     const root_c = abi.handleToC(root);
     const child_c = abi.handleToC(child);
-    const owned = (try core.getSession(id)).scene.?;
+    const owned = (try core.raw().getSession(id)).scene.?;
     const frame_id = owned.last_frame_id;
     try std.testing.expectEqual(c.OT_OK, ot_scene_measure_layout(context, &session_c, &root_c));
     try std.testing.expectEqual(@as(f32, 3), (try core.sceneGetLayout(child, true)).height);

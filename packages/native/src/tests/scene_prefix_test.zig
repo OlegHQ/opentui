@@ -50,7 +50,7 @@ test "Scene prefix and custom self fix prepared membership through reparent reve
                 try testing.expectEqual(@as(f64, 5), (try f.owner.sceneGetLayout(child, false)).screenX);
             }
         }
-        if (flags == 8) try testing.expectEqual(ansi.rgbColor(3, 0, 0, 255), (try f.owner.getSessionRenderer(f.id)).getNextBuffer().get(1, 0).?.bg);
+        if (flags == 8) try testing.expectEqual(ansi.rgbColor(3, 0, 0, 255), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(1, 0).?.bg);
         request = try f.step(request, options, 0, null);
         try f.owner.sceneFrameCancel(f.id, request.frame_id);
         var previous: ?scene.FrameRequest = null;
@@ -70,7 +70,7 @@ test "Scene prefix entered destruction finishes self after and retired hits with
     const f = try Fixture.init(testing.allocator, 8, 1, .{ .output = transport });
     defer f.deinit();
     const child = try box(f.owner, f.id, f.root, 2, 0);
-    const token = (try f.owner.getRenderable(child)).scene_node.?.token;
+    const token = (try f.owner.raw().getRenderable(child)).scene_node.?.token;
     try f.owner.sceneSetHooks(child, 24, 1, 2, 1);
     const before = try f.owner.sceneFrameStep(f.id, null, options);
     try f.owner.sceneSetPaint(child, .{ .background = .{ 200, 0, 0, 255 }, .translateX = 1 });
@@ -120,7 +120,7 @@ test "Scene prefix freezes clip opacity and dimensions but samples live transfor
     try testing.expectEqual(ansi.rgbColor(0, 0, 0, 255), f.cli.getNextBuffer().get(4, 0).?.bg);
     try f.owner.sceneSetPaint(child, .{ .opacity = 1, .translateX = 0, .background = .{ 0, 200, 0, 255 } });
     const done = try f.owner.sceneFrameStep(f.id, request, options);
-    const token = (try f.owner.getRenderable(child)).scene_node.?.token;
+    const token = (try f.owner.raw().getRenderable(child)).scene_node.?.token;
     try testing.expectEqual(token, f.cli.nextHitGrid[1]);
     try testing.expectEqual(token, f.cli.nextHitGrid[2]);
     try testing.expect(f.cli.nextHitGrid[3] != token);
@@ -146,7 +146,7 @@ test "Scene prefix live focus changes the later box border" {
     var request = try f.owner.sceneFrameStep(f.id, null, options);
     try f.owner.sceneSetFocus(child, true);
     request = try f.owner.sceneFrameStep(f.id, request, options);
-    try testing.expectEqual(ansi.rgbColor(0, 200, 0, 255), (try f.owner.getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.fg);
+    try testing.expectEqual(ansi.rgbColor(0, 200, 0, 255), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.fg);
     try f.owner.sceneFrameCancel(f.id, request.frame_id);
 }
 

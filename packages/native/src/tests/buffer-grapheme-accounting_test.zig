@@ -29,7 +29,7 @@ test "grapheme accounting - renderer narrow wide cycles stay within leased track
     defer owner.deinit() catch unreachable;
     const renderer = try owner.createSession(.{ .chunk_size = 4096 });
     try owner.attachSessionRenderer(renderer, 2, 1, .{ .remote_mode = .remote });
-    const value = try owner.getSessionRenderer(renderer);
+    const value = try owner.raw().getSessionRenderer(renderer);
     var output: [4096]u8 = undefined;
     const current = value.getCurrentBuffer();
     const next = value.getNextBuffer();

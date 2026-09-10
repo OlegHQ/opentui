@@ -147,11 +147,11 @@ test "Session owns scene nodes and borrows shared measured text through the publ
     try owner.completeOutput(id, ticket, .written);
 
     try owner.destroy(text_id);
-    try std.testing.expectError(error.StaleHandle, owner.getTextBuffer(text_id));
-    try std.testing.expectError(error.StaleHandle, owner.getTextBufferView(view_id));
-    try std.testing.expect((try owner.getRenderable(node_id)).measure_target == .none);
+    try std.testing.expectError(error.StaleHandle, owner.raw().getTextBuffer(text_id));
+    try std.testing.expectError(error.StaleHandle, owner.raw().getTextBufferView(view_id));
+    try std.testing.expect((try owner.raw().getRenderable(node_id)).measure_target == .none);
     try owner.destroy(id);
-    try std.testing.expectError(error.StaleHandle, owner.getRenderable(node_id));
+    try std.testing.expectError(error.StaleHandle, owner.raw().getRenderable(node_id));
 }
 
 test "Session terminal lifecycle renders and restores through the public Zig pump" {
@@ -174,7 +174,7 @@ test "Session terminal lifecycle renders and restores through the public Zig pum
     @memset(&prefix, '!');
     try owner.attachSessionRenderer(id, 8, 1, .{ .env_map = &environment });
     try owner.setupSessionTerminal(id, .{ .mouse = false });
-    const renderer = try owner.getSessionRenderer(id);
+    const renderer = try owner.raw().getSessionRenderer(id);
     var output: MemorySink = .{};
     var bytes: [13]u8 = undefined;
     var now_ns: u64 = 0;

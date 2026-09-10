@@ -9,11 +9,11 @@ const fail = editor.fail;
 const record = editor.record;
 
 fn text(owner: *Owner, id: ?*const c.ot_handle) !*ctx.SharedText {
-    return owner.core.getTextBuffer(abi.handleFromC((id orelse return error.InvalidOptions).*));
+    return owner.core.raw().getTextBuffer(abi.handleFromC((id orelse return error.InvalidOptions).*));
 }
 
 fn view(owner: *Owner, id: ?*const c.ot_handle) !*ctx.TextView {
-    return owner.core.getTextBufferView(abi.handleFromC((id orelse return error.InvalidOptions).*));
+    return owner.core.raw().getTextBufferView(abi.handleFromC((id orelse return error.InvalidOptions).*));
 }
 
 pub fn ot_text_buffer_create(context: ?*Owner, options: ?*const c.ot_edit_buffer_options, out: ?*c.ot_handle) callconv(.c) c.ot_status {
@@ -462,7 +462,7 @@ test "Context shared text ABI releases provisional linked replacement on allocat
         try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, "kept", 4));
         _ = try owner.core.createTextBufferView(abi.handleFromC(text_id));
         _ = try owner.core.createTextBufferView(abi.handleFromC(text_id));
-        const resource = try owner.core.getTextBuffer(abi.handleFromC(text_id));
+        const resource = try owner.core.raw().getTextBuffer(abi.handleFromC(text_id));
         const epoch = resource.buffer.getContentEpoch();
         const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = 1, .byte_count = 4, .flags = 4, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 0, .link_byte_count = 19 };
         failing.fail_index = failing.alloc_index + failure_offset;
@@ -513,11 +513,11 @@ test "Context shared text batch rejects every allocation failure including the f
             const view_id = try owner.core.createTextBufferView(text_id);
             const handle = abi.handleToC(text_id);
             try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_styled_text(&owner, &handle, "kept", 4, &.{chunk}, 1, "https://example.test/kept", 25));
-            const value = try owner.core.getTextBuffer(text_id);
+            const value = try owner.core.raw().getTextBuffer(text_id);
             roots[index] = value.buffer.rope().root;
             styles[index] = value.buffer.getSyntaxStyle().?;
             epochs[index] = value.buffer.getContentEpoch();
-            (try owner.core.getTextBufferView(view_id)).view.setSelection(0, 1, null, null);
+            (try owner.core.raw().getTextBufferView(view_id)).view.setSelection(0, 1, null, null);
             replacement.* = .{ .struct_size = @sizeOf(c.ot_text_buffer_replacement), .abi_version = 1, .buffer = handle, .view = abi.handleToC(view_id), .byte_offset = @intCast(index * 4), .byte_count = 4, .chunk_offset = @intCast(index), .chunk_count = 1 };
         }
         var output = [_]c.ot_text_buffer_replacement_info{.{ .text_length = 99, .byte_count = 99 }} ** 2;
@@ -530,8 +530,8 @@ test "Context shared text batch rejects every allocation failure including the f
         try std.testing.expectEqual(@as(u64, 1), owner.core.links.getLiveSlotCount());
         try std.testing.expectEqual(failing.has_induced_failure, owner.core.links.interned_live_ids.contains("https://example.test/kept"));
         for (records, 0..) |replacement, index| {
-            const value = try owner.core.getTextBuffer(abi.handleFromC(replacement.buffer));
-            const dependent = try owner.core.getTextBufferView(abi.handleFromC(replacement.view));
+            const value = try owner.core.raw().getTextBuffer(abi.handleFromC(replacement.buffer));
+            const dependent = try owner.core.raw().getTextBufferView(abi.handleFromC(replacement.view));
             var bytes: [4]u8 = undefined;
             _ = value.buffer.getPlainTextIntoBuffer(&bytes);
             if (failing.has_induced_failure) {
@@ -639,7 +639,7 @@ test "Context shared text batch validates identities limits admission and owned 
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_text_buffer_replace_styled_batch(&owner, &records, 2, null, 0, null, 0, null, 0, &output));
     for (records, output) |replacement, info| {
         var bytes: [4]u8 = undefined;
-        const buffer = (try owner.core.getTextBuffer(abi.handleFromC(replacement.buffer))).buffer;
+        const buffer = (try owner.core.raw().getTextBuffer(abi.handleFromC(replacement.buffer))).buffer;
         try std.testing.expectEqualStrings("kept", bytes[0..buffer.getPlainTextIntoBuffer(&bytes)]);
         try std.testing.expectEqual(@as(u32, 99), info.text_length);
         try std.testing.expectEqual(@as(u32, 99), info.byte_count);
@@ -664,7 +664,7 @@ test "Context shared text ABI rejects tab expansion before changing accepted met
     defer std.testing.allocator.free(bytes);
     @memset(bytes, '\t');
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, bytes.ptr, @intCast(bytes.len)));
-    const buffer = (try owner.core.getTextBuffer(abi.handleFromC(text_id))).buffer;
+    const buffer = (try owner.core.raw().getTextBuffer(abi.handleFromC(text_id))).buffer;
     const epoch = buffer.getContentEpoch();
     const length = buffer.getLength();
     try std.testing.expectEqual(@as(u32, 34_000_000), length);
@@ -696,7 +696,7 @@ test "Context shared text ABI rejects cold selection marker allocation before pu
     selection.end = 1;
     var changed: u32 = 99;
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_view_select(&owner, &view_id, &selection, &changed));
-    const resource = try owner.core.getTextBufferView(abi.handleFromC(view_id));
+    const resource = try owner.core.raw().getTextBufferView(abi.handleFromC(view_id));
     const accepted = resource.view.selection;
     const input = (line ++ "\n") ** 2;
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, input, input.len));
@@ -748,13 +748,13 @@ test "Context shared text ABI preserves empty chunk ordinals" {
     chunks[1].foreground = .{ 255, 0, 0, 255 };
     chunks[3] = chunks[1];
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_styled_text(&owner, &text_id, "xy", 2, &chunks, chunks.len, null, 0));
-    const style = try owner.core.getSyntaxStyle(style_id);
+    const style = try owner.core.raw().getSyntaxStyle(style_id);
     try std.testing.expectEqual(null, style.resolveByName("chunk0"));
     try std.testing.expect(style.resolveByName("chunk1") != null);
     try std.testing.expectEqual(null, style.resolveByName("chunk2"));
     try std.testing.expect(style.resolveByName("chunk3") != null);
     try std.testing.expectEqual(null, style.resolveByName("chunk4"));
-    const buffer = (try owner.core.getTextBuffer(abi.handleFromC(text_id))).buffer;
+    const buffer = (try owner.core.raw().getTextBuffer(abi.handleFromC(text_id))).buffer;
     try std.testing.expectEqual(style.resolveByName("chunk1").?, buffer.getLineHighlights(0)[0].style_id);
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_styled_text(&owner, &text_id, null, 0, &.{chunk}, 1, null, 0));
     try std.testing.expectEqual(@as(u32, 0), buffer.getByteSize());
@@ -798,7 +798,7 @@ test "Context shared text ABI selects native paint only for an exact self reques
     frame.request_id -= 1;
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_text_view_paint(&owner, &node, 0));
     try std.testing.expectEqual(c.OT_OK, ot_scene_select_text_view_paint(&owner, &node, &frame, 1));
-    try std.testing.expect(!(try owner.core.getRenderable(node_id)).scene_node.?.control.text_view.paint);
+    try std.testing.expect(!(try owner.core.raw().getRenderable(node_id)).scene_node.?.control.text_view.paint);
     try owner.core.sceneFrameCancel(session_id, frame.frame_id);
     try std.testing.expectEqual(c.OT_STALE_FRAME, ot_scene_select_text_view_paint(&owner, &node, &frame, 1));
 }

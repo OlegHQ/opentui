@@ -19,7 +19,7 @@ test "Session controls gate inactive phases and reject malformed or over-limit i
     const f = try Fixture.initWithOptions(testing.allocator, testing.io, 4, 2, transport, .{ .object_capacity = 2 });
     defer f.deinit();
     const unattached = try f.owner.createSession(transport);
-    try testing.expectError(error.RendererNotAttached, (try f.owner.getSession(unattached)).control(.query_theme_colors));
+    try testing.expectError(error.RendererNotAttached, (try f.owner.raw().getSession(unattached)).control(.query_theme_colors));
     const commands = [_]session.Control{
         .{ .capability_response = "\x1b[?0u" },
         .{ .title = "title" },

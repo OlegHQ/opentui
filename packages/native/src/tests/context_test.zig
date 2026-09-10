@@ -53,7 +53,7 @@ const Callbacks = struct {
 };
 
 fn layout(owner: *context.Context, node: context.Handle) !@import("../scene.zig").Layout {
-    const session = (try owner.getRenderable(node)).scene_node.?.owner.session;
+    const session = (try owner.raw().getRenderable(node)).scene_node.?.owner.session;
     try @import("scene_fixture_test.zig").repaint(owner, session, .{ 0, 0, 0, 255 }, false, 0);
     return owner.sceneGetLayout(node, true);
 }
@@ -73,21 +73,21 @@ test "Session scene teardown releases measure borrowers without destroying share
         try owner.sceneMoveNode(node, root, 0);
         try owner.sceneSetTextView(node, view);
         _ = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
-        const cli = try owner.getSessionRenderer(session);
+        const cli = try owner.raw().getSessionRenderer(session);
         try std.testing.expectEqual(@as(u32, 'o'), cli.getNextBuffer().get(0, 0).?.char);
-        try std.testing.expect((try owner.getTextBufferView(view)).view.measure_dependents != null);
+        try std.testing.expect((try owner.raw().getTextBufferView(view)).view.measure_dependents != null);
 
         try owner.destroy(session);
-        try std.testing.expectError(error.StaleHandle, owner.getRenderable(node));
-        try std.testing.expectError(error.StaleHandle, owner.getRenderable(root));
-        const resource = try owner.getTextBufferView(view);
+        try std.testing.expectError(error.StaleHandle, owner.raw().getRenderable(node));
+        try std.testing.expectError(error.StaleHandle, owner.raw().getRenderable(root));
+        const resource = try owner.raw().getTextBufferView(view);
         try std.testing.expect(resource.node == null);
         try std.testing.expect(resource.view.measure_dependents == null);
         try std.testing.expectEqual(@as(u32, 2), owner.objects.live_count);
         try std.testing.expectEqual(@as(u32, 2), owner.node_pool_count);
     }
     try owner.destroy(text);
-    try std.testing.expectError(error.StaleHandle, owner.getTextBufferView(view));
+    try std.testing.expectError(error.StaleHandle, owner.raw().getTextBufferView(view));
     try std.testing.expectEqual(@as(u32, 0), owner.objects.live_count);
 }
 
@@ -115,15 +115,15 @@ test "Shared text preserves explicit measure providers and never transfers node 
     try std.testing.expectEqual(@as(f32, 2), (try owner.sceneGetLayout(node, true)).height);
     try owner.destroy(second);
     try std.testing.expect(try owner.sceneHasMeasure(node));
-    try std.testing.expect((try owner.getRenderable(node)).scene_node.?.control.text_view.view == null);
+    try std.testing.expect((try owner.raw().getRenderable(node)).scene_node.?.control.text_view.view == null);
     try owner.sceneSetMeasure(node, null);
     try owner.sceneSetTextView(node, first);
     try owner.sceneDestroyNode(node);
-    try std.testing.expect((try owner.getTextBufferView(first)).node == null);
+    try std.testing.expect((try owner.raw().getTextBufferView(first)).node == null);
     const replacement = try owner.sceneCreateNode(f.id, 7, 3);
     try owner.sceneSetTextView(replacement, first);
     try owner.destroy(text);
-    try std.testing.expect((try owner.getRenderable(replacement)).scene_node.?.control.text_view.view == null);
+    try std.testing.expect((try owner.raw().getRenderable(replacement)).scene_node.?.control.text_view.view == null);
     try std.testing.expect(!(try owner.sceneHasMeasure(replacement)));
 }
 
@@ -138,13 +138,13 @@ test "Shared text pending paint retains native geometry viewport and hits" {
     try owner.sceneMoveNode(node, f.root, 0);
     try owner.sceneSetStyle(node, 4, 0, 0, 1, 4, 1);
     try owner.sceneSetStyle(node, 4, 1, 0, 1, 2, 1);
-    (try owner.getTextBufferView(view)).view.setWrapMode(.char);
+    (try owner.raw().getTextBufferView(view)).view.setWrapMode(.char);
     try owner.textBufferSetText(text, "abcdef");
     try owner.sceneSetTextViewPaint(node, false);
     try @import("scene_fixture_test.zig").repaint(owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
     try std.testing.expectEqual(@as(u32, ' '), f.cli.getNextBuffer().get(0, 0).?.char);
-    try std.testing.expectEqual((try owner.getRenderable(node)).scene_node.?.token, f.cli.nextHitGrid[0]);
-    const resource = try owner.getTextBufferView(view);
+    try std.testing.expectEqual((try owner.raw().getRenderable(node)).scene_node.?.token, f.cli.nextHitGrid[0]);
+    const resource = try owner.raw().getTextBufferView(view);
     try std.testing.expectEqual(@as(u32, 4), resource.view.getViewport().?.width);
     try std.testing.expectEqual(@as(u32, 2), resource.view.getVirtualLineCount());
     try owner.sceneSetTextViewPaint(node, true);
@@ -153,7 +153,7 @@ test "Shared text pending paint retains native geometry viewport and hits" {
     try std.testing.expectEqual(@as(u32, 'e'), f.cli.getNextBuffer().get(0, 1).?.char);
     const target = try owner.createBuffer(6, 3, .{});
     try owner.drawTextBufferView(target, null, view, 1, 1);
-    try std.testing.expectEqual(@as(u32, 'a'), (try owner.getBuffer(target)).get(1, 1).?.char);
+    try std.testing.expectEqual(@as(u32, 'a'), (try owner.raw().getBuffer(target)).get(1, 1).?.char);
     try owner.drawTextBufferView(target, null, view, std.math.maxInt(i32), 0);
     try owner.drawTextBufferView(target, null, view, std.math.minInt(i32), std.math.minInt(i32));
     try std.testing.expectError(error.WrongKind, owner.drawTextBufferView(f.id, null, view, 0, 0));
@@ -197,19 +197,19 @@ test "Context stored controls preserve source across text mutations" {
             const stored = switch (mutation) {
                 .set => blk: {
                     try owner.textBufferSetText(text, source);
-                    break :blk (try owner.getTextBuffer(text)).buffer;
+                    break :blk (try owner.raw().getTextBuffer(text)).buffer;
                 },
                 .append => blk: {
                     try owner.textBufferSetText(text, source[0..1]);
                     try owner.textBufferAppend(text, source[1..]);
-                    break :blk (try owner.getTextBuffer(text)).buffer;
+                    break :blk (try owner.raw().getTextBuffer(text)).buffer;
                 },
                 .styled => blk: {
                     try owner.textBufferSetStyledText(text, source, &.{
                         .{ .byte_count = 1, .attributes = 1 },
                         .{ .byte_count = source.len - 1, .attributes = 2 },
                     });
-                    break :blk (try owner.getTextBuffer(text)).buffer;
+                    break :blk (try owner.raw().getTextBuffer(text)).buffer;
                 },
             };
             var bytes: [source.len]u8 = undefined;
@@ -234,10 +234,10 @@ test "Context stored controls do not relax UTF8 size editing or direct output va
         try std.testing.expectError(error.InvalidUnicode, owner.editSetText(edit, invalid, false));
         try std.testing.expectError(error.InvalidUnicode, owner.editInsertText(edit, invalid));
     }
-    const stored = (try owner.getTextBuffer(text)).buffer;
+    const stored = (try owner.raw().getTextBuffer(text)).buffer;
     var bytes: [kept.len]u8 = undefined;
     try std.testing.expectEqualStrings(kept, bytes[0..stored.getPlainTextIntoBuffer(&bytes)]);
-    try std.testing.expectEqualStrings("AB", bytes[0..(try owner.getEditBuffer(edit)).buffer.getText(&bytes)]);
+    try std.testing.expectEqualStrings("AB", bytes[0..(try owner.raw().getEditBuffer(edit)).buffer.getText(&bytes)]);
     const bytes_max = (std.math.maxInt(u32) - 1) / @as(u32, @max(stored.tabWidth(), 1));
     try context.Context.validateTextBytes(stored, &document_controls, bytes_max - @as(u32, document_controls.len));
     try std.testing.expectError(error.TextLimit, context.Context.validateTextBytes(stored, &document_controls, bytes_max - @as(u32, document_controls.len) + 1));
@@ -251,7 +251,7 @@ test "Context stored controls do not relax UTF8 size editing or direct output va
         try std.testing.expectError(error.InvalidUnicode, owner.editSetText(edit, control, false));
         try std.testing.expectError(error.InvalidUnicode, owner.editInsertText(edit, control));
     }
-    try std.testing.expectEqualStrings("AB", bytes[0..(try owner.getEditBuffer(edit)).buffer.getText(&bytes)]);
+    try std.testing.expectEqualStrings("AB", bytes[0..(try owner.raw().getEditBuffer(edit)).buffer.getText(&bytes)]);
 }
 
 test "Context stored controls have printable-equivalent framebuffer and terminal output" {
@@ -280,7 +280,7 @@ test "Context stored controls have printable-equivalent framebuffer and terminal
             defer expected.deinit();
             for ([_]*TestRenderer{ &actual, &expected }, [_][]const u8{ case.source, case.printable }) |fixture, source| {
                 const text = try owner.createTextBuffer(method);
-                const view = try owner.getTextBufferView(try owner.createTextBufferView(text));
+                const view = try owner.raw().getTextBufferView(try owner.createTextBufferView(text));
                 try owner.textBufferSetText(text, source);
                 view.view.setWrapMode(case.wrap);
                 view.view.setViewport(.{ .x = case.x, .y = 0, .width = case.width, .height = 4 });
@@ -315,7 +315,7 @@ test "Shared text append copies bytes and keeps styled content on rejection" {
             const text = try owner.createTextBuffer(.unicode);
             _ = try owner.createTextBufferView(text);
             try owner.textBufferSetStyledText(text, "kept", &.{.{ .byte_count = 4, .attributes = 1 }});
-            const resource = try owner.getTextBuffer(text);
+            const resource = try owner.raw().getTextBuffer(text);
             const epoch = resource.buffer.getContentEpoch();
             const style = resource.owned_style;
             const slots = resource.buffer.memRegistry().getUsedSlots();
@@ -340,7 +340,7 @@ test "Shared text append copies bytes and keeps styled content on rejection" {
     for (0..300) |_| {
         try owner.textBufferAppend(text, "append");
         try owner.textBufferSetText(text, "");
-        try std.testing.expectEqual(@as(usize, 1), (try owner.getTextBuffer(text)).buffer.memRegistry().getUsedSlots());
+        try std.testing.expectEqual(@as(usize, 1), (try owner.raw().getTextBuffer(text)).buffer.memRegistry().getUsedSlots());
     }
 }
 
@@ -458,7 +458,7 @@ test "Shared text rejects styled replacement without publishing explicit style c
             const owner = try context.Context.init(allocator, std.testing.io, .{ .object_capacity = 8 });
             defer owner.deinit() catch unreachable;
             const style_handle = try owner.createSyntaxStyle();
-            const style = try owner.getSyntaxStyle(style_handle);
+            const style = try owner.raw().getSyntaxStyle(style_handle);
             const red = ansi.rgbColor(255, 0, 0, 255);
             const chunk = try style.registerStyle("chunk0", red, null, 0);
             const text = try owner.createTextBuffer(.unicode);
@@ -466,14 +466,14 @@ test "Shared text rejects styled replacement without publishing explicit style c
             try owner.textBufferSetSyntaxStyle(text, style_handle);
             try owner.textBufferSetSyntaxStyle(alias, style_handle);
             try owner.textBufferSetText(text, "accepted");
-            const resource = try owner.getTextBuffer(text);
+            const resource = try owner.raw().getTextBuffer(text);
             const epoch = resource.buffer.getContentEpoch();
             owner.textBufferSetStyledText(text, "new!", &.{ .{ .byte_count = 3, .attributes = 1 }, .{ .byte_count = 1, .attributes = 2, .link_url = "https://example.com/prepared" } }) catch |err| {
                 var bytes: [16]u8 = undefined;
                 try std.testing.expectEqualStrings("accepted", bytes[0..resource.buffer.getPlainTextIntoBuffer(&bytes)]);
                 try std.testing.expectEqual(epoch, resource.buffer.getContentEpoch());
                 try std.testing.expectEqual(style, resource.buffer.getSyntaxStyle().?);
-                try std.testing.expectEqual(style, (try owner.getTextBuffer(alias)).buffer.getSyntaxStyle().?);
+                try std.testing.expectEqual(style, (try owner.raw().getTextBuffer(alias)).buffer.getSyntaxStyle().?);
                 try std.testing.expectEqual(red, style.resolveById(chunk).?.fg.?);
                 try std.testing.expectEqual(@as(u32, 2), style.next_id);
                 try std.testing.expectEqual(@as(usize, 1), style.getStyleCount());
@@ -485,7 +485,7 @@ test "Shared text rejects styled replacement without publishing explicit style c
             try std.testing.expectEqual(@as(u32, 1), style.resolveById(chunk).?.attributes);
             try owner.destroy(style_handle);
             try std.testing.expect(resource.buffer.getSyntaxStyle() == null);
-            try std.testing.expect((try owner.getTextBuffer(alias)).buffer.getSyntaxStyle() == null);
+            try std.testing.expect((try owner.raw().getTextBuffer(alias)).buffer.getSyntaxStyle() == null);
         }
     };
     try std.testing.checkAllAllocationFailures(std.testing.allocator, Probe.run, .{});
@@ -495,7 +495,7 @@ test "Shared text explicit styles retain linked definitions for surviving aliase
     const owner = try context.Context.init(std.testing.allocator, std.testing.io, .{});
     defer owner.deinit() catch unreachable;
     const style_handle = try owner.createSyntaxStyle();
-    const style = try owner.getSyntaxStyle(style_handle);
+    const style = try owner.raw().getSyntaxStyle(style_handle);
     const text = try owner.createTextBuffer(.unicode);
     const alias = try owner.createTextBuffer(.unicode);
     const view = try owner.createTextBufferView(alias);
@@ -505,12 +505,12 @@ test "Shared text explicit styles retain linked definitions for surviving aliase
     const chunk = style.resolveByName("chunk0").?;
     const id = ansi.TextAttributes.getLinkId(style.resolveById(chunk).?.attributes);
     try owner.textBufferSetText(alias, "alias");
-    try (try owner.getTextBuffer(alias)).buffer.addHighlight(0, 0, 5, chunk, 1, 0);
+    try (try owner.raw().getTextBuffer(alias)).buffer.addHighlight(0, 0, 5, chunk, 1, 0);
     try owner.destroy(text);
     try std.testing.expectEqualStrings("https://example.com/retained", try owner.links.get(id));
     const target = try owner.createBuffer(5, 1, .{});
     try owner.drawTextBufferView(target, null, view, 0, 0);
-    try std.testing.expectEqual(id, ansi.TextAttributes.getLinkId((try owner.getBuffer(target)).get(0, 0).?.attributes));
+    try std.testing.expectEqual(id, ansi.TextAttributes.getLinkId((try owner.raw().getBuffer(target)).get(0, 0).?.attributes));
     try owner.textBufferSetStyledText(alias, "clear", &.{.{ .byte_count = 5 }});
     try std.testing.expectEqual(@as(u32, 0), ansi.TextAttributes.getLinkId(style.resolveById(chunk).?.attributes));
     try owner.clearBuffer(target, ansi.rgbColor(0, 0, 0, 0));
@@ -521,7 +521,7 @@ test "Context checked history treats empty undo and redo as no changes" {
     const owner = try context.Context.init(std.testing.allocator, std.testing.io, .{});
     defer owner.deinit() catch unreachable;
     const edit = try owner.createEditBuffer(.unicode);
-    const resource = (try owner.getEditBuffer(edit)).buffer;
+    const resource = (try owner.raw().getEditBuffer(edit)).buffer;
     const epoch = resource.tb.getContentEpoch();
     for ([_]bool{ true, false }) |redo| {
         try std.testing.expectEqualStrings("", try owner.editHistory(edit, redo));
@@ -554,18 +554,18 @@ test "Context checked style replacement invalidates shared text and editor depen
     try owner.textBufferSetStyledText(text, "new", &.{.{ .byte_count = 3, .attributes = 1 }});
     for ([_]context.Handle{ text_node, edit_node }) |handle| {
         var dirty: u32 = 0;
-        try yoga.check(yoga.yogaNodeIsDirtyChecked((try owner.getRenderable(handle)).yoga_node, &dirty));
+        try yoga.check(yoga.yogaNodeIsDirtyChecked((try owner.raw().getRenderable(handle)).yoga_node, &dirty));
         try std.testing.expectEqual(@as(u32, 1), dirty);
     }
     _ = try layout(owner, text_node);
-    const resource = try owner.getSyntaxStyle(style);
+    const resource = try owner.raw().getSyntaxStyle(style);
     const chunk_id = resource.resolveByName("chunk0").?;
     try std.testing.expectEqual(@as(u32, 1), (try resource.mergeStyles(&.{chunk_id})).attributes);
     try std.testing.expectEqual(chunk_id, try owner.syntaxStyleRegister(style, "chunk0", .{ .fg = null, .bg = null, .attributes = 2 }));
     try std.testing.expectEqual(@as(u32, 2), (try resource.mergeStyles(&.{chunk_id})).attributes);
     for ([_]context.Handle{ text_node, edit_node }) |handle| {
         var dirty: u32 = 0;
-        try yoga.check(yoga.yogaNodeIsDirtyChecked((try owner.getRenderable(handle)).yoga_node, &dirty));
+        try yoga.check(yoga.yogaNodeIsDirtyChecked((try owner.raw().getRenderable(handle)).yoga_node, &dirty));
         try std.testing.expectEqual(@as(u32, 1), dirty);
     }
 }
@@ -647,7 +647,7 @@ test "Context editors preserve custom and empty measure slots through binding an
     try std.testing.expectEqual(@as(f32, 2), (try owner.sceneGetLayout(node, true)).height);
     try owner.destroy(other);
     try std.testing.expect(try owner.sceneHasMeasure(node));
-    try std.testing.expect((try owner.getRenderable(node)).scene_node.?.editor == null);
+    try std.testing.expect((try owner.raw().getRenderable(node)).scene_node.?.editor == null);
     try owner.sceneSetMeasure(node, null);
     try owner.sceneSetEditorView(node, view);
     try owner.editInsertText(edit, "!");
@@ -668,7 +668,7 @@ test "Context scene measurement rejection preserves the native provider on alloc
         try owner.attachSessionRenderer(session, 8, 2, .{ .remote_mode = .remote });
         _ = try owner.sceneCreateNode(session, 0, 1);
         const text = try owner.sceneCreateNode(session, 2, 2);
-        const node = try owner.getRenderable(text);
+        const node = try owner.raw().getRenderable(text);
         const view = node.measure_target.text_buffer_view;
         failing.fail_index = failing.alloc_index + offset;
         try std.testing.expectError(error.OutOfMemory, owner.sceneSetMeasure(text, &Probe.measure));
@@ -699,7 +699,7 @@ test "Context scene measurement text queries preserve viewport and measurement c
         }
 
         fn check() !void {
-            const text = (try owner.getRenderable(node)).scene_node.?.text.?;
+            const text = (try owner.raw().getRenderable(node)).scene_node.?.text.?;
             const viewport = text.view.getViewport();
             const wrap_width = text.view.wrap_width;
             const measured = try text.view.measureForDimensions(3, 2);
@@ -719,7 +719,7 @@ test "Context scene measurement text queries preserve viewport and measurement c
             try std.testing.expectError(error.ContextBusy, owner.sceneSetText(node, "rejected"));
             try std.testing.expectError(error.ContextBusy, owner.sceneDestroyNode(node));
             try std.testing.expectError(error.ContextBusy, owner.sceneMarkDirty(node));
-            try std.testing.expectError(error.ContextBusy, owner.sceneGetStats((try owner.getRenderable(node)).scene_node.?.owner.session));
+            try std.testing.expectError(error.ContextBusy, owner.sceneGetStats((try owner.raw().getRenderable(node)).scene_node.?.owner.session));
         }
     };
     const f = try Fixture.init(std.testing.allocator, 8, 4, .{ .output = .{} });
@@ -727,7 +727,7 @@ test "Context scene measurement text queries preserve viewport and measurement c
     const owner = f.owner;
     const text = try owner.sceneCreateNode(f.id, 2, 2);
     try owner.sceneSetText(text, "one two three four");
-    const view = (try owner.getRenderable(text)).scene_node.?.text.?.view;
+    const view = (try owner.raw().getRenderable(text)).scene_node.?.text.?.view;
     view.setViewport(.{ .x = 1, .y = 1, .width = 4, .height = 2 });
     view.setTruncate(true);
     try owner.sceneMoveNode(text, f.root, 0);
@@ -750,10 +750,10 @@ test "Context Yoga target rejection preserves target ownership on non-leaf nodes
     const next_id = try owner.createTextBufferView(text);
     const node_id = try owner.sceneCreateNode(f.id, 7, 2);
     const child_id = try owner.sceneCreateNode(f.id, 1, 3);
-    const first = try owner.getTextBufferView(first_id);
-    const next = try owner.getTextBufferView(next_id);
-    const node = try owner.getRenderable(node_id);
-    const child = try owner.getRenderable(child_id);
+    const first = try owner.raw().getTextBufferView(first_id);
+    const next = try owner.raw().getTextBufferView(next_id);
+    const node = try owner.raw().getRenderable(node_id);
+    const child = try owner.raw().getRenderable(child_id);
     try owner.sceneSetTextView(node_id, first_id);
     try yoga.check(yoga.yogaNodeUnsetMeasureFuncChecked(node.yoga_node));
     try owner.sceneMoveNode(child_id, node_id, 0);
@@ -798,9 +798,9 @@ test "Context Yoga target rejection preserves targets during raw active layout" 
     const first_id = try owner.createTextBufferView(text);
     const next_id = try owner.createTextBufferView(text);
     const node_id = try owner.sceneCreateNode(session, 7, 2);
-    const first = try owner.getTextBufferView(first_id);
-    const next = try owner.getTextBufferView(next_id);
-    const node = try owner.getRenderable(node_id);
+    const first = try owner.raw().getTextBufferView(first_id);
+    const next = try owner.raw().getTextBufferView(next_id);
+    const node = try owner.raw().getRenderable(node_id);
     try owner.textBufferSetText(text, "replacement");
     try owner.sceneSetTextView(node_id, first_id);
     probe.owner = owner;
@@ -852,16 +852,16 @@ test "Context teardown rejects raw active Yoga layout without losing scene owner
     const owner = f.owner;
     const node_id = try owner.sceneCreateNode(f.id, 1, 2);
     try owner.sceneMoveNode(node_id, f.root, 0);
-    const node = try owner.getRenderable(node_id);
+    const node = try owner.raw().getRenderable(node_id);
     probe.owner = owner;
     probe.session = f.id;
     try yoga.check(yoga.yogaNodeSetMeasureFuncChecked(node.yoga_node, 1));
     try yoga.check(yoga.yogaNodeCalculateLayoutChecked(node.yoga_node, std.math.nan(f32), std.math.nan(f32), 1));
     try std.testing.expectEqual(@as(?anyerror, error.ContextBusy), probe.deinit_error);
     try std.testing.expectEqual(@as(?anyerror, error.YogaBusy), probe.destroy_error);
-    try std.testing.expectEqual(node, try owner.getRenderable(node_id));
+    try std.testing.expectEqual(node, try owner.raw().getRenderable(node_id));
     try owner.destroy(f.id);
-    try std.testing.expectError(error.StaleHandle, owner.getRenderable(node_id));
+    try std.testing.expectError(error.StaleHandle, owner.raw().getRenderable(node_id));
     try owner.deinit();
     alive = false;
 }
@@ -875,8 +875,8 @@ test "Context Yoga target cleanup survives override unset and node reset" {
         const text_id = try owner.createTextBuffer(.unicode);
         const view_id = try owner.createTextBufferView(text_id);
         const node_id = try owner.sceneCreateNode(f.id, 7, 2);
-        const text = try owner.getTextBufferView(view_id);
-        const node = try owner.getRenderable(node_id);
+        const text = try owner.raw().getTextBufferView(view_id);
+        const node = try owner.raw().getRenderable(node_id);
         try owner.textBufferSetText(text_id, "cached");
         try owner.sceneSetTextView(node_id, view_id);
         try owner.sceneMoveNode(node_id, f.root, 0);
@@ -905,17 +905,17 @@ test "Context checked Yoga reports native measurement OOM and remains teardown s
     const replacement_id = try owner.createTextBufferView(text_id);
     const node_id = try owner.sceneCreateNode(session, 7, 2);
     try owner.textBufferSetText(text_id, "word tail");
-    const text = try owner.getTextBufferView(view_id);
+    const text = try owner.raw().getTextBufferView(view_id);
     text.view.setWrapMode(.word);
     try owner.sceneSetTextView(node_id, view_id);
-    const node = try owner.getRenderable(node_id);
+    const node = try owner.raw().getRenderable(node_id);
     failing.fail_index = failing.alloc_index;
     try std.testing.expectError(error.OutOfMemory, yoga.check(yoga.yogaNodeCalculateLayoutChecked(node.yoga_node, 8, std.math.nan(f32), 1)));
     try std.testing.expect(failing.has_induced_failure);
     try std.testing.expectError(error.YogaPoisoned, yoga.check(yoga.yogaNodeCalculateLayoutChecked(node.yoga_node, 8, std.math.nan(f32), 1)));
     try std.testing.expectError(error.YogaPoisoned, owner.sceneSetTextView(node_id, replacement_id));
-    try std.testing.expectEqual(text.view, (try owner.getRenderable(node_id)).measure_target.text_buffer_view);
-    try std.testing.expect((try owner.getTextBufferView(replacement_id)).view.measure_dependents == null);
+    try std.testing.expectEqual(text.view, (try owner.raw().getRenderable(node_id)).measure_target.text_buffer_view);
+    try std.testing.expect((try owner.raw().getTextBufferView(replacement_id)).view.measure_dependents == null);
     failing.fail_index = std.math.maxInt(usize);
     try std.testing.expectEqual(@as(f32, 12), (try layout(owner, root)).width);
     try owner.destroy(text_id);
@@ -930,14 +930,14 @@ test "Context handles distinguish context, kind, stale generation, and limits" {
     const old = try first.createSession(.{});
     const foreign = try second.createSession(.{});
     try std.testing.expectEqual(old.slot, foreign.slot);
-    try std.testing.expectError(error.WrongContext, first.getSession(foreign));
-    try std.testing.expectError(error.WrongKind, first.getTextBuffer(old));
+    try std.testing.expectError(error.WrongContext, first.raw().getSession(foreign));
+    try std.testing.expectError(error.WrongKind, first.raw().getTextBuffer(old));
     try std.testing.expectError(error.ObjectLimit, first.createSession(.{}));
     try first.destroy(old);
     const replacement = try first.createSession(.{});
     try std.testing.expectEqual(old.slot, replacement.slot);
     try std.testing.expect(old.generation != replacement.generation);
-    try std.testing.expectError(error.StaleHandle, first.getSession(old));
+    try std.testing.expectError(error.StaleHandle, first.raw().getSession(old));
     try std.testing.expectError(error.StaleHandle, first.destroy(old));
     try first.destroy(replacement);
     _ = try first.createTextBuffer(.unicode);
@@ -969,14 +969,14 @@ test "Context native measure targets remain stable and unlink only their depende
     const first_view = try owner.createTextBufferView(first_text_id);
     const alias = try owner.createTextBufferView(first_text_id);
     const second_view = try owner.createTextBufferView(second_text_id);
-    const first_text = try owner.getTextBufferView(alias);
-    const second_text = try owner.getTextBufferView(second_view);
+    const first_text = try owner.raw().getTextBufferView(alias);
+    const second_text = try owner.raw().getTextBufferView(second_view);
     try owner.textBufferSetText(first_text_id, "first");
     try owner.textBufferSetText(second_text_id, "second text");
     const first_id = try owner.sceneCreateNode(f.id, 7, 2);
     const second_id = try owner.sceneCreateNode(f.id, 7, 3);
-    const first = try owner.getRenderable(first_id);
-    const second = try owner.getRenderable(second_id);
+    const first = try owner.raw().getRenderable(first_id);
+    const second = try owner.raw().getRenderable(second_id);
     try owner.sceneSetTextView(first_id, first_view);
     try owner.sceneSetTextView(second_id, alias);
     try owner.sceneMoveNode(first_id, f.root, 0);
@@ -984,7 +984,7 @@ test "Context native measure targets remain stable and unlink only their depende
     try std.testing.expectEqual(@as(f32, 5), (try layout(owner, first_id)).width);
 
     for (0..10_000) |index| _ = try owner.sceneCreateNode(f.id, 1, @intCast(index + 4));
-    try std.testing.expect(first == try owner.getRenderable(first_id));
+    try std.testing.expect(first == try owner.raw().getRenderable(first_id));
     try std.testing.expectEqual(@as(f32, 5), (try layout(owner, first_id)).width);
     try owner.sceneSetTextView(first_id, second_view);
     try std.testing.expect(first_text.view.measure_dependents == second);
@@ -1011,7 +1011,7 @@ test "Context text replacement preserves state on allocation failure" {
         const root = try owner.sceneCreateNode(session, 0, 1);
         try owner.sceneSetStyle(root, 0, 4, 0, 0, 1, 0);
         const node_id = try owner.sceneCreateNode(session, 2, 2);
-        const node = try owner.getRenderable(node_id);
+        const node = try owner.raw().getRenderable(node_id);
         const text = node.scene_node.?.text.?;
         try owner.sceneMoveNode(node_id, root, 0);
         yoga.yogaNodeSetDirtiedFunc(node.yoga_node, true);
@@ -1073,7 +1073,7 @@ test "Context rejects mutation reentry from Yoga dirtied callbacks" {
 
         fn dirtied(user_data: ?*anyopaque, _: yoga.YGNodeConstRef) void {
             const self: *@This() = @ptrCast(@alignCast(user_data.?));
-            const text = (self.owner.getRenderable(self.node) catch unreachable).scene_node.?.text.?;
+            const text = (self.owner.raw().getRenderable(self.node) catch unreachable).scene_node.?.text.?;
             self.observed_accepted_text = std.mem.eql(u8, text.buffer.getMemBuffer(text.input_mem_id.?).?, "changed") and
                 !text.buffer.rope().can_undo();
             self.owner.destroy(self.node) catch |err| {
@@ -1095,7 +1095,7 @@ test "Context rejects mutation reentry from Yoga dirtied callbacks" {
     try reentry.owner.sceneSetStyle(root, 0, 4, 0, 0, 1, 0);
     reentry.node = try reentry.owner.sceneCreateNode(session, 2, 2);
     try reentry.owner.sceneMoveNode(reentry.node, root, 0);
-    const node = try reentry.owner.getRenderable(reentry.node);
+    const node = try reentry.owner.raw().getRenderable(reentry.node);
     yoga.yogaNodeSetDirtiedFunc(node.yoga_node, true);
     _ = try layout(reentry.owner, reentry.node);
     try node.scene_node.?.text.?.buffer.rope().store_undo("before");
@@ -1122,7 +1122,7 @@ fn drain(owner: *context.Context, session: context.Handle, output: []u8) ![]cons
         length += ticket.len;
         try owner.completeOutput(session, ticket, .written);
     }
-    try std.testing.expect((try owner.getSession(session)).isDrained());
+    try std.testing.expect((try owner.raw().getSession(session)).isDrained());
     return output[0..length];
 }
 
@@ -1135,7 +1135,7 @@ test "Context render admission rejects tracker OOM before pooled cell sync" {
             defer owner.deinit() catch unreachable;
             const id = try owner.createSession(.{ .chunk_size = 4096 });
             try owner.attachSessionRenderer(id, 12, 1, .{ .remote_mode = .remote });
-            const value = try owner.getSessionRenderer(id);
+            const value = try owner.raw().getSessionRenderer(id);
             value.terminal.caps.hyperlinks = true;
             const current = value.getCurrentBuffer();
             const next = value.getNextBuffer();
@@ -1148,7 +1148,7 @@ test "Context render admission rejects tracker OOM before pooled cell sync" {
                 try std.testing.expectEqual(@as(u32, 0), current.link_tracker.used_ids.capacity());
             }
             const previous_stats = value.getRenderStats();
-            const previous_written = (try owner.getSession(id)).getStats().bytes_written;
+            const previous_written = (try owner.raw().getSession(id)).getStats().bytes_written;
             const previous_chars = current.buffer.char[0..12].*;
             try drawTrackedCells(next, if (previous_count == 0) 1 else 7, 'k');
             const glyph_id = gp.graphemeIdFromChar(next.buffer.char[0]);
@@ -1158,7 +1158,7 @@ test "Context render admission rejects tracker OOM before pooled cell sync" {
             failing.fail_index = failing.alloc_index + fail_offset;
             try std.testing.expectEqual(.failed, try owner.renderSession(id, false));
             try std.testing.expect(failing.has_induced_failure);
-            try std.testing.expectEqual(previous_written, (try owner.getSession(id)).getStats().bytes_written);
+            try std.testing.expectEqual(previous_written, (try owner.raw().getSession(id)).getStats().bytes_written);
             try std.testing.expectEqual(previous_stats, value.getRenderStats());
             try std.testing.expectEqualSlices(u32, &previous_chars, current.buffer.char);
             try std.testing.expectEqual(@as(u32, 11), value.checkHit(0, 0));
@@ -1189,7 +1189,7 @@ test "Context render admission reuses leased tracker capacity for disjoint frame
     defer owner.deinit() catch unreachable;
     const id = try owner.createSession(.{ .chunk_size = 4096 });
     try owner.attachSessionRenderer(id, 5, 1, .{ .remote_mode = .remote });
-    const value = try owner.getSessionRenderer(id);
+    const value = try owner.raw().getSessionRenderer(id);
     const lease = try owner.acquireSessionBufferLease(id, .current);
     defer owner.releaseBufferLease(lease) catch unreachable;
     const bytes = owner.lease_bytes;
@@ -1287,7 +1287,7 @@ const RenderTask = struct {
         try self.owner.sceneSetText(self.node_id, self.text);
         try std.testing.expectEqual(@as(f32, @floatFromInt(self.text.len)), (try layout(self.owner, self.node_id)).width);
         try std.testing.expectEqual(self.expected_width, (try layout(self.owner, self.custom_id)).width);
-        const value = try self.owner.getSessionRenderer(self.renderer_id);
+        const value = try self.owner.raw().getSessionRenderer(self.renderer_id);
         value.terminal.caps.hyperlinks = true;
         try value.getNextBuffer().drawText(self.grapheme, 0, 1, ansi.rgbColor(255, 255, 255, 255), null, ansi.TextAttributes.setLinkId(0, self.link_id));
         try std.testing.expectEqual(.pending, try @import("scene_fixture_test.zig").present(self.owner, self.renderer_id, true));
@@ -1334,7 +1334,7 @@ test "Context concurrently renders with independent pools, Yoga callbacks, clock
         const custom_id = try owner.sceneCreateNode(id, 1, 3);
         try owner.sceneMoveNode(node_id, root, 0);
         try owner.sceneMoveNode(custom_id, root, 1);
-        const custom = try owner.getRenderable(custom_id);
+        const custom = try owner.raw().getRenderable(custom_id);
         yoga.yogaNodeSetMeasureFunc(custom.yoga_node, true);
         yoga.yogaNodeSetDirtiedFunc(custom.yoga_node, true);
         tasks[index] = .{
@@ -1361,7 +1361,7 @@ test "Context concurrently renders with independent pools, Yoga callbacks, clock
     second_thread.join();
     for (tasks) |task| if (task.failure) |err| return err;
     for (tasks, 0..) |task, index| {
-        try std.testing.expectError(error.WrongContext, tasks[1 - index].owner.getRenderable(task.node_id));
+        try std.testing.expectError(error.WrongContext, tasks[1 - index].owner.raw().getRenderable(task.node_id));
         const bytes = task.output[0..task.output_len];
         try std.testing.expect(std.mem.find(u8, bytes, tasks[1 - index].text) == null);
         try std.testing.expect(std.mem.find(u8, bytes, tasks[1 - index].grapheme) == null);
@@ -1369,8 +1369,8 @@ test "Context concurrently renders with independent pools, Yoga callbacks, clock
     try std.testing.expect(tasks[0].thread_id.? != tasks[1].thread_id.?);
     try std.testing.expectEqual(@as(u32, 1), first_callbacks.measurements);
     try std.testing.expectEqual(@as(u32, 1), second_callbacks.measurements);
-    try std.testing.expectEqual(first_clock.time_us, (try first.getSessionRenderer(tasks[0].renderer_id)).lastRenderTime);
-    try std.testing.expectEqual(second_clock.time_us, (try second.getSessionRenderer(tasks[1].renderer_id)).lastRenderTime);
+    try std.testing.expectEqual(first_clock.time_us, (try first.raw().getSessionRenderer(tasks[0].renderer_id)).lastRenderTime);
+    try std.testing.expectEqual(second_clock.time_us, (try second.raw().getSessionRenderer(tasks[1].renderer_id)).lastRenderTime);
     try std.testing.expect(first_clock.calls > 0);
     try std.testing.expectEqual(first_clock.calls, second_clock.calls);
     const first_identity = tasks[0].node_id;
@@ -1378,15 +1378,15 @@ test "Context concurrently renders with independent pools, Yoga callbacks, clock
     first_alive = false;
     try std.testing.expectEqualStrings("o\xcc\x82", try second.graphemes.get(second_grapheme));
     try std.testing.expectEqualStrings("https://second.invalid", try second.links.get(second_link));
-    try std.testing.expectError(error.WrongContext, second.getRenderable(first_identity));
-    const custom = try second.getRenderable(tasks[1].custom_id);
+    try std.testing.expectError(error.WrongContext, second.raw().getRenderable(first_identity));
+    const custom = try second.raw().getRenderable(tasks[1].custom_id);
     yoga.yogaNodeStyleSetValue(custom.yoga_node, @intFromEnum(yoga.YogaValueKind.min_width), 0, @intFromEnum(yoga.YogaUnit.point), 1);
     second_clock.time_us += 1000;
     try tasks[1].render();
     try std.testing.expect(second_callbacks.dirtied > 0);
     try std.testing.expectEqual(@as(u32, 2), second_callbacks.measurements);
     try std.testing.expectEqual(@as(u32, 1), first_callbacks.measurements);
-    try std.testing.expectEqual(second_clock.time_us, (try second.getSessionRenderer(tasks[1].renderer_id)).lastRenderTime);
+    try std.testing.expectEqual(second_clock.time_us, (try second.raw().getSessionRenderer(tasks[1].renderer_id)).lastRenderTime);
 }
 
 fn createWithFailures(allocator: std.mem.Allocator) !void {

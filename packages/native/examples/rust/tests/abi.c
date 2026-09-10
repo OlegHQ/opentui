@@ -9,19 +9,7 @@
 /* This helper supplies only compiler layout facts, never rendering operations. */
 int main(void) {
     static const uint32_t values[] = {
-        OT_CONTEXT_ABI_VERSION, OT_OK, OT_INVALID_ARGUMENT, OT_CONTEXT_BUSY,
-        OT_STALE_HANDLE, OT_OUTPUT_BACKPRESSURE, OT_OUTPUT_BUSY, OT_STALE_OUTPUT,
-        OT_OUTPUT_FAILED, OT_OBJECT_LIMIT, OT_SCENE_ROOT, OT_SCENE_TEXT,
-        OT_SCENE_TEXT_FOREGROUND, OT_SCENE_TEXT_LINK, OT_SESSION_CLOSED_STATE,
-        OT_SESSION_FAILED, OT_SESSION_CANCELLED_STATE, OT_SESSION_REMOTE_REMOTE,
-        OT_RENDER_PENDING, OT_SESSION_CONTROL_PACKET_BYTES, OT_TERMINAL_ALTERNATE_SCREEN,
-        OT_TERMINAL_ACTIVE, OT_TERMINAL_RESTORED, OT_PUMP_IDLE, OT_PUMP_AGAIN,
-        OT_PUMP_OUTPUT_PENDING, OT_PUMP_WAIT_UNTIL, OT_PUMP_CLOSED,
-        OT_SCENE_BOX,
-        OT_SESSION_REMOTE_AUTO, OT_SESSION_REMOTE_LOCAL,
-        OT_SESSION_ENV_ENTRIES_MAX, OT_SESSION_ENV_BYTES_MAX,
-        OT_RENDER_PRESENTED, OT_RENDER_SKIPPED, OT_RENDER_FAILED,
-        OT_WRONG_CONTEXT, OT_WRONG_SESSION, OT_STALE_FRAME,
+#include "constants.generated.h"
         LAYOUT(ot_status),
         LAYOUT(ot_handle), FIELD(ot_handle, context_id), FIELD(ot_handle, slot), FIELD(ot_handle, generation),
         LAYOUT(ot_output_ticket), FIELD(ot_output_ticket, session), FIELD(ot_output_ticket, request_id),

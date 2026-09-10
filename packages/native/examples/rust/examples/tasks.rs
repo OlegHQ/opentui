@@ -38,11 +38,25 @@ impl<'session, 'context> App<'session, 'context> {
 
         let panel = Node::new(session, ffi::OT_SCENE_BOX, 3)?;
         panel.mount_at(&root, 1)?;
-        panel.set_style(1, 1, 0, 0, 1.0, 0)?; // Yoga float: flex-grow = 1.
-        panel.set_style(2, 3, 0, 1, 0.0, 0)?; // Yoga point value: min-height = 0.
+        panel.set_style(
+            ffi::OT_STYLE_FLOAT,
+            ffi::OT_STYLE_FLOAT_FLEX_GROW,
+            ffi::OT_EDGE_NONE,
+            ffi::OT_UNIT_UNDEFINED,
+            1.0,
+            ffi::OT_STYLE_FLAGS_NONE,
+        )?;
+        panel.set_style(
+            ffi::OT_STYLE_VALUE,
+            ffi::OT_STYLE_VALUE_MIN_HEIGHT,
+            ffi::OT_EDGE_NONE,
+            ffi::OT_UNIT_POINT,
+            0.0,
+            ffi::OT_STYLE_FLAGS_NONE,
+        )?;
         panel.set_paint(&ffi::ot_scene_paint_options {
             opacity: 1.0,
-            border_sides: 15,
+            border_sides: ffi::OT_BORDER_ALL,
             border_color: [67, 83, 99, 255],
             should_fill: 1,
             background: BACKGROUND,
@@ -61,8 +75,14 @@ impl<'session, 'context> App<'session, 'context> {
         text(&help, " j/k: move  Space: toggle  q: quit", FOREGROUND, false)?;
         // Fixed one-row labels leave the remaining height to the bordered panel.
         for node in [&title, &status, &help].into_iter().chain(rows.iter()) {
-            node.set_style(2, 1, 0, 1, 1.0, 0)?; // Yoga point value: height = 1.
-            node.set_style(1, 2, 0, 0, 0.0, 0)?; // Yoga float: flex-shrink = 0.
+            node.set_style(
+                ffi::OT_STYLE_DIMENSION,
+                ffi::OT_DIMENSION_HEIGHT,
+                ffi::OT_EDGE_NONE,
+                ffi::OT_UNIT_POINT,
+                1.0,
+                ffi::OT_STYLE_DISABLE_FLEX_SHRINK,
+            )?;
         }
         let app =
             Self { rows, status, _structure: vec![root, title, panel, help], selected: 0, done: [false; TASKS.len()] };

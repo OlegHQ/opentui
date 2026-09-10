@@ -17,7 +17,7 @@ test "Grid primitive clips and blends every border write path" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(7, 5, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     try target.pushScissorRect(1, 1, 4, 3);
     for ([_]f32{ 1, 0.5 }) |opacity| {
         target.clear(black, null);
@@ -42,7 +42,7 @@ test "Grid primitive retires overwritten grapheme and link references" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(7, 5, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     const link = try owner.links.alloc("https://grid.test");
     const attributes = ansi.TextAttributes.setLinkId(0, link);
     try target.drawText("e\xcc\x81e\xcc\x81", 0, 0, red, black, attributes);
@@ -59,7 +59,7 @@ test "Context grid validates all input before drawing and bounds offscreen work"
     const owner = try context.Context.init(testing.allocator, testing.io, .{ .render_cells_max = 64 });
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(7, 5, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     target.clear(black, null);
     const options: context.BufferGrid = .{ .border_chars = border, .foreground = red, .background = black, .draw_inner = true, .draw_outer = true };
     for ([_][]const i32{ &.{ 1, 0 }, &.{ 0, 0 }, &(@as([66]i32, @splat(0))) }) |offsets| {
@@ -113,7 +113,7 @@ test "Context grid ABI validates borrowed array lengths and options" {
     try testing.expectEqual(c.OT_INVALID_ARGUMENT, abi.ot_buffer_draw_grid(owner, &id, null, &options, &columns, std.math.maxInt(u32), &rows, 3));
     try testing.expectEqual(c.OT_OK, abi.ot_buffer_draw_grid(owner, &id, null, &options, null, 0, null, 0));
     try testing.expectEqual(c.OT_OK, abi.ot_buffer_draw_grid(owner, &id, null, &options, &columns, 3, &rows, 3));
-    const target = try owner.?.core.getBuffer(abi.handleFromC(id));
+    const target = try owner.?.core.raw().getBuffer(abi.handleFromC(id));
     try testing.expectEqualSlices(u32, &.{ '+', '-', '-' }, target.buffer.char[0..3]);
 }
 
@@ -128,7 +128,7 @@ test "GPU primitive packed offsets describe a source rectangle not destination b
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(4, 3, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     target.clear(black, null);
     const cells = [_]PackedCell{ .{ .char = 'A' }, .{ .char = 'B' }, .{ .char = 'C' }, .{ .char = 'D' } };
     const bytes = std.mem.asBytes(&cells);
@@ -139,8 +139,8 @@ test "GPU primitive packed offsets describe a source rectangle not destination b
 test "GPU primitive supersampling never samples the next row as a right neighbor" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
-    const target = try owner.getBuffer(try owner.createBuffer(1, 1, .{}));
-    const expected = try owner.getBuffer(try owner.createBuffer(1, 1, .{}));
+    const target = try owner.raw().getBuffer(try owner.createBuffer(1, 1, .{}));
+    const expected = try owner.raw().getBuffer(try owner.createBuffer(1, 1, .{}));
     target.clear(black, null);
     expected.clear(black, null);
     const narrow = [_]u8{ 255, 255, 255, 255, 0, 0, 0, 255 };
@@ -153,8 +153,8 @@ test "GPU primitive supersampling never samples the next row as a right neighbor
 test "GPU primitive grayscale applies inherited opacity once" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
-    const target = try owner.getBuffer(try owner.createBuffer(1, 1, .{}));
-    const expected = try owner.getBuffer(try owner.createBuffer(1, 1, .{}));
+    const target = try owner.raw().getBuffer(try owner.createBuffer(1, 1, .{}));
+    const expected = try owner.raw().getBuffer(try owner.createBuffer(1, 1, .{}));
     try target.pushOpacity(0.5);
     try expected.pushOpacity(0.5);
     const intensities = [_]f32{ 1, 1, 1, 1 };
@@ -170,7 +170,7 @@ test "GPU primitive grayscale applies inherited opacity once" {
 test "GPU checked packed drawing accepts unaligned bytes and rejects incomplete or nonfinite cells atomically" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
-    const target = try owner.getBuffer(try owner.createBuffer(2, 1, .{}));
+    const target = try owner.raw().getBuffer(try owner.createBuffer(2, 1, .{}));
     target.clear(black, null);
     var cells = [_]PackedCell{ .{ .char = 'A' }, .{ .char = 'B' } };
     const bytes = std.mem.asBytes(&cells);
@@ -197,7 +197,7 @@ test "GPU checked packed drawing accepts unaligned bytes and rejects incomplete 
 test "GPU checked supersampling validates strides lengths and formats before touching pixels" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
-    const target = try owner.getBuffer(try owner.createBuffer(2, 2, .{}));
+    const target = try owner.raw().getBuffer(try owner.createBuffer(2, 2, .{}));
     target.clear(black, null);
     const pixels = [_]u8{ 255, 0, 0, 255 } ** 4;
     for ([_]u32{ 0, 1, 6 }) |stride| {
@@ -219,7 +219,7 @@ test "GPU checked supersampling validates strides lengths and formats before tou
 test "GPU checked grayscale validates lengths finite samples colors and signed clipping" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
-    const target = try owner.getBuffer(try owner.createBuffer(2, 1, .{}));
+    const target = try owner.raw().getBuffer(try owner.createBuffer(2, 1, .{}));
     inline for (.{ false, true }) |supersampled| {
         const width: u32 = if (supersampled) 4 else 2;
         const height: u32 = if (supersampled) 2 else 1;
@@ -248,7 +248,7 @@ test "GPU checked grayscale validates lengths finite samples colors and signed c
 test "GPU checked drawing clips opacity and retires overwritten pooled cells" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
-    const target = try owner.getBuffer(try owner.createBuffer(2, 2, .{}));
+    const target = try owner.raw().getBuffer(try owner.createBuffer(2, 2, .{}));
     try target.pushScissorRect(0, 0, 1, 1);
     try target.pushOpacity(0.5);
     const cells = [_]PackedCell{.{ .char = 'A', .bg = .{ 1, 0, 0, 1 } }} ** 4;
@@ -278,7 +278,7 @@ test "GPU Context drawing uses exact frame tickets and bounded visible preflight
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(2, 1, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     try target.pushScissorRect(0, 0, 1, 1);
     const cells = [_]PackedCell{ .{ .char = 'A' }, .{ .char = 'B', .fg = .{ 1, 0, 0, std.math.nan(f32) } } };
     const data = std.mem.asBytes(&cells);
@@ -320,5 +320,5 @@ test "GPU ABI rejects missing inputs invalid flags and dimensions before writes"
     try testing.expectEqual(c.OT_OK, abi.ot_buffer_draw_packed(owner, &handle, null, bytes, 96, 0, 0, 2, 1));
     try testing.expectEqual(c.OT_OK, abi.ot_buffer_draw_supersample(owner, &handle, null, &pixels, 16, 0, 0, 1, 8));
     try testing.expectEqual(c.OT_OK, abi.ot_buffer_draw_grayscale(owner, &handle, null, &samples, 2, 0, 0, 2, 1, null, null, 0));
-    try testing.expectEqualSlices(u32, &.{ '$', '$' }, (try owner.?.core.getBuffer(abi.handleFromC(handle))).buffer.char);
+    try testing.expectEqualSlices(u32, &.{ '$', '$' }, (try owner.?.core.raw().getBuffer(abi.handleFromC(handle))).buffer.char);
 }

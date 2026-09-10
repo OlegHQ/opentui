@@ -50,7 +50,7 @@ test "Context lease pins stale generations through renderer resize, destroy, and
     defer owner.deinit() catch unreachable;
     const renderer = try owner.createSession(.{});
     try owner.attachSessionRenderer(renderer, 2, 1, .{ .remote_mode = .remote });
-    const target = (try owner.getSessionRenderer(renderer)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
     const grapheme_id = try owner.graphemes.alloc("e\xcc\x81");
     const link_id = try owner.links.alloc("https://lease.invalid");
     target.set(0, 0, .{
@@ -108,7 +108,7 @@ test "Context link retirement preserves all slots on destroy and final lease rel
         const link_count: u32 = @intCast(owner.links.free_list.capacity + 1);
         const renderer = try owner.createSession(.{});
         try owner.attachSessionRenderer(renderer, link_count, 1, .{ .remote_mode = .remote });
-        const target = (try owner.getSessionRenderer(renderer)).getNextBuffer();
+        const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
         for (0..link_count) |index| {
             var url: [64]u8 = undefined;
             const id = if (index == 0) first_id else try owner.links.alloc(
@@ -184,7 +184,7 @@ test "Context lease charges distinct current and retired storage once and enforc
     defer owner.deinit() catch unreachable;
     const renderer = try owner.createSession(.{});
     try owner.attachSessionRenderer(renderer, 2, 1, .{ .remote_mode = .remote });
-    const value = try owner.getSessionRenderer(renderer);
+    const value = try owner.raw().getSessionRenderer(renderer);
     const first = try owner.acquireSessionBufferLease(renderer, .next);
     const bytes = owner.lease_bytes;
     try std.testing.expectEqual(value.getNextBuffer().storage.retained_bytes, bytes);
@@ -223,7 +223,7 @@ test "Context lease checked counts ignore raw leases and release order" {
             defer owner.deinit() catch unreachable;
             const renderer = try owner.createSession(.{});
             try owner.attachSessionRenderer(renderer, 1, 1, .{ .remote_mode = .remote });
-            const target = (try owner.getSessionRenderer(renderer)).getNextBuffer();
+            const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
             var raw = try target.acquireLease();
             defer raw.release();
             const storage = raw.storage.?;
@@ -281,7 +281,7 @@ test "Context lease accounts for future tracker growth before admitting storage"
     defer owner.deinit() catch unreachable;
     const renderer = try owner.createSession(.{});
     try owner.attachSessionRenderer(renderer, 32, 1, .{ .remote_mode = .remote });
-    const target = (try owner.getSessionRenderer(renderer)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
     const empty_bytes = target.storage.retained_bytes;
     owner.lease_bytes_max = empty_bytes;
     try std.testing.expectError(error.LeaseBytesLimit, owner.acquireSessionBufferLease(renderer, .next));

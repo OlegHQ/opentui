@@ -6,7 +6,7 @@ const renderer = @import("../renderer.zig");
 
 /// Starts a fresh draft for paint/layout assertions, cancelling any preceding capture.
 pub fn repaint(owner: *context.Context, id: context.Handle, background: @import("../buffer.zig").RGBA, use_mouse: bool, excluded_hit_num: u32) !void {
-    const value = try owner.getSession(id);
+    const value = try owner.raw().getSession(id);
     if (value.scene) |state| {
         if (state.painted) |painted| try owner.sceneFrameCancel(id, painted.ticket.frame_id);
     }
@@ -14,7 +14,7 @@ pub fn repaint(owner: *context.Context, id: context.Handle, background: @import(
 }
 
 pub fn present(owner: *context.Context, id: context.Handle, force: bool) !session.RenderStatus {
-    const value = try owner.getSession(id);
+    const value = try owner.raw().getSession(id);
     return owner.sceneFrameCommit(id, value.scene.?.painted.?.ticket, force);
 }
 
@@ -38,8 +38,8 @@ pub const Fixture = struct {
             .owner = owner,
             .id = id,
             .root = root,
-            .state = (try owner.getSession(id)).scene.?,
-            .cli = try owner.getSessionRenderer(id),
+            .state = (try owner.raw().getSession(id)).scene.?,
+            .cli = try owner.raw().getSessionRenderer(id),
         };
     }
 

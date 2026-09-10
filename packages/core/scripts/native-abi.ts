@@ -15,6 +15,8 @@ import { variants } from "./variants.js"
 const scriptRoot = dirname(fileURLToPath(import.meta.url))
 const nativeRoot = resolve(scriptRoot, "../../native")
 const outputPath = resolve(scriptRoot, "../src/native-abi.generated.ts")
+const rustConstantsPath = resolve(nativeRoot, "examples/rust/src/constants.generated.rs")
+const rustProbePath = resolve(nativeRoot, "examples/rust/tests/constants.generated.h")
 const archNames: Record<string, string> = { x64: "x86_64", arm64: "aarch64" }
 const osNames: Record<string, string> = { linux: "linux-musl", darwin: "macos", win32: "windows-gnu" }
 
@@ -246,6 +248,7 @@ export async function generateNativeABI(
     nativeCallbacks: signatures.callbacks,
     nativeLayouts: abi.layouts,
     nativeConstants: abi.constants,
+    nativeStyleEnumMaxima: sceneStyleEnumMaxima(abi),
   }
   const source =
     "// Generated from packages/native/include/opentui.h and scripts/native-abi-pointers.ts.\n" +
@@ -258,6 +261,41 @@ export async function generateNativeABI(
   const formatted = await format(outputPath, source, { semi: false, printWidth: 120 })
   if (formatted.errors.length) throw new Error(`Cannot format generated ABI: ${JSON.stringify(formatted.errors)}`)
   return formatted.code
+}
+
+export function sceneStyleEnumMaxima(abi: HeaderABI): number[] {
+  const entries = Object.entries(abi.constants)
+    .filter(([name]) => name.startsWith("OT_STYLE_ENUM_") && !name.endsWith("_MAX"))
+    .sort((a, b) => a[1] - b[1])
+  return entries.map(([name, kind], index) => {
+    const maximum = abi.constants[`${name}_MAX`]
+    if (kind !== index || maximum === undefined) throw new Error(`Missing style enum constraint: ${name}`)
+    return maximum
+  })
+}
+
+export function generateRustConstants(abi: HeaderABI): Map<string, string> {
+  const entries = Object.entries(abi.constants)
+  const notice = "// Generated from packages/native/include/opentui.h. Run bun run generate:abi in packages/core.\n"
+  return new Map([
+    [
+      rustConstantsPath,
+      notice +
+        entries
+          .map(([name, value]) => `pub const ${name}: ${value < 0 || name === "OT_OK" ? "i32" : "u32"} = ${value};\n`)
+          .join("") +
+        "#[cfg(test)]\nfn constants() -> Vec<u32> {\n    vec![\n" +
+        entries.map(([name]) => `        ${name} as u32,\n`).join("") +
+        "    ]\n}\n",
+    ],
+    [rustProbePath, notice + entries.map(([name]) => `${name},\n`).join("")],
+  ])
+}
+
+export function verifyRustConstants(abi: HeaderABI): void {
+  for (const [path, contents] of generateRustConstants(abi)) {
+    if (readFileSync(path, "utf8") !== contents) throw new Error(`${path} is stale; run bun run generate:abi`)
+  }
 }
 
 export function verifyNativeABI(generated: string): void {
@@ -276,8 +314,13 @@ if (import.meta.main) {
     throw new Error("Expected --check, --all-targets and/or --audit")
   const abi = compileHeader({ allTargets: args.includes("--all-targets") })
   const generated = await generateNativeABI(abi)
-  if (args.includes("--check")) verifyNativeABI(generated)
-  else if (!args.includes("--audit")) writeFileSync(outputPath, generated)
+  if (args.includes("--check")) {
+    verifyNativeABI(generated)
+    verifyRustConstants(abi)
+  } else if (!args.includes("--audit")) {
+    writeFileSync(outputPath, generated)
+    for (const [path, contents] of generateRustConstants(abi)) writeFileSync(path, contents)
+  }
   if (args.includes("--audit")) process.stdout.write(serializeNativeABIAudit(abi))
   else
     console.log(`Checked ABI: ${Object.keys(abi.symbols).length} symbols, ${Object.keys(abi.layouts).length} records`)

@@ -75,6 +75,151 @@ typedef struct ot_handle {
 #define OT_SCENE_WRAP_CHAR UINT32_C(1)
 #define OT_SCENE_WRAP_WORD UINT32_C(2)
 
+/* Layout property groups and kinds. ENUM/FLOAT require edge=OT_EDGE_NONE and
+ * unit=OT_UNIT_UNDEFINED. VALUE uses an edge for MARGIN/PADDING/POSITION and a
+ * gutter for GAP; other kinds ignore edge. DIMENSION requires OT_EDGE_NONE.
+ * BORDER is read-only, uses OT_STYLE_BORDER_WIDTH, and reads an OT_EDGE_* border width.
+ * Read dimensions through VALUE WIDTH/HEIGHT or DIMENSION WIDTH/HEIGHT.
+ * Numeric lengths use terminal display cells; percent uses 0..100 for 0..100%.
+ * UNDEFINED ignores value. AUTO ignores value and is supported only by width,
+ * height, flex basis, margin, and position. NaN clears a numeric value; infinity
+ * rejects. ENUM values must be nonnegative integers from the named family.
+ * Scene layout requires box geometry; Yoga's display:contents is unsupported. */
+#define OT_STYLE_ENUM UINT32_C(0)
+#define OT_STYLE_FLOAT UINT32_C(1)
+#define OT_STYLE_VALUE UINT32_C(2)
+#define OT_STYLE_BORDER UINT32_C(3)
+#define OT_STYLE_DIMENSION UINT32_C(4)
+#define OT_STYLE_BORDER_WIDTH UINT32_C(0)
+#define OT_STYLE_FLAGS_NONE UINT32_C(0)
+#define OT_STYLE_DISABLE_FLEX_SHRINK UINT32_C(1)
+#define OT_STYLE_ENUM_DIRECTION UINT32_C(0)
+#define OT_STYLE_ENUM_FLEX_DIRECTION UINT32_C(1)
+#define OT_STYLE_ENUM_JUSTIFY_CONTENT UINT32_C(2)
+#define OT_STYLE_ENUM_ALIGN_CONTENT UINT32_C(3)
+#define OT_STYLE_ENUM_ALIGN_ITEMS UINT32_C(4)
+#define OT_STYLE_ENUM_ALIGN_SELF UINT32_C(5)
+#define OT_STYLE_ENUM_POSITION_TYPE UINT32_C(6)
+#define OT_STYLE_ENUM_FLEX_WRAP UINT32_C(7)
+#define OT_STYLE_ENUM_OVERFLOW UINT32_C(8)
+#define OT_STYLE_ENUM_DISPLAY UINT32_C(9)
+#define OT_STYLE_ENUM_BOX_SIZING UINT32_C(10)
+#define OT_STYLE_FLOAT_FLEX UINT32_C(0)
+#define OT_STYLE_FLOAT_FLEX_GROW UINT32_C(1)
+#define OT_STYLE_FLOAT_FLEX_SHRINK UINT32_C(2)
+#define OT_STYLE_FLOAT_ASPECT_RATIO UINT32_C(3)
+#define OT_STYLE_VALUE_WIDTH UINT32_C(0)
+#define OT_STYLE_VALUE_HEIGHT UINT32_C(1)
+#define OT_STYLE_VALUE_MIN_WIDTH UINT32_C(2)
+#define OT_STYLE_VALUE_MIN_HEIGHT UINT32_C(3)
+#define OT_STYLE_VALUE_MAX_WIDTH UINT32_C(4)
+#define OT_STYLE_VALUE_MAX_HEIGHT UINT32_C(5)
+#define OT_STYLE_VALUE_FLEX_BASIS UINT32_C(6)
+#define OT_STYLE_VALUE_MARGIN UINT32_C(7)
+#define OT_STYLE_VALUE_PADDING UINT32_C(8)
+#define OT_STYLE_VALUE_POSITION UINT32_C(9)
+#define OT_STYLE_VALUE_GAP UINT32_C(10)
+#define OT_DIMENSION_WIDTH UINT32_C(0)
+#define OT_DIMENSION_HEIGHT UINT32_C(1)
+#define OT_UNIT_UNDEFINED UINT32_C(0)
+#define OT_UNIT_POINT UINT32_C(1)
+#define OT_UNIT_PERCENT UINT32_C(2)
+#define OT_UNIT_AUTO UINT32_C(3)
+#define OT_EDGE_NONE UINT32_C(0)
+#define OT_EDGE_LEFT UINT32_C(0)
+#define OT_EDGE_TOP UINT32_C(1)
+#define OT_EDGE_RIGHT UINT32_C(2)
+#define OT_EDGE_BOTTOM UINT32_C(3)
+#define OT_EDGE_START UINT32_C(4)
+#define OT_EDGE_END UINT32_C(5)
+#define OT_EDGE_HORIZONTAL UINT32_C(6)
+#define OT_EDGE_VERTICAL UINT32_C(7)
+#define OT_EDGE_ALL UINT32_C(8)
+#define OT_GUTTER_COLUMN UINT32_C(0)
+#define OT_GUTTER_ROW UINT32_C(1)
+#define OT_GUTTER_ALL UINT32_C(2)
+#define OT_DIRECTION_INHERIT UINT32_C(0)
+#define OT_DIRECTION_LTR UINT32_C(1)
+#define OT_DIRECTION_RTL UINT32_C(2)
+#define OT_FLEX_DIRECTION_COLUMN UINT32_C(0)
+#define OT_FLEX_DIRECTION_COLUMN_REVERSE UINT32_C(1)
+#define OT_FLEX_DIRECTION_ROW UINT32_C(2)
+#define OT_FLEX_DIRECTION_ROW_REVERSE UINT32_C(3)
+#define OT_JUSTIFY_FLEX_START UINT32_C(0)
+#define OT_JUSTIFY_CENTER UINT32_C(1)
+#define OT_JUSTIFY_FLEX_END UINT32_C(2)
+#define OT_JUSTIFY_SPACE_BETWEEN UINT32_C(3)
+#define OT_JUSTIFY_SPACE_AROUND UINT32_C(4)
+#define OT_JUSTIFY_SPACE_EVENLY UINT32_C(5)
+#define OT_ALIGN_AUTO UINT32_C(0)
+#define OT_ALIGN_FLEX_START UINT32_C(1)
+#define OT_ALIGN_CENTER UINT32_C(2)
+#define OT_ALIGN_FLEX_END UINT32_C(3)
+#define OT_ALIGN_STRETCH UINT32_C(4)
+#define OT_ALIGN_BASELINE UINT32_C(5)
+#define OT_ALIGN_SPACE_BETWEEN UINT32_C(6)
+#define OT_ALIGN_SPACE_AROUND UINT32_C(7)
+#define OT_ALIGN_SPACE_EVENLY UINT32_C(8)
+#define OT_POSITION_STATIC UINT32_C(0)
+#define OT_POSITION_RELATIVE UINT32_C(1)
+#define OT_POSITION_ABSOLUTE UINT32_C(2)
+#define OT_FLEX_WRAP_NONE UINT32_C(0)
+#define OT_FLEX_WRAP_WRAP UINT32_C(1)
+#define OT_FLEX_WRAP_REVERSE UINT32_C(2)
+#define OT_OVERFLOW_VISIBLE UINT32_C(0)
+#define OT_OVERFLOW_HIDDEN UINT32_C(1)
+#define OT_OVERFLOW_SCROLL UINT32_C(2)
+#define OT_DISPLAY_FLEX UINT32_C(0)
+#define OT_DISPLAY_NONE UINT32_C(1)
+#define OT_BOX_SIZING_BORDER_BOX UINT32_C(0)
+#define OT_BOX_SIZING_CONTENT_BOX UINT32_C(1)
+/* Inclusive enum limits also drive generated host validation. */
+#define OT_STYLE_ENUM_DIRECTION_MAX OT_DIRECTION_RTL
+#define OT_STYLE_ENUM_FLEX_DIRECTION_MAX OT_FLEX_DIRECTION_ROW_REVERSE
+#define OT_STYLE_ENUM_JUSTIFY_CONTENT_MAX OT_JUSTIFY_SPACE_EVENLY
+#define OT_STYLE_ENUM_ALIGN_CONTENT_MAX OT_ALIGN_SPACE_EVENLY
+#define OT_STYLE_ENUM_ALIGN_ITEMS_MAX OT_ALIGN_SPACE_EVENLY
+#define OT_STYLE_ENUM_ALIGN_SELF_MAX OT_ALIGN_SPACE_EVENLY
+#define OT_STYLE_ENUM_POSITION_TYPE_MAX OT_POSITION_ABSOLUTE
+#define OT_STYLE_ENUM_FLEX_WRAP_MAX OT_FLEX_WRAP_REVERSE
+#define OT_STYLE_ENUM_OVERFLOW_MAX OT_OVERFLOW_SCROLL
+#define OT_STYLE_ENUM_DISPLAY_MAX OT_DISPLAY_NONE
+#define OT_STYLE_ENUM_BOX_SIZING_MAX OT_BOX_SIZING_CONTENT_BOX
+#define OT_MEASURE_UNDEFINED UINT32_C(0)
+#define OT_MEASURE_EXACTLY UINT32_C(1)
+#define OT_MEASURE_AT_MOST UINT32_C(2)
+#define OT_LAYOUT_PUBLIC UINT32_C(0)
+#define OT_LAYOUT_YOGA UINT32_C(1)
+#define OT_LAYOUT_PAINT UINT32_C(2)
+
+/* Border masks are paint bits, not OT_EDGE_* layout selectors. */
+#define OT_BORDER_NONE UINT32_C(0)
+#define OT_BORDER_LEFT UINT32_C(1)
+#define OT_BORDER_BOTTOM UINT32_C(2)
+#define OT_BORDER_RIGHT UINT32_C(4)
+#define OT_BORDER_TOP UINT32_C(8)
+#define OT_BORDER_ALL UINT32_C(15)
+#define OT_BORDER_SINGLE UINT32_C(0)
+#define OT_BORDER_DOUBLE UINT32_C(1)
+#define OT_BORDER_ROUNDED UINT32_C(2)
+#define OT_BORDER_HEAVY UINT32_C(3)
+
+/* Color words store RGBA bytes in their low eight bits, not 16-bit channels.
+ * The high bytes store metadata: word[0] has the palette slot, word[1] has the
+ * intent, and word[2..3] have zero high bytes. RGB and DEFAULT require slot=0.
+ * INDEXED requires a slot in 0..255. RGB snapshots supply fallback/blending
+ * colors for INDEXED and DEFAULT. Alpha is 0..255 for every intent.
+ * For example, {255, 0, 0, 255} is opaque red; {255, 0, 0, 0} is transparent.
+ * Indexed red at slot 1: {255 | (1 << OT_COLOR_META_SHIFT),
+ * OT_COLOR_INDEXED << OT_COLOR_META_SHIFT, 0, 255}.
+ * Default white: {255, 255 | (OT_COLOR_DEFAULT << OT_COLOR_META_SHIFT), 255, 255}.
+ * Float color outputs such as cursor state instead use normalized 0..1 channels. */
+#define OT_COLOR_RGB UINT32_C(0)
+#define OT_COLOR_INDEXED UINT32_C(1)
+#define OT_COLOR_DEFAULT UINT32_C(2)
+#define OT_COLOR_CHANNEL_MASK UINT32_C(255)
+#define OT_COLOR_META_SHIFT UINT32_C(8)
+
 /* Complete slider options. orientation is horizontal=0 or vertical=1. Colors
  * retain terminal color intent. All numbers and derived thumb arithmetic must be finite.
  * Values are not clamped: zero and inverted ranges retain the legacy full thumb.
@@ -176,13 +321,16 @@ typedef struct ot_styled_text_chunk {
     uint32_t link_byte_count;
 } ot_styled_text_chunk;
 
-/* Copied text metadata. text_length counts display columns, not bytes or Unicode
- * code points. width_cols_max is the longest unwrapped line. reserved is zero. */
+/* Copied text metadata. text_length sums unwrapped line widths in display columns,
+ * with expanded tabs and no line separators. It is not a byte/code-point count
+ * or the final document selection offset: selection offsets count each line
+ * separator as one position. width_cols_max is the longest unwrapped line.
+ * reserved is zero. */
 typedef struct ot_scene_text_info {
     uint32_t struct_size;
     uint32_t abi_version;
     uint32_t byte_count;
-    uint32_t text_length; /* Display-cell width, not bytes or Unicode code points. */
+    uint32_t text_length; /* Sum of unwrapped display-column widths, excluding line separators. */
     uint32_t line_count;
     uint32_t virtual_line_count;
     uint32_t width_cols_max;
@@ -465,9 +613,9 @@ typedef void (*ot_scene_measure_callback)(uint64_t context_id, uint32_t slot, ui
 ot_status ot_scene_set_measure(ot_context *, const ot_handle *node, ot_scene_measure_callback);
 ot_status ot_scene_has_measure(ot_context *, const ot_handle *node, uint32_t *out_enabled);
 ot_status ot_scene_mark_dirty(ot_context *, const ot_handle *node);
-/* Groups: 0 enum, 1 float, 2 value, 3 border (read-only), 4 dimension.
- * Kinds/edges/units follow checked Yoga. Only group 4 accepts flags bit 0,
- * which disables flex shrink atomically with the dimension update. */
+/* Use OT_STYLE_* groups/kinds, OT_EDGE_* (or OT_GUTTER_* for GAP), and OT_UNIT_*.
+ * Only OT_STYLE_DIMENSION accepts OT_STYLE_DISABLE_FLEX_SHRINK, which disables
+ * flex shrink atomically with the dimension update. Other flags must be zero. */
 ot_status ot_scene_set_style(ot_context *, const ot_handle *node, uint32_t group,
     uint32_t kind, uint32_t edge, uint32_t unit, float value, uint32_t flags);
 ot_status ot_scene_get_style(ot_context *, const ot_handle *node, uint32_t group,
@@ -608,17 +756,17 @@ ot_status ot_scene_get_selected_text(ot_context *, const ot_handle *node,
 ot_status ot_scene_get_text(ot_context *, const ot_handle *node, uint8_t *bytes, uint32_t capacity, uint32_t *out_count);
 ot_status ot_scene_get_text_info(ot_context *, const ot_handle *node, ot_scene_text_info *out_info);
 ot_status ot_scene_get_text_lines(ot_context *, const ot_handle *node, ot_scene_text_line *lines, uint32_t capacity, uint32_t *out_count);
-/* raw_yoga=0 copies local cell geometry from the node's latest preparation refresh.
+/* OT_LAYOUT_PUBLIC copies local cell geometry from the node's latest preparation refresh.
  * During host phases, mounted nodes retain their preceding projection until that
  * refresh; newly placed children refresh before their own update. screen_x/y
  * combine that geometry with current accepted ancestor relationships
- * and translations immediately, without running layout. raw_yoga=1 instead
+ * and translations immediately, without running layout. OT_LAYOUT_YOGA instead
  * copies the six actual Yoga computed values, including zero dimensions, and
- * sets screen_x/y to zero. raw_yoga=2 copies cached paint geometry, including
+ * sets screen_x/y to zero. OT_LAYOUT_PAINT copies cached paint geometry, including
  * screen_x/y. During a paint prefix, reparenting and ancestor translations do not
  * change those coordinates; the node's own translation setters refresh them.
  * These reads do not run layout. Other selectors reject without changing output. */
-ot_status ot_scene_get_layout(ot_context *, const ot_handle *node, uint32_t raw_yoga, ot_scene_layout *out_layout);
+ot_status ot_scene_get_layout(ot_context *, const ot_handle *node, uint32_t observation, ot_scene_layout *out_layout);
 /* Paint a hook-free scene and retain its DONE draft in out_frame. Commit it with
  * ot_scene_frame_commit, or cancel it before painting again. Frame-qualified
  * effects and capture may run before commit. Initialize out_frame's exact
@@ -1115,6 +1263,21 @@ ot_status ot_editor_view_set_tab_color(ot_context *, const ot_handle *, const ui
 #define OT_EDITOR_SELECT_OCCUPANCY UINT32_C(7)
 #define OT_EDITOR_SELECT_INCLUSIVE UINT32_C(8)
 #define OT_EDITOR_SELECT_COLORS UINT32_C(9)
+/* SET/UPDATE use flattened document display-column offsets (start/end), with an
+ * exclusive end and one position per line separator. LOCAL/LOCAL_UPDATE use viewport-local display cells (x) and
+ * virtual rows (y). Scene text selection always uses that local coordinate space.
+ * These aliases name the coordinate space as well as the operation. */
+#define OT_SELECT_DOCUMENT_SET OT_EDITOR_SELECT_SET
+#define OT_SELECT_DOCUMENT_UPDATE OT_EDITOR_SELECT_UPDATE
+#define OT_SELECT_DOCUMENT_RESET OT_EDITOR_SELECT_RESET
+#define OT_SELECT_VIEWPORT_SET OT_EDITOR_SELECT_LOCAL
+#define OT_SELECT_VIEWPORT_UPDATE OT_EDITOR_SELECT_LOCAL_UPDATE
+#define OT_SELECT_VIEWPORT_RESET OT_EDITOR_SELECT_LOCAL_RESET
+#define OT_SELECTION_CELL UINT32_C(0)
+#define OT_SELECTION_WORD UINT32_C(1)
+#define OT_SELECTION_LINE UINT32_C(2)
+#define OT_SELECTION_OCCUPANCY_CELL UINT32_C(0)
+#define OT_SELECTION_OCCUPANCY_BOUNDARY UINT32_C(1)
 typedef struct ot_editor_selection {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -1133,8 +1296,8 @@ typedef struct ot_editor_selection {
     uint16_t foreground[4];
     uint16_t background[4];
 } ot_editor_selection;
-/* flags uses FOREGROUND/BACKGROUND; behavior is cell=0 word=1 line=2 for local
- * operations, or occupancy cell=0 boundary=1 for OCCUPANCY. Unused fields are zero.
+/* flags uses FOREGROUND/BACKGROUND; behavior is OT_SELECTION_CELL/WORD/LINE for local
+ * operations, or OT_SELECTION_OCCUPANCY_* for OCCUPANCY. Unused fields are zero.
  * out_changed is meaningful for LOCAL/LOCAL_UPDATE/CELL, otherwise zero. */
 ot_status ot_editor_view_select(ot_context *, const ot_handle *, const ot_editor_selection *, uint32_t *out_changed);
 typedef struct ot_editor_view_info {
@@ -1309,7 +1472,7 @@ typedef struct ot_text_buffer_info {
     uint32_t abi_version;
     uint64_t content_epoch;
     uint32_t byte_count;
-    uint32_t text_length;
+    uint32_t text_length; /* Sum of unwrapped display-column widths, excluding line separators. */
     uint32_t line_count;
     uint32_t highlight_count;
     uint32_t tab_width;
@@ -1354,7 +1517,7 @@ typedef struct ot_text_buffer_replacement {
     uint32_t chunk_count;
 } ot_text_buffer_replacement;
 typedef struct ot_text_buffer_replacement_info {
-    uint32_t text_length;
+    uint32_t text_length; /* Sum of unwrapped display-column widths, as in ot_text_buffer_info. */
     uint32_t byte_count;
 } ot_text_buffer_replacement_info;
 ot_status ot_text_buffer_replace_styled_batch(ot_context *, const ot_text_buffer_replacement *, uint32_t count,

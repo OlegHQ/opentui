@@ -1,4 +1,5 @@
 #include "yoga-bridge.h"
+#include "yoga-vocabulary.h"
 
 #include <yoga/OTAllocator.h>
 #include <yoga/node/Node.h>

@@ -7,6 +7,8 @@ import {
   generateNativeABI,
   serializeNativeABIAudit,
   verifyNativeABI,
+  verifyRustConstants,
+  sceneStyleEnumMaxima,
   type HeaderABI,
 } from "./native-abi.js"
 import { nativeAddressFields, nativePointerPolicies } from "./native-abi-pointers.js"
@@ -21,7 +23,17 @@ beforeAll(() => {
 describe("checked native ABI generation", () => {
   test("the committed output matches every header symbol and record", async () => {
     verifyNativeABI(await generateNativeABI(abi))
+    verifyRustConstants(abi)
   }, 120_000)
+
+  test("style constraints follow the header and fail closed when a kind has no constraint", () => {
+    expect(sceneStyleEnumMaxima(abi)[abi.constants.OT_STYLE_ENUM_DISPLAY]).toBe(abi.constants.OT_DISPLAY_NONE)
+    const changed = structuredClone(abi)
+    changed.constants.OT_STYLE_ENUM_DISPLAY_MAX += 1
+    expect(sceneStyleEnumMaxima(changed)[abi.constants.OT_STYLE_ENUM_DISPLAY]).toBe(abi.constants.OT_DISPLAY_NONE + 1)
+    delete changed.constants.OT_STYLE_ENUM_DISPLAY_MAX
+    expect(() => sceneStyleEnumMaxima(changed)).toThrow("Missing style enum constraint")
+  })
 
   test("audit inspection exposes the complete fingerprint input", async () => {
     const audit = serializeNativeABIAudit(abi)

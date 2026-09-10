@@ -40,7 +40,7 @@ test "Context Yoga warnings use only their owning diagnostic queues with bounded
     yoga.testFailAfter(0);
     defer yoga.testFailAfter(-1);
     for ([_]*context.Context{ first, second }, 0..) |owner, index| {
-        const node = try owner.getRenderable(nodes[index]);
+        const node = try owner.raw().getRenderable(nodes[index]);
         try yoga.check(yoga.yogaNodeSetMeasureFuncChecked(node.yoga_node, 1));
         try yoga.check(yoga.yogaNodeCalculateLayoutChecked(node.yoga_node, std.math.nan(f32), std.math.nan(f32), 1));
         try std.testing.expectEqual(heights[index], (try owner.sceneGetLayout(nodes[index], true)).height);
@@ -56,7 +56,7 @@ test "Context Yoga warnings use only their owning diagnostic queues with bounded
     }
     try first.deinit();
     first_alive = false;
-    const remaining = try second.getRenderable(nodes[1]);
+    const remaining = try second.raw().getRenderable(nodes[1]);
     try yoga.check(yoga.yogaNodeMarkDirtyChecked(remaining.yoga_node));
     try yoga.check(yoga.yogaNodeCalculateLayoutChecked(remaining.yoga_node, std.math.nan(f32), std.math.nan(f32), 1));
     const long_message = [_:0]u8{'x'} ** (logger.Diagnostic.message_bytes_max + 1);
@@ -220,11 +220,11 @@ const LogTask = struct {
     fn render(self: *LogTask) !void {
         self.owner.logger.err("context {s}", .{self.text});
         try self.owner.textBufferSetText(self.text_id, self.text);
-        const text = try self.owner.getTextBuffer(self.text_id);
+        const text = try self.owner.raw().getTextBuffer(self.text_id);
         text.buffer.debugLogRope();
-        const view = (try self.owner.getTextBufferView(self.view_id)).view;
+        const view = (try self.owner.raw().getTextBufferView(self.view_id)).view;
         view.setViewportSize(16, 1);
-        const value = try self.owner.getSessionRenderer(self.renderer_id);
+        const value = try self.owner.raw().getSessionRenderer(self.renderer_id);
         value.logger.warn("renderer {s}", .{self.text});
         value.getNextBuffer().drawTextBuffer(view, 0, 0);
         try std.testing.expectEqual(.pending, try self.owner.renderSession(self.renderer_id, true));
@@ -232,7 +232,7 @@ const LogTask = struct {
         const ticket = (try self.owner.readOutput(self.renderer_id, &bytes)).?;
         try std.testing.expect(std.mem.find(u8, bytes[0..ticket.len], self.text) != null);
         try self.owner.completeOutput(self.renderer_id, ticket, .written);
-        try std.testing.expect((try self.owner.getSession(self.renderer_id)).isDrained());
+        try std.testing.expect((try self.owner.raw().getSession(self.renderer_id)).isDrained());
     }
 };
 
@@ -315,7 +315,7 @@ test "Context diagnostics capture renderer and buffer failures without invoking 
     defer owner.deinit() catch unreachable;
     const renderer_id = try owner.createSession(.{});
     try owner.attachSessionRenderer(renderer_id, 2, 1, .{ .remote_mode = .remote });
-    const value = try owner.getSessionRenderer(renderer_id);
+    const value = try owner.raw().getSessionRenderer(renderer_id);
     failing.fail_index = failing.alloc_index;
     value.hitGridPushScissorRect(0, 0, 2, 1);
     try std.testing.expect(failing.has_induced_failure);
@@ -323,7 +323,7 @@ test "Context diagnostics capture renderer and buffer failures without invoking 
 
     const text_id = try owner.createTextBuffer(.unicode);
     try owner.textBufferSetText(text_id, "a" ++ "\xcc\x81" ** 64);
-    const view = (try owner.getTextBufferView(try owner.createTextBufferView(text_id))).view;
+    const view = (try owner.raw().getTextBufferView(try owner.createTextBufferView(text_id))).view;
     view.setViewportSize(2, 1);
     value.getNextBuffer().drawTextBuffer(view, 0, 0);
     try std.testing.expectError(error.InvalidDimensions, buffer.OptimizedBuffer.init(std.testing.allocator, 0, 1, .{
@@ -366,7 +366,7 @@ test "Context diagnostics text resources use the supplied I/O" {
         .object_capacity = 1,
     });
     defer owner.deinit() catch unreachable;
-    const text = try owner.getTextBuffer(try owner.createTextBuffer(.unicode));
+    const text = try owner.raw().getTextBuffer(try owner.createTextBuffer(.unicode));
     try std.testing.expectError(error.InvalidIndex, text.buffer.loadFile("diagnostics-fixture.txt"));
     try std.testing.expectEqual(@as(u32, 1), supplied.calls);
 }
@@ -380,7 +380,7 @@ test "Context diagnostics preserve rope log order after snapshot allocation fail
     defer owner.deinit() catch unreachable;
     const text_id = try owner.createTextBuffer(.unicode);
     try owner.textBufferSetText(text_id, "owned");
-    const text = try owner.getTextBuffer(text_id);
+    const text = try owner.raw().getTextBuffer(text_id);
     failing.fail_index = failing.alloc_index;
     text.buffer.debugLogRope();
     try std.testing.expect(failing.has_induced_failure);

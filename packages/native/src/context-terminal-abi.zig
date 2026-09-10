@@ -17,7 +17,7 @@ pub fn ot_embedded_terminal_destroy(context: ?*abi.ContextHandle, id: ?*const c.
     const status = abi.sessionContextStatus(context);
     if (status != c.OT_OK) return status;
     const handle = abi.handleFromC((id orelse return fail(context, error.InvalidOptions)).*);
-    _ = context.?.core.getEmbeddedTerminal(handle) catch |err| return fail(context, err);
+    _ = context.?.core.raw().getEmbeddedTerminal(handle) catch |err| return fail(context, err);
     context.?.core.destroy(handle) catch |err| return fail(context, err);
     return c.OT_OK;
 }

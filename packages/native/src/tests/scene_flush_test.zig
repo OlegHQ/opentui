@@ -69,7 +69,7 @@ const Fixture = struct {
     }
 
     fn paint(self: *Fixture, handle: context.Handle) !scene.Paint {
-        return (try self.owner.core.getRenderable(handle)).scene_node.?.paint;
+        return (try self.owner.core.raw().getRenderable(handle)).scene_node.?.paint;
     }
 
     fn red(self: *Fixture, handle: context.Handle) !u16 {

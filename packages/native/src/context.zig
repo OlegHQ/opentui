@@ -1,4 +1,5 @@
 const std = @import("std");
+const api = @import("context_abi_c");
 const handles = @import("context-handles.zig");
 const grapheme = @import("grapheme.zig");
 const link = @import("link.zig");
@@ -62,6 +63,26 @@ pub const Error = handles.Error || yoga.Error || session.Error || error{
 };
 
 pub const RendererBuffer = enum { current, next };
+
+const scene_style_enum_maxima = blk: {
+    @setEvalBranchQuota(64 * std.meta.declarations(api).len);
+    var count = 0;
+    for (std.meta.declarations(api)) |decl| {
+        if (std.mem.startsWith(u8, decl.name, "OT_STYLE_ENUM_") and
+            !std.mem.endsWith(u8, decl.name, "_MAX")) count += 1;
+    }
+    var maxima: [count]u32 = undefined;
+    var present = [_]bool{false} ** count;
+    for (std.meta.declarations(api)) |decl| {
+        if (!std.mem.startsWith(u8, decl.name, "OT_STYLE_ENUM_") or
+            !std.mem.endsWith(u8, decl.name, "_MAX")) continue;
+        const kind = @field(api, decl.name[0 .. decl.name.len - "_MAX".len]);
+        maxima[kind] = @field(api, decl.name);
+        present[kind] = true;
+    }
+    for (present) |found| if (!found) @compileError("Missing checked scene style enum constraint");
+    break :blk maxima;
+};
 
 const FrameBufferLease = struct {
     frame: scene.FrameRequest,
@@ -443,7 +464,8 @@ const SceneMeasure = struct {
 /// Returned pointers and pool IDs are borrowed for the owning object's lifetime.
 /// Pool IDs and render buffers must not cross contexts. Callbacks must not mutate
 /// borrowed objects; checked context mutations reject reentry during layout/render.
-/// Raw getters do not register borrowers. Callers must release raw BufferLeases
+/// raw() exposes borrowed implementation access, outside checked mutation/lease
+/// admission. Its getters do not register borrowers. Callers must release raw BufferLeases
 /// before context deinit; only checked lease handles prevent context teardown.
 /// Pending output and active terminal lifecycle block teardown until restored or cancelled.
 pub const Context = struct {
@@ -481,6 +503,69 @@ pub const Context = struct {
     pub const text_pool_count_max = 256;
     pub const text_pool_bytes_max = 4 * 1024 * 1024;
     pub const text_storage_bytes_max = 64 * 1024;
+
+    /// Borrow implementation objects without retaining them. Raw access keeps
+    /// handle-kind/generation checks, but calls on the returned pointers bypass
+    /// Context mutation admission and frame authority. Never mutate them during
+    /// callbacks or another checked operation. Checked destruction invalidates
+    /// these pointers; use checked leases to pin buffer storage across calls.
+    pub fn raw(self: *Context) RawAccess {
+        return .{ .owner = self };
+    }
+
+    pub const RawAccess = struct {
+        owner: *Context,
+
+        pub fn getSession(self: RawAccess, handle: Handle) Error!*session.Session {
+            return self.owner.getSession(handle);
+        }
+
+        /// Draw only when no frame awaits completion. Route output, presentation,
+        /// resize, terminal lifecycle, and destruction through checked Context methods.
+        pub fn getSessionRenderer(self: RawAccess, handle: Handle) Error!*renderer.CliRenderer {
+            return self.owner.getSessionRenderer(handle);
+        }
+
+        pub fn getUnicode(self: RawAccess, handle: Handle) Error!*EncodedUnicode {
+            return self.owner.getUnicode(handle);
+        }
+
+        pub fn getEmbeddedTerminal(self: RawAccess, handle: Handle) Error!*embedded_terminal.EmbeddedTerminal {
+            return self.owner.getEmbeddedTerminal(handle);
+        }
+
+        pub fn getImage(self: RawAccess, handle: Handle) Error!*image.Image {
+            return self.owner.getImage(handle);
+        }
+
+        pub fn getBuffer(self: RawAccess, handle: Handle) Error!*buf.OptimizedBuffer {
+            return self.owner.getBuffer(handle);
+        }
+
+        pub fn getRenderable(self: RawAccess, handle: Handle) Error!*native_renderable.NativeRenderable {
+            return self.owner.getRenderable(handle);
+        }
+
+        pub fn getTextBuffer(self: RawAccess, handle: Handle) Error!*SharedText {
+            return self.owner.getTextBuffer(handle);
+        }
+
+        pub fn getTextBufferView(self: RawAccess, handle: Handle) Error!*TextView {
+            return self.owner.getTextBufferView(handle);
+        }
+
+        pub fn getEditBuffer(self: RawAccess, handle: Handle) Error!*Edit {
+            return self.owner.getEditBuffer(handle);
+        }
+
+        pub fn getEditorView(self: RawAccess, handle: Handle) Error!*Editor {
+            return self.owner.getEditorView(handle);
+        }
+
+        pub fn getSyntaxStyle(self: RawAccess, handle: Handle) Error!*syntax_style.SyntaxStyle {
+            return self.owner.getSyntaxStyle(handle);
+        }
+    };
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, options: Options) Error!*Context {
         if (options.object_capacity == 0 or options.render_cells_max == 0) return error.InvalidOptions;
@@ -610,7 +695,7 @@ pub const Context = struct {
         return handle;
     }
 
-    pub fn getSession(self: *Context, handle: Handle) Error!*session.Session {
+    fn getSession(self: *Context, handle: Handle) Error!*session.Session {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .session, session.Session);
     }
@@ -674,10 +759,7 @@ pub const Context = struct {
     }
 
     /// Borrows the Session's renderer for buffer drawing and queries, not ownership.
-    /// Draw only when no frame awaits completion. Output, presentation, resize,
-    /// terminal lifecycle, and destruction must go through the Session's Context
-    /// methods, never through this pointer.
-    pub fn getSessionRenderer(self: *Context, handle: Handle) Error!*renderer.CliRenderer {
+    fn getSessionRenderer(self: *Context, handle: Handle) Error!*renderer.CliRenderer {
         const value = try self.getSession(handle);
         return value.renderer orelse error.RendererNotAttached;
     }
@@ -925,7 +1007,7 @@ pub const Context = struct {
         return self.objects.insert(.encoded_unicode, value);
     }
 
-    pub fn getUnicode(self: *Context, handle: Handle) Error!*EncodedUnicode {
+    fn getUnicode(self: *Context, handle: Handle) Error!*EncodedUnicode {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .encoded_unicode, EncodedUnicode);
     }
@@ -974,7 +1056,7 @@ pub const Context = struct {
         return self.objects.insert(.embedded_terminal, value);
     }
 
-    pub fn getEmbeddedTerminal(self: *Context, handle: Handle) Error!*embedded_terminal.EmbeddedTerminal {
+    fn getEmbeddedTerminal(self: *Context, handle: Handle) Error!*embedded_terminal.EmbeddedTerminal {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .embedded_terminal, embedded_terminal.EmbeddedTerminal);
     }
@@ -1143,7 +1225,7 @@ pub const Context = struct {
         return @intCast(bytes.len);
     }
 
-    pub fn getImage(self: *Context, handle: Handle) Error!*image.Image {
+    fn getImage(self: *Context, handle: Handle) Error!*image.Image {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .image, image.Image);
     }
@@ -1212,7 +1294,7 @@ pub const Context = struct {
         try (try self.getSession(handle)).startKittyFileProbe();
     }
 
-    pub fn getBuffer(self: *Context, handle: Handle) Error!*buf.OptimizedBuffer {
+    fn getBuffer(self: *Context, handle: Handle) Error!*buf.OptimizedBuffer {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .buffer, buf.OptimizedBuffer);
     }
@@ -1811,8 +1893,8 @@ pub const Context = struct {
         if ((group == 0 or group == 1) and (edge != 0 or unit != 0)) return error.InvalidOptions;
         if (group == 4 and edge != 0) return error.InvalidOptions;
         if (group == 0 and (!std.math.isFinite(value) or value < 0 or @as(f64, value) >= 4294967296 or @trunc(value) != value)) return error.InvalidOptions;
-        // Display:contents has no box geometry and is outside this restricted scene.
-        if (group == 0 and kind == 9 and value == 2) return error.InvalidOptions;
+        if (group == api.OT_STYLE_ENUM and
+            (kind >= scene_style_enum_maxima.len or value > @as(f32, @floatFromInt(scene_style_enum_maxima[kind])))) return error.InvalidOptions;
         const node = try self.sceneMutableNode(handle);
         try yoga.check(switch (group) {
             0 => yoga.yogaNodeStyleSetEnumChecked(node.yoga_node, kind, @intFromFloat(value)),
@@ -2385,6 +2467,21 @@ pub const Context = struct {
         return scene.getPaintLayout(try self.sceneNode(handle));
     }
 
+    /// Solve the Session root without painting or publishing output. Measurement
+    /// callbacks may use checked scene queries; mutations reject until this returns.
+    pub fn sceneMeasureLayout(self: *Context, session_handle: Handle, root: Handle) !void {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const value = try self.getSession(session_handle);
+        try value.checkRendering();
+        try value.checkFrameIdle();
+        const attached = value.renderer orelse return error.RendererNotAttached;
+        const owned = value.scene orelse return error.SceneNotAttached;
+        if (value.frame_end_offset != null or attached.pendingPresentation != null) return error.PresentationPending;
+        if (attached.width > std.math.maxInt(i32) or attached.height > std.math.maxInt(i32)) return error.InvalidDimensions;
+        try owned.measureLayout(&self.objects, attached, root);
+    }
+
     /// Paints a hook-free scene and retains its DONE draft. Commit or cancel the
     /// returned request before painting again; frame-qualified effects may run first.
     pub fn scenePaint(self: *Context, session_handle: Handle, background: buf.RGBA, use_mouse: bool, excluded_hit_num: u32) !scene.FrameRequest {
@@ -2542,7 +2639,7 @@ pub const Context = struct {
         };
     }
 
-    pub fn getRenderable(self: *Context, handle: Handle) Error!*native_renderable.NativeRenderable {
+    fn getRenderable(self: *Context, handle: Handle) Error!*native_renderable.NativeRenderable {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .native_renderable, native_renderable.NativeRenderable);
     }
@@ -2589,7 +2686,7 @@ pub const Context = struct {
         return handle;
     }
 
-    pub fn getTextBuffer(self: *Context, handle: Handle) Error!*SharedText {
+    fn getTextBuffer(self: *Context, handle: Handle) Error!*SharedText {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .text_buffer, SharedText);
     }
@@ -2610,7 +2707,7 @@ pub const Context = struct {
         return handle;
     }
 
-    pub fn getTextBufferView(self: *Context, handle: Handle) Error!*TextView {
+    fn getTextBufferView(self: *Context, handle: Handle) Error!*TextView {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .text_buffer_view, TextView);
     }
@@ -2867,7 +2964,7 @@ pub const Context = struct {
         return value.handle;
     }
 
-    pub fn getEditBuffer(self: *Context, handle: Handle) Error!*Edit {
+    fn getEditBuffer(self: *Context, handle: Handle) Error!*Edit {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .edit_buffer, Edit);
     }
@@ -2888,7 +2985,7 @@ pub const Context = struct {
         return handle;
     }
 
-    pub fn getEditorView(self: *Context, handle: Handle) Error!*Editor {
+    fn getEditorView(self: *Context, handle: Handle) Error!*Editor {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .editor_view, Editor);
     }
@@ -2902,7 +2999,7 @@ pub const Context = struct {
         return self.objects.insert(.syntax_style, style);
     }
 
-    pub fn getSyntaxStyle(self: *Context, handle: Handle) Error!*syntax_style.SyntaxStyle {
+    fn getSyntaxStyle(self: *Context, handle: Handle) Error!*syntax_style.SyntaxStyle {
         if (self.closing) return error.ContextClosed;
         return self.objects.get(handle, .syntax_style, syntax_style.SyntaxStyle);
     }

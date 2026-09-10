@@ -441,7 +441,7 @@ test "Scene work budget preserves filtered feedback order geometry and output th
     for (ids, 0..) |id, pass| {
         try testing.expectError(error.InvalidOptions, owner.sceneFrameStepWorkBudgeted(id, null, options, 0, 1));
         try testing.expectError(error.InvalidOptions, owner.sceneFrameStepWorkBudgeted(id, null, options, 1, 0));
-        const root = (try owner.getSession(id)).scene.?.root.?.scene_node.?.handle;
+        const root = (try owner.raw().getSession(id)).scene.?.root.?.scene_node.?.handle;
         const parent = try box(owner, id, root, 2, 0);
         try owner.sceneSetStyle(parent, 4, 0, 0, 1, 12, 1);
         try owner.sceneSetStyle(parent, 4, 1, 0, 1, 3, 1);
@@ -480,8 +480,8 @@ test "Scene work budget preserves filtered feedback order geometry and output th
         try testing.expectEqual(expected_events.items.len, cursor);
         try testing.expectEqual(@as(f32, 2), (try owner.sceneGetLayout(changed, false)).width);
     }
-    const expected = (try owner.getSessionRenderer(ids[0])).getNextBuffer();
-    const actual = (try owner.getSessionRenderer(ids[1])).getNextBuffer();
+    const expected = (try owner.raw().getSessionRenderer(ids[0])).getNextBuffer();
+    const actual = (try owner.raw().getSessionRenderer(ids[1])).getNextBuffer();
     for (0..3) |y| for (0..12) |x| {
         try testing.expectEqualDeep(expected.get(@intCast(x), @intCast(y)), actual.get(@intCast(x), @intCast(y)));
     };
@@ -566,7 +566,7 @@ test "Scene work budget unlimited hook replies cannot bypass remaining preparati
         try testing.expectError(error.StaleFrame, f.owner.sceneFrameStep(f.id, update, options));
         const done = try f.step(yielded, options, 0, null);
         try testing.expectEqual(@as(f32, 2), (try f.owner.sceneGetPaintLayout(child)).width);
-        try testing.expectEqual(ansi.rgbColor(2, 0, 0, 255), (try f.owner.getSessionRenderer(f.id)).getNextBuffer().get(1, 0).?.bg);
+        try testing.expectEqual(ansi.rgbColor(2, 0, 0, 255), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(1, 0).?.bg);
         try f.owner.sceneFrameCancel(f.id, done.frame_id);
     }
 }
@@ -597,7 +597,7 @@ test "Scene work budget provisional preparation does not freeze callback or pain
             previous = request;
         } else return error.TestUnexpectedResult;
         try testing.expectEqual(@as(usize, 3), updates);
-        try testing.expectEqual(ansi.rgbColor(2, 0, 0, 255), (try f.owner.getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.bg);
+        try testing.expectEqual(ansi.rgbColor(2, 0, 0, 255), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.bg);
         _ = try f.owner.sceneFrameCommit(f.id, done, true);
         var bytes: [4096]u8 = undefined;
         _ = try drain(f.owner, f.id, &bytes);
@@ -625,7 +625,7 @@ test "Scene work budget changed transforms never mix saved parents with live chi
             previous = request;
         } else return error.TestUnexpectedResult;
         try testing.expectEqual(@as(f64, -2147483647), (try f.owner.sceneGetPaintLayout(child)).screenX);
-        try testing.expectEqual(ansi.rgbColor(0, 0, 0, 255), (try f.owner.getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.bg);
+        try testing.expectEqual(ansi.rgbColor(0, 0, 0, 255), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.bg);
         try f.owner.sceneFrameCancel(f.id, done.frame_id);
     }
 }

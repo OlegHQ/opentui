@@ -23,8 +23,8 @@ test "Context checked stacks intersect clips and multiply opacity without changi
     const source = try owner.createBuffer(6, 1, .{});
     try owner.clearBuffer(destination, black);
     try owner.drawBufferText(source, "A\u{754c}BCD", 0, 0, red, red, 0);
-    const target = try owner.getBuffer(destination);
-    const source_buffer = try owner.getBuffer(source);
+    const target = try owner.raw().getBuffer(destination);
+    const source_buffer = try owner.raw().getBuffer(source);
     const source_chars = source_buffer.buffer.char[0..6].*;
     _ = try owner.bufferStack(destination, null, .{ .operation = .push_scissor, .x = 1, .width = 4, .height = 1 });
     _ = try owner.bufferStack(destination, null, .{ .operation = .push_scissor, .x = 2, .width = 4, .height = 1 });
@@ -54,7 +54,7 @@ test "Context checked stacks reject invalid bounds and preserve state on depth a
     const owner = try context.Context.init(failing.allocator(), testing.io, .{});
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(2, 1, .{});
-    const target = try owner.getBuffer(id);
+    const target = try owner.raw().getBuffer(id);
     failing.fail_index = failing.alloc_index;
     failing.resize_fail_index = failing.resize_index;
     try testing.expectError(error.OutOfMemory, owner.bufferStack(id, null, .{ .operation = .push_opacity, .opacity = 0.5 }));
@@ -107,7 +107,7 @@ test "Context checked frame stacks keep inherited floors and restore after ackno
     try owner.sceneSetPaint(child, .{ .shouldFill = 0, .opacity = 0.5 });
     try owner.sceneSetHooks(child, 56, 1, 3, 1);
     try owner.sceneMoveNode(child, root, 0);
-    const target = (try owner.getSessionRenderer(id)).getNextBuffer();
+    const target = (try owner.raw().getSessionRenderer(id)).getNextBuffer();
     const before = try owner.sceneFrameStep(id, null, options);
     const inherited = target.getCurrentScissorRect().?;
     for ([_]context.BufferStack.Operation{ .pop_scissor, .clear_scissors, .pop_opacity, .clear_opacity }) |operation| {
@@ -170,7 +170,7 @@ test "Context checked stacks ABI rejects invalid calls without writing output or
     owner.?.core.mutating = true;
     try testing.expectEqual(c.OT_CONTEXT_BUSY, abi.ot_buffer_stack(owner, &id, null, c.OT_BUFFER_STACK_CLEAR_OPACITY, 0, 0, 0, 0, &opacity, &output));
     owner.?.core.mutating = false;
-    try testing.expectEqual(@as(f32, 0.5), (try owner.?.core.getBuffer(handle)).getCurrentOpacity());
+    try testing.expectEqual(@as(f32, 0.5), (try owner.?.core.raw().getBuffer(handle)).getCurrentOpacity());
     var foreign = id;
     foreign.context_id += 1;
     try testing.expectEqual(c.OT_WRONG_CONTEXT, abi.ot_buffer_stack(owner, &foreign, null, 0, 0, 0, 0, 0, &opacity, &output));

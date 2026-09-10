@@ -11,55 +11,7 @@ use std::ffi::c_void;
 pub type ot_context = c_void;
 pub type ot_status = i32;
 
-macro_rules! constants {
-    ($($name:ident: $kind:ty = $value:expr;)*) => {
-        $(pub const $name: $kind = $value;)*
-        #[cfg(test)]
-        fn constants() -> Vec<u32> { vec![$($name as u32,)*] }
-    };
-}
-
-constants! {
-    OT_CONTEXT_ABI_VERSION: u32 = 1;
-    OT_OK: i32 = 0;
-    OT_INVALID_ARGUMENT: i32 = -1;
-    OT_CONTEXT_BUSY: i32 = -6;
-    OT_STALE_HANDLE: i32 = -9;
-    OT_OUTPUT_BACKPRESSURE: i32 = -11;
-    OT_OUTPUT_BUSY: i32 = -13;
-    OT_STALE_OUTPUT: i32 = -14;
-    OT_OUTPUT_FAILED: i32 = -15;
-    OT_OBJECT_LIMIT: i32 = -16;
-    OT_SCENE_ROOT: u32 = 0;
-    OT_SCENE_TEXT: u32 = 2;
-    OT_SCENE_TEXT_FOREGROUND: u32 = 1;
-    OT_SCENE_TEXT_LINK: u32 = 4;
-    OT_SESSION_CLOSED_STATE: u32 = 2;
-    OT_SESSION_FAILED: u32 = 3;
-    OT_SESSION_CANCELLED_STATE: u32 = 4;
-    OT_SESSION_REMOTE_REMOTE: u32 = 2;
-    OT_RENDER_PENDING: u32 = 1;
-    OT_SESSION_CONTROL_PACKET_BYTES: u32 = 4096;
-    OT_TERMINAL_ALTERNATE_SCREEN: u32 = 1;
-    OT_TERMINAL_ACTIVE: u32 = 2;
-    OT_TERMINAL_RESTORED: u32 = 7;
-    OT_PUMP_IDLE: u32 = 0;
-    OT_PUMP_AGAIN: u32 = 1;
-    OT_PUMP_OUTPUT_PENDING: u32 = 2;
-    OT_PUMP_WAIT_UNTIL: u32 = 3;
-    OT_PUMP_CLOSED: u32 = 4;
-    OT_SCENE_BOX: u32 = 1;
-    OT_SESSION_REMOTE_AUTO: u32 = 0;
-    OT_SESSION_REMOTE_LOCAL: u32 = 1;
-    OT_SESSION_ENV_ENTRIES_MAX: u32 = 256;
-    OT_SESSION_ENV_BYTES_MAX: u32 = 65536;
-    OT_RENDER_PRESENTED: u32 = 0;
-    OT_RENDER_SKIPPED: u32 = 2;
-    OT_RENDER_FAILED: u32 = 3;
-    OT_WRONG_CONTEXT: i32 = -7;
-    OT_WRONG_SESSION: i32 = -10;
-    OT_STALE_FRAME: i32 = -25;
-}
+include!("constants.generated.rs");
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
