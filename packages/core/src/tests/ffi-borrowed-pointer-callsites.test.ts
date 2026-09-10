@@ -493,26 +493,28 @@ describe("borrowed pointer call sites", () => {
 
   test("image calls pass transient buffer owners directly", () => {
     const names = [
-      "imageInfo",
-      "imageDecode",
-      "imageCreateFromRgba",
-      "imageGetInfo",
-      "imageRetain",
-      "imageClone",
-      "imageCopyPixels",
-      "imageResize",
-      "imageExtract",
-      "imageExtend",
-      "imageTransform",
-      "imageComposite",
+      "ot_image_inspect",
+      "ot_image_decode",
+      "ot_image_create_pixels",
+      "ot_image_get_info",
+      "ot_image_retain",
+      "ot_image_clone",
+      "ot_image_copy_pixels",
+      "ot_image_resize",
+      "ot_image_extract",
+      "ot_image_extend",
+      "ot_image_transform",
+      "ot_image_composite",
     ] as const
+    const context = lib.createContext({ objectCapacity: 4, renderCellsMax: 1 })
+    const handle = lib.imageCreateFromRgba(context, Uint8Array.of(1, 2, 3, 255), 1, 1, 4).handle!
     const originals = new Map<string, (...args: any[]) => any>()
     const calls = new Map<string, any[]>()
     for (const name of names) {
       originals.set(name, symbols[name]!)
       symbols[name] = (...args: any[]) => {
         calls.set(name, args)
-        return 0
+        return -1
       }
     }
 
@@ -521,11 +523,9 @@ describe("borrowed pointer call sites", () => {
       const pixels = Uint8Array.of(5, 6, 7, 255)
       const destination = new Uint8Array(4)
       const background = Uint8Array.of(8, 9, 10, 255)
-      const handle = 1 as any
-
-      lib.imageInfo(data)
-      lib.imageDecode(data)
-      lib.imageCreateFromRgba(pixels, 1, 1, 4)
+      lib.imageInfo(context, data)
+      lib.imageDecode(context, data)
+      lib.imageCreateFromRgba(context, pixels, 1, 1, 4)
       lib.imageGetInfo(handle)
       lib.imageRetain(handle)
       lib.imageClone(handle)
@@ -536,68 +536,73 @@ describe("borrowed pointer call sites", () => {
       lib.imageTransform(handle, 0)
       lib.imageComposite(handle, handle, 0, 0, 0, 255)
 
-      expect(calls.get("imageInfo")![0]).toBe(data)
-      expect(calls.get("imageInfo")![2]).toBeInstanceOf(ArrayBuffer)
-      expect(calls.get("imageDecode")![0]).toBe(data)
-      expect(calls.get("imageDecode")![2]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageCreateFromRgba")![0]).toBe(pixels)
-      expect(calls.get("imageCreateFromRgba")![5]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageGetInfo")![1]).toBeInstanceOf(ArrayBuffer)
-      expect(calls.get("imageRetain")![1]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageClone")![1]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageCopyPixels")![1]).toBe(destination)
-      expect(calls.get("imageResize")![4]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageExtract")![5]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageExtend")![5]).toBe(background)
-      expect(calls.get("imageExtend")![6]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageTransform")![2]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("imageComposite")![6]).toBeInstanceOf(Uint32Array)
+      expect(calls.get("ot_image_inspect")![1]).toBe(data)
+      expect(calls.get("ot_image_inspect")![3]).toBeInstanceOf(Uint32Array)
+      expect(calls.get("ot_image_decode")![1]).toBe(data)
+      expect(calls.get("ot_image_decode")![3]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_create_pixels")![1]).toBe(pixels)
+      expect(calls.get("ot_image_create_pixels")![8]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_get_info")![2]).toBeInstanceOf(Uint32Array)
+      expect(calls.get("ot_image_retain")![2]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_clone")![3]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_copy_pixels")![2]).toBe(destination)
+      expect(calls.get("ot_image_resize")![5]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_extract")![6]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_extend")![6]).toBe(background)
+      expect(calls.get("ot_image_extend")![7]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_transform")![3]).toBeInstanceOf(BigUint64Array)
+      expect(calls.get("ot_image_composite")![7]).toBeInstanceOf(BigUint64Array)
     } finally {
       for (const [name, original] of originals) symbols[name] = original
+      lib.destroyContext(context)
     }
   })
 
-  test("imageGetPixelsPtr preserves portable pointer returns", () => {
-    const original = symbols.imageGetPixelsPtr
-    const pointer = 1234n as Pointer
-    symbols.imageGetPixelsPtr = (handle) => {
-      expect(handle).toBe(1)
-      return pointer
-    }
+  test("checked image raw transfer preserves portable addresses", () => {
+    const context = lib.createContext({ objectCapacity: 4, renderCellsMax: 1 })
+    const image = lib.imageCreateFromRgba(context, Uint8Array.of(1, 2, 3, 255), 1, 1, 4).handle!
+    const raw = lib.imageTakePixels(image)
     try {
-      expect(lib.imageGetPixelsPtr(1 as any)).toBe(pointer)
-      symbols.imageGetPixelsPtr = () => 0n
-      expect(lib.imageGetPixelsPtr(1 as any)).toBeNull()
+      expect(raw.status).toBe(0)
+      expect(["number", "bigint"]).toContain(typeof raw.pointer)
+      expect(raw.byteCount).toBe(4)
     } finally {
-      symbols.imageGetPixelsPtr = original
+      lib.imageReleasePixels(raw.lease!)
+      lib.destroyContext(context)
     }
   })
 
-  test("empty image inputs preserve nullable pointer semantics", () => {
-    withStubbedSymbols(
-      {
-        imageInfo: () => 0,
-        imageDecode: () => 0,
-        imageCreateFromRgba: () => 0,
-        imageCopyPixels: () => 0,
-      },
-      (calls) => {
-        const empty = new Uint8Array()
-        lib.imageInfo(empty)
-        lib.imageDecode(empty)
-        lib.imageCreateFromRgba(empty, 0, 0, 0)
-        lib.imageCopyPixels(1 as any, empty, 0, false)
+  test("empty image inputs pass zero-length buffer owners directly", () => {
+    const context = lib.createContext({ objectCapacity: 4, renderCellsMax: 1 })
+    const image = lib.imageCreateFromRgba(context, Uint8Array.of(1, 2, 3, 255), 1, 1, 4).handle!
+    try {
+      withStubbedSymbols(
+        {
+          ot_image_inspect: () => -1,
+          ot_image_decode: () => -1,
+          ot_image_create_pixels: () => -1,
+          ot_image_copy_pixels: () => -1,
+        },
+        (calls) => {
+          const empty = new Uint8Array()
+          lib.imageInfo(context, empty)
+          lib.imageDecode(context, empty)
+          lib.imageCreateFromRgba(context, empty, 0, 0, 0)
+          lib.imageCopyPixels(image, empty, 0, false)
 
-        expect(calls.imageInfo[0]![0]).toBeNull()
-        expect(calls.imageDecode[0]![0]).toBeNull()
-        expect(calls.imageCreateFromRgba[0]![0]).toBeNull()
-        expect(calls.imageCopyPixels[0]![1]).toBeNull()
-      },
-    )
+          expect(calls.ot_image_inspect[0]![1]).toBe(empty)
+          expect(calls.ot_image_decode[0]![1]).toBe(empty)
+          expect(calls.ot_image_create_pixels[0]![1]).toBe(empty)
+          expect(calls.ot_image_copy_pixels[0]![2]).toBe(empty)
+        },
+      )
+    } finally {
+      lib.destroyContext(context)
+    }
   })
 
   test("imageExtend rejects a short background before native access", () => {
-    withStubbedSymbol("imageExtend", (calls) => {
+    withStubbedSymbol("ot_image_extend", (calls) => {
       expect(lib.imageExtend(1 as any, 0, 0, 0, 0, Uint8Array.of(1, 2, 3))).toEqual({
         status: 7,
         handle: null,

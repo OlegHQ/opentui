@@ -12,17 +12,6 @@ export interface NativeImageInfo {
   hasAlpha: number
 }
 
-export const NativeImageInfoStruct = defineStruct([
-  ["width", "u32"],
-  ["height", "u32"],
-  ["sourceWidth", "u32"],
-  ["sourceHeight", "u32"],
-  ["format", "u32"],
-  ["colorStatus", "u32"],
-  ["orientation", "u32"],
-  ["hasAlpha", "u32"],
-])
-
 export type BuildOptions = {
   gpaSafeStats: boolean
   gpaMemoryLimitTracking: boolean

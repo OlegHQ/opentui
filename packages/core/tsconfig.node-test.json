@@ -135,6 +135,7 @@
     "src/tests/context-editors.test.ts",
     "src/tests/context-text-resources.test.ts",
     "src/tests/context-image-transport.test.ts",
+    "src/tests/context-image-creation.test.ts",
     "src/tests/renderer.native-scene-image.test.ts",
     "src/tests/renderer.native-scene-surface.test.ts",
     "src/tests/renderer.native-scene-staging.test.ts",

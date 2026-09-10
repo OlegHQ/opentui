@@ -54,7 +54,6 @@ import {
   AudioStatsStruct,
   BuildOptionsStruct,
   AllocatorStatsStruct,
-  NativeImageInfoStruct,
 } from "./zig-structs.js"
 import type {
   NativeSpanFeedOptions,
@@ -122,6 +121,7 @@ export type ContextSyntaxStyleHandle = ContextObjectHandle & { readonly [context
 export type ContextTextBufferHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "text_buffer" }
 export type ContextTextBufferViewHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "text_buffer_view" }
 export type ContextImageHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "image" }
+export type ContextImagePixelsHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "image_pixels" }
 export type ContextUnicodeHandle = ContextObjectHandle & { readonly [contextResourceBrand]: "unicode" }
 export type ContextEmbeddedTerminalHandle = ContextObjectHandle & {
   readonly [contextResourceBrand]: "embedded_terminal"
@@ -662,7 +662,23 @@ export class NativeError extends Error {
   }
 }
 export type AudioEngineHandle = NativeHandle<"audio_engine">
-export type ImageHandle = NativeHandle<"image">
+export type ImageHandle = ContextImageHandle
+
+const imageStatusCodes = new Map<number, number>([
+  [nativeConstants.OT_OK, 0],
+  [nativeConstants.OT_STALE_HANDLE, 1],
+  [nativeConstants.OT_IMAGE_UNSUPPORTED_FORMAT, 2],
+  [nativeConstants.OT_IMAGE_UNSUPPORTED_COLOR_SPACE, 3],
+  [nativeConstants.OT_IMAGE_MALFORMED_DATA, 4],
+  [nativeConstants.OT_IMAGE_DIMENSION_LIMIT, 5],
+  [nativeConstants.OT_IMAGE_MEMORY_LIMIT, 6],
+  [nativeConstants.OT_INVALID_ARGUMENT, 7],
+  [nativeConstants.OT_OUT_OF_MEMORY, 8],
+  [nativeConstants.OT_IMAGE_OUTPUT_TOO_SMALL, 9],
+  [nativeConstants.OT_INTERNAL_ERROR, 10],
+  [nativeConstants.OT_IMAGE_UNSUPPORTED_FEATURE, 11],
+  [nativeConstants.OT_IMAGE_BUSY, 12],
+])
 export type ClipboardServiceHandle = number & { readonly __nativeHandle: "clipboard_service" }
 export type ClipboardOperationHandle = number & { readonly __nativeHandle: "clipboard_operation" }
 
@@ -1871,26 +1887,8 @@ function getOpenTUILib(libPath?: string) {
       returns: "void",
     },
 
-    imageInfo: { args: ["ptr", "u32", "ptr"], returns: "u32" },
     imageRetainIccCache: { args: [], returns: "void" },
     imageReleaseIccCache: { args: [], returns: "void" },
-    imageDecode: { args: ["ptr", "u32", "buffer"], returns: "u32" },
-    imageCreateFromRgba: { args: ["ptr", "u64", "u32", "u32", "u32", "buffer"], returns: "u32" },
-    imageCreateFromPixels: { args: ["ptr", "u64", "u32", "u32", "u32", "u32", "u32", "buffer"], returns: "u32" },
-    imageUpdatePixels: { args: ["u32", "ptr", "u64", "u32", "u32", "u32"], returns: "u32" },
-    imageDestroy: { args: ["u32"], returns: "void" },
-    imageRetain: { args: ["u32", "buffer"], returns: "u32" },
-    imageGetInfo: { args: ["u32", "ptr"], returns: "u32" },
-    imageMaterialize: { args: ["u32"], returns: "u32" },
-    imageEnsureEncodedPng: { args: ["u32"], returns: "u32" },
-    imageGetPixelsPtr: { args: ["u32"], returns: "ptr" },
-    imageClone: { args: ["u32", "buffer"], returns: "u32" },
-    imageCopyPixels: { args: ["u32", "ptr", "u64", "u32", "u8"], returns: "u32" },
-    imageResize: { args: ["u32", "u32", "u32", "u32", "buffer"], returns: "u32" },
-    imageExtract: { args: ["u32", "u32", "u32", "u32", "u32", "buffer"], returns: "u32" },
-    imageExtend: { args: ["u32", "u32", "u32", "u32", "u32", "buffer", "buffer"], returns: "u32" },
-    imageTransform: { args: ["u32", "u32", "buffer"], returns: "u32" },
-    imageComposite: { args: ["u32", "u32", "i32", "i32", "u32", "u8", "buffer"], returns: "u32" },
 
     ...yogaSymbols,
 
@@ -4628,18 +4626,9 @@ export class FFIRenderLib {
   }
 
   public importContextImage(context: NativeContextHandle, source: ImageHandle): ContextImageHandle {
-    const token = toSafeFFIU32Length(toNumber(source), "Compatibility image handle")
-    const output = new BigUint64Array(nativeLayouts.ot_handle.size / 8)
-    return this.getYogaHost().runMutation(() => {
-      const pointer = this.nativeContextPointer(context, "ot_image_import_compat")
-      nativeResult("ot_image_import_compat", this.opentui.symbols.ot_image_import_compat(pointer, token, output))
-      try {
-        return decodeContextHandle(context, output) as ContextImageHandle
-      } catch (error) {
-        this.opentui.symbols.ot_image_destroy(pointer, output)
-        throw error
-      }
-    })
+    const result = this.imageClone(source, context)
+    if (!result.handle) throw new Error(`Image clone failed: ${result.status}`)
+    return result.handle
   }
 
   public destroyContextImage(context: NativeContextHandle, image: ContextImageHandle): void {
@@ -7973,45 +7962,83 @@ export class FFIRenderLib {
     return this.opentui.symbols.streamCommitReserved(stream, length)
   }
 
-  private imageHandleResult(status: number, output: Uint32Array): { status: number; handle: ImageHandle | null } {
-    return { status, handle: status === 0 && output[0] !== 0 ? (output[0] as ImageHandle) : null }
+  private imageStatus(operation: string, status: number): number {
+    const result = imageStatusCodes.get(status)
+    if (result !== undefined) return result
+    nativeResult(operation, status)
+    return 0
   }
 
-  public imageInfo(data: Uint8Array): { status: number; info: NativeImageInfo } {
-    const length = toSafeFFIU32Length(data.byteLength, "image data")
-    const output = new ArrayBuffer(NativeImageInfoStruct.size)
-    const status = this.opentui.symbols.imageInfo(data.byteLength === 0 ? null : data, length, output)
-    return { status, info: NativeImageInfoStruct.unpack(output) }
+  private imageCall(context: NativeContextHandle, operation: string, call: (pointer: Pointer) => number): number {
+    return this.getYogaHost().runMutation(() =>
+      this.imageStatus(operation, call(this.nativeContextPointer(context, operation))),
+    )
   }
 
-  public imageDecode(data: Uint8Array): { status: number; handle: ImageHandle | null } {
-    const length = toSafeFFIU32Length(data.byteLength, "image data")
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(
-      this.opentui.symbols.imageDecode(data.byteLength === 0 ? null : data, length, output),
-      output,
+  private imageOutput(
+    context: NativeContextHandle,
+    operation: string,
+    call: (pointer: Pointer, output: BigUint64Array) => number,
+  ): { status: number; handle: ImageHandle | null } {
+    const output = new BigUint64Array(nativeLayouts.ot_handle.size / 8)
+    const status = this.imageCall(context, operation, (pointer) => call(pointer, output))
+    if (status !== 0) return { status, handle: null }
+    try {
+      return { status, handle: decodeContextHandle(context, output) as ImageHandle }
+    } catch (error) {
+      this.opentui.symbols.ot_image_destroy(this.nativeContextPointer(context, operation), output)
+      throw error
+    }
+  }
+
+  private imageInfoOutput(
+    context: NativeContextHandle,
+    operation: string,
+    call: (pointer: Pointer, output: Uint32Array) => number,
+  ): { status: number; info: NativeImageInfo } {
+    const layout = nativeLayouts.ot_image_info
+    const output = new Uint32Array(layout.size / 4)
+    const status = this.imageCall(context, operation, (pointer) => call(pointer, output))
+    const fields = layout.fields
+    return {
+      status,
+      info: {
+        width: output[fields.width.offset / 4],
+        height: output[fields.height.offset / 4],
+        sourceWidth: output[fields.source_width.offset / 4],
+        sourceHeight: output[fields.source_height.offset / 4],
+        format: output[fields.format.offset / 4],
+        colorStatus: output[fields.color_status.offset / 4],
+        orientation: output[fields.orientation.offset / 4],
+        hasAlpha: output[fields.has_alpha.offset / 4],
+      },
+    }
+  }
+
+  public imageInfo(context: NativeContextHandle, data: Uint8Array): { status: number; info: NativeImageInfo } {
+    return this.imageInfoOutput(context, "ot_image_inspect", (pointer, output) =>
+      this.opentui.symbols.ot_image_inspect(pointer, data, BigInt(data.byteLength), output),
+    )
+  }
+
+  public imageDecode(context: NativeContextHandle, data: Uint8Array): { status: number; handle: ImageHandle | null } {
+    return this.imageOutput(context, "ot_image_decode", (pointer, output) =>
+      this.opentui.symbols.ot_image_decode(pointer, data, BigInt(data.byteLength), output),
     )
   }
 
   public imageCreateFromRgba(
+    context: NativeContextHandle,
     pixels: Uint8Array,
     width: number,
     height: number,
     stride: number,
   ): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    const status = this.opentui.symbols.imageCreateFromRgba(
-      pixels.byteLength === 0 ? null : pixels,
-      BigInt(pixels.byteLength),
-      width,
-      height,
-      stride,
-      output,
-    )
-    return this.imageHandleResult(status, output)
+    return this.imageCreateFromPixels(context, pixels, width, height, stride, 0, 0)
   }
 
   public imageCreateFromPixels(
+    context: NativeContextHandle,
     pixels: Uint8Array,
     width: number,
     height: number,
@@ -8019,18 +8046,19 @@ export class FFIRenderLib {
     format: number,
     alpha: number,
   ): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    const status = this.opentui.symbols.imageCreateFromPixels(
-      pixels.byteLength === 0 ? null : pixels,
-      BigInt(pixels.byteLength),
-      width,
-      height,
-      stride,
-      format,
-      alpha,
-      output,
+    return this.imageOutput(context, "ot_image_create_pixels", (pointer, output) =>
+      this.opentui.symbols.ot_image_create_pixels(
+        pointer,
+        pixels,
+        BigInt(pixels.byteLength),
+        width,
+        height,
+        stride,
+        format,
+        alpha,
+        output,
+      ),
     )
-    return this.imageHandleResult(status, output)
   }
 
   public imageUpdatePixels(
@@ -8040,23 +8068,29 @@ export class FFIRenderLib {
     format: number,
     alpha: number,
   ): number {
-    return this.opentui.symbols.imageUpdatePixels(
-      image,
-      pixels.byteLength === 0 ? null : pixels,
-      BigInt(pixels.byteLength),
-      stride,
-      format,
-      alpha,
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageCall(image.context, "ot_image_update_pixels", (pointer) =>
+      this.opentui.symbols.ot_image_update_pixels(
+        pointer,
+        handle,
+        pixels,
+        BigInt(pixels.byteLength),
+        stride,
+        format,
+        alpha,
+      ),
     )
   }
 
   public imageDestroy(image: ImageHandle): void {
-    this.opentui.symbols.imageDestroy(image)
+    this.destroyContextImage(image.context, image)
   }
 
   public imageRetain(image: ImageHandle): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(this.opentui.symbols.imageRetain(image, output), output)
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageOutput(image.context, "ot_image_retain", (pointer, output) =>
+      this.opentui.symbols.ot_image_retain(pointer, handle, output),
+    )
   }
 
   public imageRetainIccCache(): void {
@@ -8068,36 +8102,85 @@ export class FFIRenderLib {
   }
 
   public imageGetInfo(image: ImageHandle): { status: number; info: NativeImageInfo } {
-    const output = new ArrayBuffer(NativeImageInfoStruct.size)
-    const status = this.opentui.symbols.imageGetInfo(image, output)
-    return { status, info: NativeImageInfoStruct.unpack(output) }
-  }
-
-  public imageGetPixelsPtr(image: ImageHandle): Pointer | null {
-    const pointer = this.opentui.symbols.imageGetPixelsPtr(image)
-    return pointer === null || pointer === 0 || pointer === 0n ? null : pointer
-  }
-
-  public imageMaterialize(image: ImageHandle): number {
-    return this.opentui.symbols.imageMaterialize(image)
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageInfoOutput(image.context, "ot_image_get_info", (pointer, output) =>
+      this.opentui.symbols.ot_image_get_info(pointer, handle, output),
+    )
   }
 
   public imageEnsureEncodedPng(image: ImageHandle): number {
-    return this.opentui.symbols.imageEnsureEncodedPng(image)
+    return this.imageCopyPng(image, new Uint8Array()).status
   }
 
-  public imageClone(image: ImageHandle): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(this.opentui.symbols.imageClone(image, output), output)
+  public imageCopyPng(image: ImageHandle, destination: Uint8Array): { status: number; byteCount: number } {
+    const handle = encodeContextHandle(image.context, image)
+    const count = new BigUint64Array(1)
+    const status = this.imageCall(image.context, "ot_image_copy_png", (pointer) =>
+      this.opentui.symbols.ot_image_copy_png(pointer, handle, destination, BigInt(destination.byteLength), count),
+    )
+    return { status, byteCount: Number(count[0]) }
+  }
+
+  public imageTakePixels(image: ImageHandle): {
+    status: number
+    lease: ContextImagePixelsHandle | null
+    pointer: Pointer | null
+    byteCount: number
+  } {
+    const handle = encodeContextHandle(image.context, image)
+    const layout = nativeLayouts.ot_image_pixels
+    const output = new BigUint64Array(layout.size / 8)
+    const status = this.imageCall(image.context, "ot_image_take_pixels", (pointer) =>
+      this.opentui.symbols.ot_image_take_pixels(pointer, handle, output),
+    )
+    if (status !== 0) return { status, lease: null, pointer: null, byteCount: 0 }
+    try {
+      return {
+        status,
+        lease: decodeContextHandle(image.context, output) as ContextImagePixelsHandle,
+        pointer: toPointer(output[layout.fields.pixels.offset / 8]),
+        byteCount: Number(output[layout.fields.byte_count.offset / 8]),
+      }
+    } catch (error) {
+      this.opentui.symbols.ot_image_pixels_release(
+        this.nativeContextPointer(image.context, "ot_image_pixels_release"),
+        output,
+      )
+      throw error
+    }
+  }
+
+  public imageReleasePixels(lease: ContextImagePixelsHandle): void {
+    const handle = encodeContextHandle(lease.context, lease)
+    this.getYogaHost().runMutation(() => {
+      const pointer = this.nativeContextPointer(lease.context, "ot_image_pixels_release")
+      nativeResult("ot_image_pixels_release", this.opentui.symbols.ot_image_pixels_release(pointer, handle))
+    })
+  }
+
+  public imageClone(image: ImageHandle, context = image.context): { status: number; handle: ImageHandle | null } {
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageOutput(context, "ot_image_clone", (pointer, output) =>
+      this.opentui.symbols.ot_image_clone(
+        pointer,
+        this.nativeContextPointer(image.context, "ot_image_clone"),
+        handle,
+        output,
+      ),
+    )
   }
 
   public imageCopyPixels(image: ImageHandle, destination: Uint8Array, stride: number, bgra: boolean): number {
-    return this.opentui.symbols.imageCopyPixels(
-      image,
-      destination.byteLength === 0 ? null : destination,
-      BigInt(destination.byteLength),
-      stride,
-      bgra ? 1 : 0,
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageCall(image.context, "ot_image_copy_pixels", (pointer) =>
+      this.opentui.symbols.ot_image_copy_pixels(
+        pointer,
+        handle,
+        destination,
+        BigInt(destination.byteLength),
+        stride,
+        bgra ? 1 : 0,
+      ),
     )
   }
 
@@ -8107,8 +8190,10 @@ export class FFIRenderLib {
     height: number,
     filter: number,
   ): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(this.opentui.symbols.imageResize(image, width, height, filter, output), output)
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageOutput(image.context, "ot_image_resize", (pointer, output) =>
+      this.opentui.symbols.ot_image_resize(pointer, handle, width, height, filter, output),
+    )
   }
 
   public imageExtract(
@@ -8118,8 +8203,10 @@ export class FFIRenderLib {
     width: number,
     height: number,
   ): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(this.opentui.symbols.imageExtract(image, left, top, width, height, output), output)
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageOutput(image.context, "ot_image_extract", (pointer, output) =>
+      this.opentui.symbols.ot_image_extract(pointer, handle, left, top, width, height, output),
+    )
   }
 
   public imageExtend(
@@ -8131,16 +8218,17 @@ export class FFIRenderLib {
     background: Uint8Array,
   ): { status: number; handle: ImageHandle | null } {
     if (!(background instanceof Uint8Array) || background.byteLength !== 4) return { status: 7, handle: null }
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(
-      this.opentui.symbols.imageExtend(image, top, right, bottom, left, background, output),
-      output,
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageOutput(image.context, "ot_image_extend", (pointer, output) =>
+      this.opentui.symbols.ot_image_extend(pointer, handle, top, right, bottom, left, background, output),
     )
   }
 
   public imageTransform(image: ImageHandle, operation: number): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(this.opentui.symbols.imageTransform(image, operation, output), output)
+    const handle = encodeContextHandle(image.context, image)
+    return this.imageOutput(image.context, "ot_image_transform", (pointer, output) =>
+      this.opentui.symbols.ot_image_transform(pointer, handle, operation, output),
+    )
   }
 
   public imageComposite(
@@ -8151,10 +8239,10 @@ export class FFIRenderLib {
     blend: number,
     opacity: number,
   ): { status: number; handle: ImageHandle | null } {
-    const output = new Uint32Array(1)
-    return this.imageHandleResult(
-      this.opentui.symbols.imageComposite(base, overlay, left, top, blend, opacity, output),
-      output,
+    const baseHandle = encodeContextHandle(base.context, base)
+    const overlayHandle = encodeContextHandle(base.context, overlay)
+    return this.imageOutput(base.context, "ot_image_composite", (pointer, output) =>
+      this.opentui.symbols.ot_image_composite(pointer, baseHandle, overlayHandle, left, top, blend, opacity, output),
     )
   }
 }
