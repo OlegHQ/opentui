@@ -29,6 +29,12 @@ and frame requests carry additional authority; they cannot substitute for
 resource handles. Native ownership checks apply to all bindings, including those
 made by direct Zig callers.
 
+TypeScript resource factories accept a `NativeResourceOwner` and retain its
+canonical `resourceContext`. A root `NativeSession` owns that Context, and
+detached Sessions share it. Resource wrappers remain usable after their
+originating detached Session is destroyed, until the resource or Context is
+destroyed. Explicit resource destruction also removes its event subscriptions.
+
 ## Mutation visibility
 
 Application state passes through distinct stages:
@@ -79,6 +85,24 @@ Selected-text reads do not prepare virtual lines or follow the cursor.
 Coordinate-based edit ranges can prepare the document's marker cache. View line
 queries can prepare wrapping, and editor info queries follow the cursor only
 when explicitly requested.
+
+## Painted drafts and submission
+
+`scenePaint` and `ot_scene_paint` return the same `DONE` request as incremental
+frame stepping. The Session retains one painted draft until it is submitted or
+cancelled. Use the exact issued request for acknowledgement and submission,
+including its identities, generations, and dimensions. Separate geometry queries
+provide observations without granting authority.
+
+Normal and frame-qualified split commits consume that draft on every returned
+render status: `PRESENTED`, `PENDING`, `SKIPPED`, and `FAILED`. An admission error
+preserves the draft for retry. A consumed draft is stale even if earlier output
+remains pending. Output delivery and presentation completion remain separate
+from draft consumption.
+
+TypeScript treats issued authority fields as readonly. Rust represents the draft
+as an opaque `PaintedFrame`, consumes it on successful submission, and cancels an
+unsubmitted draft when it is dropped.
 
 ## Drawing and storage access
 

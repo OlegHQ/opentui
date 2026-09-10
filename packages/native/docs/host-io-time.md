@@ -55,7 +55,7 @@ unlinks all use that I/O. The renderer also uses it for hit-grid dumps. Supporte
 text-resource file operations already use the same Context dependency.
 
 Kitty file transport retains at most eight files and 64 MiB per renderer. Files
-use exclusive creation, mode `0600`, and the renderer's copied `TMPDIR` hint
+use exclusive creation, mode `0600`, and the renderer's explicit `TMPDIR` hint
 (otherwise `/tmp` on supported systems). Preparation and output failures close
 open files and attempt to unlink leases. Matching acknowledgements, cancellation,
 suspension, output failure, and renderer teardown also attempt release. Expiry
