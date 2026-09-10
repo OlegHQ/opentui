@@ -6,9 +6,9 @@ import { NativeStatus, resolveRenderLib } from "../zig.js"
 const lib = resolveRenderLib()
 const options = { objectCapacity: 16, renderCellsMax: 128 }
 
-test("Context image import outlives its compatibility source and rejects stale handles", () => {
+test("Context image clone outlives its checked source and rejects stale handles", () => {
   const context = lib.createContext(options)
-  const source = lib.imageCreateFromRgba(Uint8Array.of(255, 0, 0, 255), 1, 1, 4).handle!
+  const source = lib.imageCreateFromRgba(context, Uint8Array.of(255, 0, 0, 255), 1, 1, 4).handle!
   try {
     const image = lib.importContextImage(context, source)
     lib.imageDestroy(source)
@@ -22,9 +22,8 @@ test("Context image import outlives its compatibility source and rejects stale h
     assert.throws(() => lib.contextDrawImage({ context, target, frame: null }, image, { width: 2, height: 1 }), {
       status: NativeStatus.StaleHandle,
     })
-    assert.throws(() => lib.importContextImage(context, source), { status: NativeStatus.StaleHandle })
+    assert.equal(lib.imageClone(source).status, 1)
   } finally {
-    lib.imageDestroy(source)
     lib.destroyContext(context)
   }
 })
@@ -32,7 +31,7 @@ test("Context image import outlives its compatibility source and rejects stale h
 test("Context image transport checks owners kinds optional backing storage and dimensions", () => {
   const context = lib.createContext(options)
   const other = lib.createContext(options)
-  const source = lib.imageCreateFromRgba(Uint8Array.of(255, 0, 0, 255), 1, 1, 4).handle!
+  const source = lib.imageCreateFromRgba(other, Uint8Array.of(255, 0, 0, 255), 1, 1, 4).handle!
   try {
     const image = lib.importContextImage(context, source)
     const target = lib.createContextBuffer(context, { width: 2, height: 1 })
@@ -130,7 +129,7 @@ test("Context image transport checks owners kinds optional backing storage and d
 
 test("Context image transport resolves native ownership after draw option getters", () => {
   const context = lib.createContext(options)
-  const source = lib.imageCreateFromRgba(Uint8Array.of(255, 0, 0, 255), 1, 1, 4).handle!
+  const source = lib.imageCreateFromRgba(context, Uint8Array.of(255, 0, 0, 255), 1, 1, 4).handle!
   let destroyed = false
   try {
     const image = lib.importContextImage(context, source)
@@ -165,7 +164,6 @@ test("Context image transport resolves native ownership after draw option getter
       { status: NativeStatus.WrongContext },
     )
   } finally {
-    lib.imageDestroy(source)
     if (!destroyed) lib.destroyContext(context)
   }
 })

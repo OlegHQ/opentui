@@ -169,7 +169,7 @@ test("native Image failed binding preserves accepted state and releases its cand
     assert.equal(image.loadError, failure)
     assert.equal(image.loading, false)
     assert.deepEqual(errors, [failure])
-    assert.equal(release.mock.calls.length, 1)
+    assert.equal(release.mock.calls.length, 2)
     const source = image.source
     assert.throws(() => (image.source = undefined), failure)
     assert.equal(image.source, source)
@@ -204,7 +204,7 @@ test("native image buffers cache checked Context imports and retain copies after
     }
     assert.equal(imported.mock.calls.length, 2)
     source.dispose()
-    assert.equal(released.mock.calls.length, 2)
+    assert.equal(released.mock.calls.length, 3)
     for (const target of [first, second]) {
       await target.renderOnce()
       assert.deepEqual(target.errors, [])
