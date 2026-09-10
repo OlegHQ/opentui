@@ -1356,28 +1356,29 @@ function propertyWordLength(fields: number): number {
   return (words + 1) & ~1
 }
 
-/** One ordered property stream. Visual writes coalesce at the node's latest visual
- * record; last write wins per field. New or changed translations only merge into
- * the last record so prepared coordinates observe preceding ancestor translations.
- * Layout writes stay ordered because Yoga shorthand/edge and dimension/flex-shrink
- * operations can overlap. There are no
+/** One ordered property stream, stored in native wire layout. Visual writes coalesce
+ * at the node's latest visual record; last write wins per field. New or changed
+ * translations only merge into the last record so prepared coordinates observe
+ * preceding ancestor translations. Layout writes stay ordered because Yoga
+ * shorthand/edge and dimension/flex-shrink operations can overlap. There are no
  * reads or callbacks between records. A successful flush ends coalescing.
  *
- * Slots reserve room for any visual mask so coalescing is O(1), without shifting
- * later records. Borrowing compacts selected fields in place; only a failed flush
- * expands its suffix for retry. No second wire buffer or skip records are needed.
- * Scratch snapshots caller getters before publication, including under reentry. */
+ * Records occupy their packed size, so a background-only or style batch is already
+ * the borrowed bytes. Merging extra visual fields grows that record and shifts later
+ * ones. Scratch snapshots caller getters before publication, including under reentry. */
 export class SceneStaging {
   static readonly limit = nativeConstants.OT_SCENE_MUTATIONS_MAX
   private words: Uint32Array
   private floats: Float32Array
   private readonly paintBySlot = new Map<number, number>()
+  private readonly packScratch = new Uint32Array(16)
   private context?: NativeContextHandle
   private readonly contextId = new BigUint64Array(1)
   private readonly contextWords = new Uint32Array(this.contextId.buffer)
   private borrowed = false
   private entryCount = 0
   private encodedWords = 0
+  private lastBase = 0
   private handleScratch: ReturnType<typeof createContextHandleRecord> | undefined = createContextHandleRecord()
   private paintScratch: ReturnType<typeof createScenePaintRecord> | undefined = createScenePaintRecord()
 
@@ -1419,7 +1420,7 @@ export class SceneStaging {
       throw new NativeError("Context handle", NativeStatus.WrongContext)
     }
     const entry = this.paintBySlot.get(handle.words[2])
-    if (entry !== undefined && this.words[entry * propertySlotWords + 3] !== handle.words[3]) {
+    if (entry !== undefined && this.words[entry + 3] !== handle.words[3]) {
       throw new NativeError("Context handle", NativeStatus.StaleHandle)
     }
   }
@@ -1432,20 +1433,28 @@ export class SceneStaging {
     return true
   }
 
-  private reserve(handle: ReturnType<typeof createContextHandleRecord>, fields: number): number {
+  private ensureWords(need: number): void {
+    if (need <= this.words.length) return
+    const next = new Uint32Array(
+      Math.min(SceneStaging.limit * propertySlotWords, Math.max(need, this.words.length * 2)),
+    )
+    next.set(this.words.subarray(0, this.encodedWords))
+    this.words = next
+    this.floats = new Float32Array(next.buffer)
+  }
+
+  private reserve(handleWords: Uint32Array, fields: number): number {
     if (this.full) throw new NativeError("ot_scene_flush", NativeStatus.ObjectLimit)
-    if (this.entryCount * propertySlotWords === this.words.length) {
-      const next = new Uint32Array(Math.min(SceneStaging.limit * propertySlotWords, this.words.length * 2))
-      next.set(this.words)
-      this.words = next
-      this.floats = new Float32Array(next.buffer)
-    }
-    const base = this.entryCount++ * propertySlotWords
     const length = propertyWordLength(fields)
-    this.words.set(handle.words, base)
+    this.ensureWords(this.encodedWords + length)
+    const base = this.encodedWords
+    this.words.fill(0, base, base + length)
+    this.words.set(handleWords.subarray(0, 4), base)
     this.words[base + 4] = fields
     this.words[base + 5] = length * 4
     this.encodedWords += length
+    this.entryCount++
+    this.lastBase = base
     return base
   }
 
@@ -1469,16 +1478,37 @@ export class SceneStaging {
     validateSceneStyle(group, kind, edge, unit, value, flags)
     // Yoga ignores edges for dimensions; do not let unused u32 bits spill into the unit byte.
     if (group === 2 && kind < 7) edge = 0
+    if (
+      this.entryCount !== 0 &&
+      this.context === context &&
+      node.context === context &&
+      this.words[this.lastBase + 4] === propertyStyle &&
+      this.words[this.lastBase + 2] === node.slot &&
+      this.words[this.lastBase + 3] === node.generation
+    ) {
+      const paintOffset = this.paintBySlot.get(node.slot)
+      if (paintOffset !== undefined && this.words[paintOffset + 3] !== node.generation) {
+        throw new NativeError("Context handle", NativeStatus.StaleHandle)
+      }
+      this.packScratch[0] = this.words[this.lastBase]
+      this.packScratch[1] = this.words[this.lastBase + 1]
+      this.packScratch[2] = this.words[this.lastBase + 2]
+      this.packScratch[3] = this.words[this.lastBase + 3]
+      const base = this.reserve(this.packScratch, propertyStyle)
+      this.words[base + 6] = group | (kind << 8) | (edge << 16) | (unit << 24)
+      this.words[base + 7] = flags
+      this.floats[base + 8] = value
+      return false
+    }
     const scratch = this.handleScratch ?? createContextHandleRecord()
     this.handleScratch = undefined
     try {
       encodeContextHandle(context, node, scratch.record, scratch.words)
       this.checkHandle(context, scratch)
-      const base = this.reserve(scratch, propertyStyle)
+      const base = this.reserve(scratch.words, propertyStyle)
       this.words[base + 6] = group | (kind << 8) | (edge << 16) | (unit << 24)
       this.words[base + 7] = flags
       this.floats[base + 8] = value
-      this.words[base + 9] = 0
       return this.bind(context, scratch)
     } finally {
       this.handleScratch ??= scratch
@@ -1534,18 +1564,13 @@ export class SceneStaging {
     let entry = this.paintBySlot.get(slot)
     const translation =
       fields & (nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_X | nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_Y)
-    if (entry !== undefined && translation !== 0 && entry !== this.entryCount - 1) {
-      const base = entry * propertySlotWords
+    if (entry !== undefined && translation !== 0 && entry !== this.lastBase) {
+      const existing = this.words[entry + 4]
       // Identical staged doubles cause no second native coordinate update.
       for (let index = 2; index < 4; index++) {
         const bit = 1 << index
         if (!(translation & bit)) continue
-        const offset = scenePropertyWords[index].offset
-        if (
-          !(this.words[base + 4] & bit) ||
-          this.words[base + 4 + offset] !== scratch.record[offset] ||
-          this.words[base + 5 + offset] !== scratch.record[offset + 1]
-        ) {
+        if (!(existing & bit) || !this.packedFieldEquals(entry, existing, index, scratch.record)) {
           entry = undefined
           break
         }
@@ -1553,56 +1578,88 @@ export class SceneStaging {
     }
     let base: number
     if (entry === undefined) {
-      base = this.reserve(scratch.handle, fields)
-      this.paintBySlot.set(slot, base / propertySlotWords)
+      base = this.reserve(scratch.handle.words, fields)
+      this.paintBySlot.set(slot, base)
+      this.writePackedFields(base, fields, fields, scratch, null, 0)
     } else {
-      base = entry * propertySlotWords
-      const merged = this.words[base + 4] | fields
-      if (merged !== this.words[base + 4]) {
-        const size = propertyWordLength(merged) * 4
-        this.encodedWords += (size - this.words[base + 5]) / 4
-        this.words[base + 4] = merged
-        this.words[base + 5] = size
-      }
-    }
-    if ((fields & (propertyStyle - 1)) === propertyStyle - 1) {
-      this.words.set(scratch.payload, base + propertyHeaderWords)
-    } else {
-      for (let index = 0; index < scenePropertyWords.length; index++) {
-        if (!(fields & (1 << index))) continue
-        const field = scenePropertyWords[index]
-        for (let word = 0; word < field.length; word++)
-          this.words[base + 4 + field.offset + word] = scratch.record[field.offset + word]
-      }
+      base = entry
+      this.mergePackedPaint(base, fields, scratch)
     }
     return this.bind(context, scratch.handle)
   }
 
-  /** @internal Compact and borrow until consume() acknowledges the native prefix. */
+  private packedFieldEquals(base: number, fields: number, bitIndex: number, record: Uint32Array): boolean {
+    let packed = 0
+    for (let index = 0; index < bitIndex; index++) {
+      if (fields & (1 << index)) packed += scenePropertyWords[index].length
+    }
+    const field = scenePropertyWords[bitIndex]
+    for (let word = 0; word < field.length; word++) {
+      if (this.words[base + propertyHeaderWords + packed + word] !== record[field.offset + word]) return false
+    }
+    return true
+  }
+
+  private writePackedFields(
+    base: number,
+    recordFields: number,
+    writeMask: number,
+    scratch: ReturnType<typeof createScenePaintRecord>,
+    oldPayload: Uint32Array | null,
+    oldFields: number,
+  ): void {
+    if ((writeMask & (propertyStyle - 1)) === propertyStyle - 1) {
+      this.words.set(scratch.payload, base + propertyHeaderWords)
+      return
+    }
+    let dest = base + propertyHeaderWords
+    let oldOff = 0
+    for (let index = 0; index < scenePropertyWords.length; index++) {
+      const bit = 1 << index
+      if (!(recordFields & bit)) continue
+      const field = scenePropertyWords[index]
+      if (writeMask & bit) {
+        for (let word = 0; word < field.length; word++) {
+          this.words[dest + word] = scratch.record[field.offset + word]
+        }
+      } else if (oldPayload) {
+        for (let word = 0; word < field.length; word++) this.words[dest + word] = oldPayload[oldOff + word]
+      }
+      dest += field.length
+      if (oldFields & bit) oldOff += field.length
+    }
+  }
+
+  private mergePackedPaint(base: number, fields: number, scratch: ReturnType<typeof createScenePaintRecord>): void {
+    const oldFields = this.words[base + 4]
+    const merged = oldFields | fields
+    if (merged === oldFields) {
+      this.writePackedFields(base, merged, fields, scratch, null, 0)
+      return
+    }
+    const oldLen = this.words[base + 5] / 4
+    const newLen = propertyWordLength(merged)
+    this.packScratch.set(this.words.subarray(base + propertyHeaderWords, base + oldLen))
+    const delta = newLen - oldLen
+    this.ensureWords(this.encodedWords + delta)
+    if (base + oldLen < this.encodedWords) {
+      this.words.copyWithin(base + newLen, base + oldLen, this.encodedWords)
+      for (const [slot, offset] of this.paintBySlot) {
+        if (offset >= base + oldLen) this.paintBySlot.set(slot, offset + delta)
+      }
+    }
+    this.encodedWords += delta
+    if (this.lastBase >= base + oldLen) this.lastBase += delta
+    this.words.fill(0, base + propertyHeaderWords, base + newLen)
+    this.words[base + 4] = merged
+    this.words[base + 5] = newLen * 4
+    this.writePackedFields(base, merged, fields, scratch, this.packScratch, oldFields)
+  }
+
+  /** @internal Borrow until consume() acknowledges the native prefix. */
   _views(context: NativeContextHandle): Uint32Array {
     this.assertWritable()
     if (this.context !== context) throw new NativeError("ot_scene_flush", NativeStatus.WrongContext)
-    let dest = 0
-    for (let index = 0; index < this.entryCount; index++) {
-      const source = index * propertySlotWords
-      const fields = this.words[source + 4]
-      const length = this.words[source + 5] / 4
-      if ((fields & (propertyStyle - 1)) === propertyStyle - 1 || fields === propertyStyle) {
-        if (dest !== source) this.words.copyWithin(dest, source, source + length)
-        dest += length
-        continue
-      }
-      this.words.copyWithin(dest, source, source + propertyHeaderWords)
-      let offset = dest + propertyHeaderWords
-      for (let bit = 0; bit < scenePropertyWords.length; bit++) {
-        if (!(fields & (1 << bit))) continue
-        const field = scenePropertyWords[bit]
-        this.words.copyWithin(offset, source + 4 + field.offset, source + 4 + field.offset + field.length)
-        offset += field.length
-      }
-      this.words.fill(0, offset, dest + length)
-      dest += length
-    }
     this.borrowed = true
     return this.words
   }
@@ -1611,11 +1668,12 @@ export class SceneStaging {
     this.assertWritable()
     this.entryCount = 0
     this.encodedWords = 0
+    this.lastBase = 0
     this.paintBySlot.clear()
     this.context = undefined
   }
 
-  /** Never replay the accepted prefix. Expand only the rejected compact suffix. */
+  /** Never replay the accepted prefix. Remaining records stay in wire layout. */
   consume(applied: number): void {
     if (!Number.isInteger(applied) || applied < 0 || applied > this.entryCount)
       throw new Error("Invalid scene flush prefix")
@@ -1627,28 +1685,6 @@ export class SceneStaging {
     this.words.copyWithin(0, source, this.encodedWords)
     this.encodedWords -= source
     this.entryCount -= applied
-    // Only rejection needs this bounded offset index; successful flushes allocate nothing.
-    const offsets: number[] = []
-    for (let offset = 0; offset < this.encodedWords; offset += this.words[offset + 5] / 4) offsets.push(offset)
-    for (let index = this.entryCount - 1; index >= 0; index--) {
-      source = offsets[index]
-      const dest = index * propertySlotWords
-      const fields = this.words[source + 4]
-      if (fields === propertyStyle) this.words.copyWithin(dest, source, source + 10)
-      else {
-        let offset = source + propertyHeaderWords
-        for (let bit = 0; bit < scenePropertyWords.length; bit++) {
-          if (fields & (1 << bit)) offset += scenePropertyWords[bit].length
-        }
-        for (let bit = scenePropertyWords.length - 1; bit >= 0; bit--) {
-          if (!(fields & (1 << bit))) continue
-          const field = scenePropertyWords[bit]
-          offset -= field.length
-          this.words.copyWithin(dest + 4 + field.offset, offset, offset + field.length)
-        }
-        this.words.copyWithin(dest, source, source + propertyHeaderWords)
-      }
-    }
     this.reindex()
   }
 
@@ -1656,25 +1692,35 @@ export class SceneStaging {
     this.assertWritable()
     if (!this.pending || node.context !== this.context || node.contextId !== this.contextId[0]) return
     let count = 0
+    let dest = 0
+    let offset = 0
     for (let index = 0; index < this.entryCount; index++) {
-      const base = index * propertySlotWords
-      if (this.words[base + 2] === node.slot && this.words[base + 3] === node.generation) {
-        this.encodedWords -= this.words[base + 5] / 4
+      const length = this.words[offset + 5] / 4
+      if (this.words[offset + 2] === node.slot && this.words[offset + 3] === node.generation) {
+        offset += length
         continue
       }
-      this.words.copyWithin(count++ * propertySlotWords, base, base + propertySlotWords)
+      if (dest !== offset) this.words.copyWithin(dest, offset, offset + length)
+      dest += length
+      offset += length
+      count++
     }
     this.entryCount = count
+    this.encodedWords = dest
     if (!this.pending) this.clear()
     else this.reindex()
   }
 
   private reindex(): void {
     this.paintBySlot.clear()
+    let offset = 0
+    let last = 0
     for (let index = 0; index < this.entryCount; index++) {
-      const base = index * propertySlotWords
-      if (this.words[base + 4] !== propertyStyle) this.paintBySlot.set(this.words[base + 2], index)
+      last = offset
+      if (this.words[offset + 4] !== propertyStyle) this.paintBySlot.set(this.words[offset + 2], offset)
+      offset += this.words[offset + 5] / 4
     }
+    this.lastBase = last
   }
 }
 

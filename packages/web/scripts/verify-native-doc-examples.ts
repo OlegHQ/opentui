@@ -39,7 +39,7 @@ function run(command: string[], cwd = work, exitCode = 0, input?: string) {
 }
 
 async function code(page: string, language: string, tag?: string): Promise<string> {
-  const source = await readFile(join(root, `packages/web/src/content/docs/native/${page}.mdx`), "utf8")
+  const source = await readFile(join(root, `packages/web/src/content/docs/${page}.mdx`), "utf8")
   const blocks = [...source.matchAll(/^```(\w+)([^\n]*)\n([\s\S]*?)^```\s*$/gm)].filter(
     (block) => block[1] === language && (!tag || block[2].trim().split(/\s+/).includes(tag)),
   )
@@ -53,7 +53,7 @@ function captureFrame(terminal: Terminal): string {
   ).join("\n")}\n`
 }
 
-async function checkFrames(directory: string, page = "overview") {
+async function checkFrames(directory: string, page = "native/overview") {
   const terminal = new xterm.Terminal({ cols: 12, rows: 3, scrollback: 0, allowProposedApi: true })
   try {
     for (const name of ["hello", "ready"]) {
@@ -68,7 +68,7 @@ async function checkFrames(directory: string, page = "overview") {
 }
 
 async function checkPreview(directory: string) {
-  await writeFile(join(directory, "preview.sh"), await code("frames", "bash", "example=preview"))
+  await writeFile(join(directory, "preview.sh"), await code("native/frames", "bash", "example=preview"))
   const output = run(["script", "-q", "-e", "-c", "bash ./preview.sh", "/dev/null"], directory, 0, "\n\n").stdout
   const terminal = new xterm.Terminal({ cols: 80, rows: 24, scrollback: 0, allowProposedApi: true })
   try {
@@ -82,7 +82,7 @@ async function checkPreview(directory: string) {
       assert.ok(end > offset, `Preview did not reach ${name}`)
       await new Promise<void>((resolve) => terminal.write(output.slice(offset, end), resolve))
       assert.equal(terminal.buffer.active.type, "alternate")
-      assert.equal(captureFrame(terminal), await code("overview", "text", `frame=${name}`))
+      assert.equal(captureFrame(terminal), await code("native/overview", "text", `frame=${name}`))
       offset = end
     }
     await new Promise<void>((resolve) => terminal.write(output.slice(offset), resolve))
@@ -105,7 +105,7 @@ async function checkWriteFailure(executable: string, name: string) {
   )
 }
 
-async function runC(name: string, source: string, page = "overview") {
+async function runC(name: string, source: string, page = "native/overview") {
   const directory = join(work, name)
   await mkdir(directory)
   await writeFile(join(directory, "native-hello.c"), source)
@@ -132,7 +132,7 @@ async function runC(name: string, source: string, page = "overview") {
 
 try {
   const cParts = await Promise.all(
-    ["setup", "nodes", "update", "submit", "output"].map((part) => code("c", "c", `example=${part}`)),
+    ["setup", "nodes", "update", "submit", "output"].map((part) => code("native/c", "c", `example=${part}`)),
   )
   const cDir = await runC("c", cParts.join("\n"))
   console.log("PASS: C tutorial renders both screens and handles a failed write")
@@ -142,35 +142,13 @@ try {
   const hookProgram = [
     cParts[0],
     cParts[1],
-    await code("c", "c", "example=register"),
+    await code("native/c", "c", "example=register"),
     cParts[2],
-    await code("c", "c", "example=hook-submit"),
+    await code("native/c", "c", "example=hook-submit"),
     cParts[4],
   ].join("\n")
-  await runC("hooks", hookProgram, "c")
+  await runC("hooks", hookProgram, "native/c")
   console.log("PASS: C frame-step extension draws the host mark in both frames and handles a failed write")
-
-  const rustDir = join(work, "rust")
-  await mkdir(join(rustDir, "src"), { recursive: true })
-  await writeFile(join(rustDir, "Cargo.toml"), (await code("rust", "toml")).replaceAll("/path/to/opentui", root))
-  await writeFile(join(rustDir, "src/main.rs"), await code("rust", "rust"))
-  const build = run(
-    ["cargo", "build", "--offline", "--quiet", "--target-dir", join(rustDir, "target"), "--message-format=json"],
-    rustDir,
-  )
-  const executable = build.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .find(
-      (message) =>
-        message.reason === "compiler-artifact" && message.target.name === "native-hello" && message.executable,
-    )?.executable
-  assert.equal(typeof executable, "string", "Cargo did not report the native-hello executable")
-  run([executable], rustDir)
-  await checkFrames(rustDir)
-  await checkWriteFailure(executable, "rust")
-  console.log("PASS: external Rust consumer renders both screens and handles a failed write")
 
   const zigDir = join(work, "zig")
   const hello = join(native, "examples/hello")
@@ -180,8 +158,8 @@ try {
     join(zigDir, "build.zig.zon"),
     (await readFile(join(hello, "build.zig.zon"), "utf8")).replace('"../.."', JSON.stringify(relative(zigDir, native))),
   )
-  await writeFile(join(zigDir, "src/main.zig"), await code("zig", "zig", "example=scene"))
-  await writeFile(join(zigDir, "src/acceptance_test.zig"), await code("zig", "zig", "example=buffer"))
+  await writeFile(join(zigDir, "src/main.zig"), await code("native/zig", "zig", "example=scene"))
+  await writeFile(join(zigDir, "src/acceptance_test.zig"), await code("native/zig", "zig", "example=buffer"))
   run(["zig", "build", "run"], zigDir)
   await checkFrames(zigDir)
   await checkWriteFailure(join(zigDir, "zig-out/bin/opentui-hello"), "zig")
@@ -194,11 +172,17 @@ try {
   await writeFile(join(work, "package.json"), JSON.stringify({ type: "module" }))
 
   const files: string[] = []
-  for (const name of ["hook", "resource"]) {
-    const output = await code("core", "text", `example=${name}-output`)
+  for (const [page, name] of [
+    ["native/core", "hook"],
+    ["native/core", "resource"],
+    ["extend/editing", "shared-text"],
+    ["extend/custom-renderables", "rule"],
+    ["reference/native-image", "image-owner"],
+  ]) {
+    const output = await code(page, "text", `example=${name}-output`)
     const file = join(work, `core-${name}.ts`)
     files.push(file)
-    await writeFile(file, await code("core", "typescript", `example=${name}`))
+    await writeFile(file, await code(page, "typescript", `example=${name}`))
     assert.equal(run([process.execPath, file]).stdout, output, `${name}: Bun output`)
 
     const bundle = await Bun.build({

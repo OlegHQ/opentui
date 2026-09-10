@@ -247,7 +247,14 @@ export const DOC_MANIFEST = {
     canonicalSection: "Extend / Custom UI",
     primaryNav: false,
     status: "Advanced",
-    searchSymbols: ["BaseRenderable", "Renderable", "render", "measure"],
+    searchSymbols: [
+      "BaseRenderable",
+      "Renderable",
+      "render",
+      "measure",
+      "nativeIntegration",
+      "defineNativeIntegration",
+    ],
     related: ["core-concepts/renderables", "core-concepts/lifecycle", "bindings/react", "bindings/solid"],
   }),
 
@@ -715,15 +722,15 @@ export const DOC_MANIFEST = {
     availability: NOT_APPLICABLE,
     runtimes: ["Native"],
     searchSymbols: ["retained scene", "native rendering"],
-    related: ["native/resources", "native/frames", "native/core", "native/c", "native/zig", "native/rust"],
+    related: ["native/resources", "native/frames", "native/host-io-time", "native/core", "native/c", "native/zig"],
   }),
   "native/resources": page("native", 2, "Resources and ownership", "low-level-api", {
     status: "Experimental native ABI",
     packages: ["@opentui/native"],
     availability: NOT_APPLICABLE,
     runtimes: ["Native"],
-    searchSymbols: ["ot_handle", "ot_context_destroy", "ot_buffer_create", "storage lease"],
-    related: ["native/overview", "native/frames", "native/core", "native/c", "native/zig", "native/rust"],
+    searchSymbols: ["ot_handle", "ot_context_destroy", "ot_buffer_create", "ot_styled_text_chunk", "storage lease"],
+    related: ["native/overview", "native/frames", "native/host-io-time", "native/core", "native/c", "native/zig"],
   }),
   "native/frames": page("native", 3, "Frames and output", "low-level-api", {
     status: "Experimental native ABI",
@@ -734,12 +741,21 @@ export const DOC_MANIFEST = {
       "ot_scene_frame_step_with_geometry",
       "ot_scene_frame_commit",
       "ot_scene_frame_request",
+      "ot_scene_flush",
       "ot_session_pump",
       "ot_session_complete_output",
     ],
-    related: ["native/resources", "native/core", "native/c", "native/zig", "native/rust"],
+    related: ["native/resources", "native/host-io-time", "native/core", "native/c", "native/zig"],
   }),
-  "native/core": page("native", 4, "How Core uses native", "internals", {
+  "native/host-io-time": page("native", 4, "Host I/O and time", "low-level-api", {
+    status: "Experimental native ABI",
+    packages: ["@opentui/native"],
+    availability: NOT_APPLICABLE,
+    runtimes: ["Native"],
+    searchSymbols: ["ot_session_poll_kitty_image_transport", "ot_session_pump_exit", "Context I/O", "Session clock"],
+    related: ["native/resources", "native/frames", "native/core", "native/c", "native/zig"],
+  }),
+  "native/core": page("native", 5, "How Core uses native", "internals", {
     status: "Maintained Core integration",
     searchSymbols: [
       "NativeScene",
@@ -757,29 +773,21 @@ export const DOC_MANIFEST = {
       "reference/buffer-api",
     ],
   }),
-  "native/c": page("native", 5, "C", "integration", {
+  "native/c": page("native", 6, "C", "integration", {
     status: "Experimental native ABI",
     packages: ["@opentui/native"],
     availability: NOT_APPLICABLE,
     runtimes: ["Native"],
     searchSymbols: ["ot_context_create", "ot_scene_create_node", "opentui.h", "C ABI"],
-    related: ["native/resources", "native/frames", "native/zig", "native/rust"],
+    related: ["native/resources", "native/frames", "native/host-io-time", "native/zig"],
   }),
-  "native/zig": page("native", 6, "Zig", "integration", {
+  "native/zig": page("native", 7, "Zig", "integration", {
     status: "Experimental native module",
     packages: ["@opentui/native"],
     availability: NOT_APPLICABLE,
     runtimes: ["Native"],
-    searchSymbols: ["Zig", "Context.init", "sceneCreateNode", "scenePaint", "renderSession"],
-    related: ["native/resources", "native/frames", "native/c", "native/rust"],
-  }),
-  "native/rust": page("native", 7, "Rust", "integration", {
-    status: "Example binding; Linux x86_64 glibc only",
-    packages: ["@opentui/native"],
-    availability: NOT_APPLICABLE,
-    runtimes: ["Native"],
-    searchSymbols: ["Rust", "Cargo", "Context", "Session", "Node", "OPENTUI_LIB_DIR"],
-    related: ["native/resources", "native/frames", "native/c", "native/zig"],
+    searchSymbols: ["Zig", "Context.init", "Context.raw", "sceneCreateNode", "scenePaint", "commitSceneFrame"],
+    related: ["native/resources", "native/frames", "native/host-io-time", "native/c"],
   }),
 
   "reference/standalone-executables": page("ship", 2, "Standalone executables", "task-guide", {
@@ -988,17 +996,12 @@ export const DOC_LEARNING_SEQUENCES: DocLearningSequence[] = [
   {
     id: "native",
     title: "Native C learning path",
-    pages: ["native/overview", "native/resources", "native/frames", "native/core", "native/c"],
+    pages: ["native/overview", "native/resources", "native/frames", "native/host-io-time", "native/core", "native/c"],
   },
   {
     id: "native-zig",
     title: "Native Zig learning path",
-    pages: ["native/overview", "native/resources", "native/frames", "native/core", "native/zig"],
-  },
-  {
-    id: "native-rust",
-    title: "Native Rust learning path",
-    pages: ["native/overview", "native/resources", "native/frames", "native/core", "native/rust"],
+    pages: ["native/overview", "native/resources", "native/frames", "native/host-io-time", "native/core", "native/zig"],
   },
   {
     id: "ship",

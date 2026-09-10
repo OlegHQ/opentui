@@ -110,7 +110,8 @@ details, start at `docs/plugins/slots.mdx`, then open the Core, React, or Solid 
 
 For native applications, read `docs/native/overview.mdx`, `docs/native/resources.mdx`, and `docs/native/frames.mdx` in order.
 `docs/native/core.mdx` explains Core's TypeScript integration, not a native-language API.
-Then choose `docs/native/c.mdx`, `docs/native/zig.mdx`, or `docs/native/rust.mdx` for a native program.
+Read `docs/native/host-io-time.mdx` for Session clocks, terminal delivery, and native file operations.
+Then choose `docs/native/c.mdx` or `docs/native/zig.mdx` for a native program.
 
 ## Current skill entry pages
 

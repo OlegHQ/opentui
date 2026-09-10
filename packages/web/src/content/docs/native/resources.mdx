@@ -112,15 +112,78 @@ These are native creation entry points. Each C call takes the destination Contex
 | Editor view  | `ot_editor_view_create`      | `createEditorView`     |
 | Syntax style | `ot_syntax_style_create`     | `createSyntaxStyle`    |
 
-Destroying a text or edit buffer also destroys its dependent views.
-Destroying a view leaves the backing buffer alive.
-Destroying a bound node releases its binding, not an independently owned buffer or view.
-A text or editor view can have only one scene paint binding because it has one viewport.
+Bindings have different retention and destruction rules:
+
+| Binding                       | Retention and destruction                                                                                                                                                     | Sharing and layout                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Document → text/editor views  | Document destruction destroys every dependent view. View destruction leaves the document alive.                                                                               | One document can supply separate views in several Sessions within its Context.      |
+| Node → text/editor view       | The binding does not transfer ownership. Destroying either side removes the binding. View destruction invalidates the node's measurement and preparation state.               | One view binds to at most one node. The node supplies the view's layout dimensions. |
+| Node → image/offscreen buffer | The binding retains storage independently of the public handle. Replacement retains the new resource before releasing the old binding. Node destruction releases the binding. | Compatible nodes can share the resource across Sessions within its Context.         |
+| Document → syntax style       | The document does not own the public style handle. Style destruction clears the document's binding.                                                                           | Documents in one Context can share a style. Style IDs belong to that style.         |
+| Box → viewport node           | The Box copies the handle without retaining the node. Viewport destruction makes later preparation fail until you replace or disable the binding.                             | The viewport must satisfy the checked Box topology rules within the same scene.     |
+
+Use separate views for placements with independent dimensions.
+Tree membership, resource ownership, and resource retention are separate relationships.
 
 Related resources must belong to the same Context.
 For example, cell data can contain references to the Context's grapheme and hyperlink pools.
 Copying raw identifiers into another Context would not copy the referenced content.
 For a shared theme, reuse the theme definitions but create a style resource in each destination Context.
+
+## Read text and geometry
+
+Documents own text. Views own wrapping, viewport, and selection state. Scene nodes place and measure views.
+An ordinary `TEXT` node owns a private document/view pair. A `TEXT_VIEW` or `EDITOR` node binds a public view.
+
+Text, range, and selected-text copies use UTF-8 byte counts:
+
+1. Call the query with zero capacity to get the exact count, without a terminating NUL.
+2. Supply a destination with at least that capacity to copy the bytes.
+
+A short nonzero destination rejects before changing its bytes or the output count.
+Empty, reversed, and out-of-document ranges return zero.
+Record queries count records. Output and diagnostic queues have separate rules for drains.
+
+Range offsets use display cells, with one position for each line separator.
+Range columns also use display cells. The exclusive end is clamped to the document length.
+Range starts snap backward to the containing grapheme. Exclusive ends snap forward to include a partially selected grapheme.
+Extraction uses the document's selected width method.
+Text metadata distinguishes UTF-8 bytes from summed line widths, which exclude separators.
+
+Selected-text reads do not prepare virtual lines, follow the cursor, or change the viewport.
+Coordinate-based edit ranges can prepare the document's marker cache.
+View line queries can prepare wrapping. Editor info queries follow the cursor only when you request that behavior.
+
+One `ot_styled_text_chunk` record supplies scene text, shared replacements, replacement batches, and editor placeholders.
+The record can identify URL bytes. `ot_scene_set_styled_text` accepts those bytes through the same operation.
+Placeholders reject links, including a link flag with an empty URL span. Plain-text replacement keeps its separate UTF-8 operation.
+
+`ot_scene_get_layout` uses named observation modes:
+
+| Mode               | Observation                                                                                                                                               |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OT_LAYOUT_PUBLIC` | Local cell geometry from the latest preparation refresh. Screen coordinates use current accepted ancestors and translations.                              |
+| `OT_LAYOUT_YOGA`   | The six computed Yoga values, including zero dimensions. Screen coordinates are zero.                                                                     |
+| `OT_LAYOUT_PAINT`  | Cached paint geometry. During painting, reparenting and ancestor translations leave these coordinates fixed. The node's own translation can refresh them. |
+
+These queries do not run Yoga. Observations do not grant frame authority.
+The [checked header](https://github.com/anomalyco/opentui/blob/main/packages/native/include/opentui.h) defines record layouts, named selectors, color construction, bounds, and failure results.
+Use the header and native library from the same revision.
+
+## Create images in a Context
+
+`ot_image_inspect`, `ot_image_decode`, and `ot_image_create_pixels` use the Context's allocator, I/O, limits, and handle identities.
+Creation copies input bytes. Encoded input has a 64 MiB limit.
+Dimensions have a 16,384-pixel limit per axis and a 25,000,000-pixel limit in total.
+
+The checked image operations also support pixel updates, metadata, transformations, composition, and pixel or PNG copies.
+`ot_image_retain` shares immutable storage within one Context. `ot_image_clone` can copy pixels and encoded data into another Context.
+An exclusive pixel update assigns a new identity to the render cache.
+`ot_image_import_compat` is an explicit bridge for a compatibility image.
+
+`ot_image_take_pixels` consumes an exclusive image handle and returns a mutable RGBA8 lease.
+The lease uses the Context's lease-count and byte limits. It blocks Context destruction until `ot_image_pixels_release` succeeds.
+Release invalidates all saved aliases. PNG copies use the exact-count and short-destination rules for text copies.
 
 ## Compose an owned buffer
 
@@ -178,9 +241,11 @@ For a terminal-managed Session, request `ot_session_close` and deliver restorati
 For a lost transport, use `ot_session_cancel` to discard pending output.
 Cancellation does not restore a terminal that no longer receives bytes, and it does not release your outstanding leases.
 
-In direct Zig code, pointers from Context getters are borrowed.
+In direct Zig code, pointers from `Context.raw()` getters are borrowed.
+The getters check handles but do not retain objects, pin storage, or grant checked mutation or frame authority.
 Destroy the resource through the Context, not through the raw object's destructor.
 Keep the allocator, `std.Io`, callback data, and borrowed environment state alive until the Context no longer needs them.
+[Host I/O and time](/docs/native/host-io-time) defines the native file and clock dependencies.
 
 ## Set limits and keep calls on the owning thread
 
@@ -196,7 +261,6 @@ These limits are not a total memory or frame-time budget. Sessions have their ow
 Call a C Context only from its creating operating-system thread, including for error queries and destruction.
 Separate Contexts can run on separate threads.
 Direct Zig Contexts permit ownership transfer only while idle and require serialized access.
-[Rust's owner types](/docs/native/rust#ownership-and-errors) enforce the C thread restriction at compile time.
 
 Core uses the same ownership model through its own TypeScript wrappers.
 [How Core uses native](/docs/native/core#resources-through-core) covers `ResourceContext`, resource factories, and scoped array access for Core extensions.

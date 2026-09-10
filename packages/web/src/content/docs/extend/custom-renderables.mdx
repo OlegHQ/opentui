@@ -17,7 +17,7 @@ components usually hide.
 
 This renderable measures an intrinsic width and draws one row of cells:
 
-```typescript
+```typescript example=rule
 import { RGBA, Renderable, type OptimizedBuffer, type RenderableOptions, type RenderContext } from "@opentui/core"
 import { MeasureMode } from "@opentui/core/yoga"
 
@@ -27,6 +27,12 @@ interface RuleOptions extends RenderableOptions<RuleRenderable> {
 }
 
 export class RuleRenderable extends Renderable {
+  static override readonly nativeIntegration = this.defineNativeIntegration({
+    kind: "custom",
+    body: "host",
+    construction: "prototype",
+  })
+
   private _columns: number
   private _color: RGBA
 
@@ -62,8 +68,30 @@ export class RuleRenderable extends Renderable {
 }
 ```
 
-Add the instance to a parent as described in [Renderables](/docs/core-concepts/renderables). The parent owns tree
-placement. Your code still owns resources that the instance allocates.
+Use the test renderer to draw the rule:
+
+```typescript example=rule
+import { createTestRenderer } from "@opentui/core/testing"
+
+const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: 5, height: 1 })
+try {
+  renderer.root.add(new RuleRenderable(renderer, { columns: 5 }))
+  await renderOnce()
+  console.log(captureCharFrame().trimEnd())
+} finally {
+  renderer.destroy()
+  await renderer.closed
+}
+```
+
+Output:
+
+```text example=rule-output
+-----
+```
+
+Add the instance to a parent as described in [Renderables](/docs/core-concepts/renderables).
+The parent owns tree placement. Your code still owns resources that the instance allocates.
 
 ## Choose the base class
 
@@ -149,6 +177,38 @@ Paint and style changes do not rediscover hook descriptors automatically.
 OpenTUI discovers class-field hooks at attachment and before frame or lifecycle work.
 An intermediate constructor can attach the node before derived fields initialize.
 If you need those hooks before the next discovery boundary, call `refreshHooks()` after construction.
+
+### Declare native integration
+
+`nativeIntegration` describes how a class uses the native scene.
+Built-ins declare the node kind, native or host body, lifecycle work, decorations, buffering, and optional intrinsic measurement.
+Core uses this description for hook registration and dispatch.
+
+Declare the description with `defineNativeIntegration()` before creating instances.
+The `RuleRenderable` example declares kind `"custom"` and body `"host"` because its JavaScript method draws the cells.
+
+Use `construction: "prototype"` only when the class adds no hook fields during construction.
+Use `"fields"` when it does. Subclasses without their own description retain bounded discovery for derived fields and intermediate-constructor attachment.
+An ordinary custom `Renderable` can use that default discovery path without a declaration.
+
+The `body` field has three forms:
+
+| Form                         | Behavior                                                                                           |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| `"host"`                     | Dispatch the body's drawing to the host.                                                           |
+| `{ native: method }`         | Identify the method whose work the native node already implements. An override uses host dispatch. |
+| `{ textController: method }` | Run the host text controller, then resume native text drawing. `CodeRenderable` uses this form.    |
+
+A native-body description does not compile a JavaScript method into native code.
+Use that form only when the native node already supplies the method's drawing behavior.
+For a built-in subclass, inherit its description and change only the capabilities your subclass needs.
+
+`lifecycle` describes resize and update work. `beforeAfter` enables or disables the generic decorations.
+The description also supports destination-buffer selection, native buffer composition, and intrinsic measurement through `measure`.
+The shared-text [subclass example](/docs/extend/editing#renderable-base-classes) shows how to select a resource-backed text node.
+
+Declared prototype methods keep normal `super` behavior. Direct hook assignments use the same registration path.
+Reflection still requires `refreshHooks()`, as described above.
 
 ## Handle coordinates, clipping, and buffering
 

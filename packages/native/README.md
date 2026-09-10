@@ -4,11 +4,14 @@ OpenTUI uses Context-owned scenes and Sessions for production rendering, includi
 text, editors, custom paint hooks, images, detached surfaces, and split output.
 Standalone resources use the same checked ownership model without a terminal.
 
-The [ownership and observation contract](docs/api-contract.md) describes resource
-bindings, mutation visibility, text copy units, and scoped framebuffer access.
-
-See [Host I/O and time](docs/host-io-time.md) for terminal delivery, Context file
-operations, Session deadlines, and native diagnostic clock samples.
+Read [Resources and ownership](https://opentui.com/docs/native/resources) for
+resource bindings, text copy units, and scoped framebuffer access.
+[Frames and output](https://opentui.com/docs/native/frames) defines mutation
+admission, painted drafts, and transport completion.
+[How Core uses native](https://opentui.com/docs/native/core) explains TypeScript
+staging and resource ownership.
+[Host I/O and time](https://opentui.com/docs/native/host-io-time) defines Context
+file operations, Session deadlines, and native diagnostic clocks.
 
 ## API surfaces
 
@@ -22,9 +25,6 @@ operations, Session deadlines, and native diagnostic clock samples.
 - [`../core/src/zig.ts`](../core/src/zig.ts) supplies TypeScript wrappers over that
   checked ABI. Its checked signatures, callbacks, constants, and record layouts come
   from [`native-abi.generated.ts`](../core/src/native-abi.generated.ts).
-
-Painted-draft consumption, mutation visibility, and drawing authority are in the
-[ownership and observation contract](docs/api-contract.md).
 
 ## ABI generation and builds
 
@@ -71,7 +71,3 @@ checks do not establish macOS/Windows runtime linkage or terminal behavior.
 
 The external [`examples/hello`](examples/hello) package imports the public Zig module
 without JavaScript.
-
-Rust bindings live in a separate Cargo crate. They are not part of this repository.
-Set `OPENTUI_LIB_DIR` to `lib/<target>/` when linking them. Set `OPENTUI_RUST_DIR` when
-`bun run generate:abi` should refresh that crate's generated constants.

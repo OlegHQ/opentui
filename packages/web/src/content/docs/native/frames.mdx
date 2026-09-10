@@ -109,15 +109,24 @@ This lets native code check that the submitted cells belong to that exact finish
 
 Check both the call's `ot_status` and the separate render outcome:
 
-| Render outcome        | Meaning                                                        |
-| --------------------- | -------------------------------------------------------------- |
-| `OT_RENDER_PRESENTED` | The frame's output endpoint is already complete                |
-| `OT_RENDER_PENDING`   | The frame still needs output completion                        |
-| `OT_RENDER_SKIPPED`   | No frame output was accepted. Submit a new frame explicitly    |
-| `OT_RENDER_FAILED`    | Rendering failed. Handle the failure before another submission |
+| Render outcome        | Meaning                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------- |
+| `OT_RENDER_PRESENTED` | Output was accepted and presentation is complete, including no-byte frames                   |
+| `OT_RENDER_PENDING`   | This draft was accepted. Its output completion remains pending                               |
+| `OT_RENDER_SKIPPED`   | No output was accepted. Paint a new draft after output capacity returns                      |
+| `OT_RENDER_FAILED`    | Encoding or admission failed without accepting output. Paint a new draft for another attempt |
 
 An `OT_OK` commit consumes the draft even for skipped or failed render outcomes.
 Do not submit its ticket again. Pumping output does not repaint or retry it.
+
+An admission error preserves a live draft for retry and leaves the render-outcome output unchanged.
+For example, a frame-qualified lease can block commit with `OT_FRAME_BUSY` until you release the lease.
+An `OT_OK` call with `OT_RENDER_FAILED` consumes the draft. It is not an `ot_status` error.
+
+Frame-qualified `ot_session_render_split` calls use the same consumption rules.
+A consumed draft is stale even while earlier output remains pending.
+A ticketless submission can report earlier pending output without accepting new work.
+Draft consumption and transport completion are separate events.
 
 The output ticket from `ot_session_read_output` has a different job from the frame ticket:
 
@@ -168,6 +177,25 @@ An ordinary storage lease cannot bypass an active draft's frame checks.
 
 The next buffer is drawing storage, which encoding clears after use.
 The current buffer is encoding comparison state, not a guaranteed copy of the last presented frame.
+
+## Submit property updates
+
+`ot_scene_flush` accepts one bounded byte stream under one mutation admission.
+Each record selects a node and the properties to change. Unselected visual fields keep their accepted native values.
+Layout records contain one style operation. Visual records contain only the fields selected by their mask.
+
+Records apply in stream order without host callbacks between them.
+Each record publishes atomically, including border appearance, Yoga border widths, and a requested custom-character reset.
+The first rejected record stops the flush. `out_applied` counts complete accepted records, not bytes.
+The rejected record and its suffix remain unapplied. Accepted records do not roll back.
+
+Admission, null-input, and byte-limit failures consume zero records.
+The record limit stops before record 4,097 and preserves the accepted prefix.
+The stream limits are `OT_SCENE_MUTATIONS_MAX` records and `OT_SCENE_PROPERTY_BYTES_MAX` bytes.
+Style records use 40 bytes. Visual records use 32 to 88 bytes.
+
+Use the [checked header](https://github.com/anomalyco/opentui/blob/main/packages/native/include/opentui.h) for masks, exact sizes, padding, and field encodings.
+The [Core driver](/docs/native/core#send-changes-before-native-work-continues) stages and coalesces property writes before this call.
 
 ## Change the scene during a frame
 
@@ -263,7 +291,7 @@ The native Session does not own your transport or restore host-side input settin
 
 On graceful shutdown, call `ot_session_close` and continue pumping and delivering restoration output until closed.
 On transport loss, call `ot_session_cancel`. It discards pending output without claiming terminal restoration.
-The [Rust terminal examples](/docs/native/rust#connect-a-terminal) supply complete host loops.
+Read [Host I/O and time](/docs/native/host-io-time) for the shared Session clock, image deadlines, and native file cleanup.
 
 ### Reserve output storage
 
@@ -288,7 +316,7 @@ A smaller write can still fail while other output is pending. These limits do no
 
 ## View both frames
 
-The [C](/docs/native/c), [Zig](/docs/native/zig), and [Rust](/docs/native/rust) guides write two frames to `hello.ansi` and `ready.ansi`.
+The [C](/docs/native/c) and [Zig](/docs/native/zig) guides write two frames to `hello.ansi` and `ready.ansi`.
 Once you have those files, this preview displays them in sequence without replacing your normal shell screen.
 
 Run it in Bash from the directory containing the files.

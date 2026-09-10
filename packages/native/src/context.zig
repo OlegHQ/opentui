@@ -2133,7 +2133,23 @@ pub const Context = struct {
     }
 
     pub fn sceneSetBackground(self: *Context, handle: Handle, background: buf.RGBA) !void {
-        return self.scenePatchPaint(handle, 64, .{ .background = background });
+        try self.beginMutation();
+        defer self.mutating = false;
+        return self.scenePatchBackgroundLocked(handle, background);
+    }
+
+    /// Caller holds the mutation admission; used by ot_scene_flush for background-only records.
+    pub fn scenePatchBackgroundLocked(self: *Context, handle: Handle, background: buf.RGBA) !void {
+        std.debug.assert(self.mutating);
+        try buf.validateColor(background);
+        const value = try self.sceneMutableNode(handle);
+        try yoga.check(yoga.nodeTeardownStatus(value.yoga_node));
+        var unused: u32 = 0;
+        try yoga.check(yoga.yogaNodeIsDirtyChecked(value.yoga_node, &unused));
+        const node = value.scene_node.?;
+        if (node.kind != 1 and node.paint.borderSides != 0) return error.InvalidOptions;
+        if (node.owner.attempt != null) node.owner.work.clearRetainingCapacity();
+        node.paint.background = background;
     }
 
     pub fn sceneSetViewport(self: *Context, handle: Handle, viewport_handle: ?Handle) !void {

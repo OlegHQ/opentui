@@ -37,8 +37,8 @@ describe("documentation index", () => {
   })
 
   test("teaches native concepts before separate language guides", () => {
-    const concepts = ["native/overview", "native/resources", "native/frames", "native/core"]
-    const languages = ["native/c", "native/zig", "native/rust"]
+    const concepts = ["native/overview", "native/resources", "native/frames", "native/host-io-time", "native/core"]
+    const languages = ["native/c", "native/zig"]
     const native = index.sections.find((section) => section.id === "native")
 
     expect(native?.pages.map((page) => page.slug)).toEqual([...concepts, ...languages])
@@ -46,13 +46,14 @@ describe("documentation index", () => {
     expect(index.pagesBySlug["native/overview"].title).toBe("Native rendering")
     expect(index.pagesBySlug["native/c"]?.title).toBe("C")
     expect(index.pagesBySlug["native/zig"]?.title).toBe("Zig")
+    expect(index.pagesBySlug["native/rust"]).toBeUndefined()
+    expect(index.pagesBySlug["native/api-contract"]).toBeUndefined()
     expect(index.pagesBySlug["native/c-zig"]).toBeUndefined()
     expect(index.intentIndex["native-api"]?.map((page) => page.slug)).toContain("native/overview")
 
     for (const [id, language] of [
       ["native", "native/c"],
       ["native-zig", "native/zig"],
-      ["native-rust", "native/rust"],
     ]) {
       expect(index.learningSequences.find((sequence) => sequence.id === id)?.pages).toEqual([...concepts, language])
       const [{ prev }] = getPrevNextDocSequences(index, language)
@@ -64,7 +65,7 @@ describe("documentation index", () => {
     }
     const [{ prev, next }] = getPrevNextDocSequences(index, "native/frames")
     expect(prev?.slug).toBe("native/resources")
-    expect(next?.slug).toBe("native/core")
+    expect(next?.slug).toBe("native/host-io-time")
   })
 
   test("uses named learning sequences instead of the global sidebar order", () => {

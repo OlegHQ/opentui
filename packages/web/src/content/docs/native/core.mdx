@@ -101,17 +101,52 @@ Their custom drawing contract is in [Custom renderables](/docs/extend/custom-ren
 ## Send changes before native work continues
 
 Core's ordinary style and paint setters validate values and stage native updates.
-Repeated background or full-paint writes can replace pending values for the same node. Style writes keep their order.
-Node creation, tree changes, and text and resource operations use their own checked calls.
+The driver sends one bounded property stream. Visual records contain only the selected fields, so small edits need no complete paint projection.
+
+Application state passes through these stages:
+
+```text
+┌─ Requested host values
+│  ↓ staged mutations
+│  ↓ accepted native state
+│  ↓ completed layout
+│  ↓ prepared paint membership
+│  ↓ painted draft
+│  ↓ admitted output
+└─ Transport-completed presentation
+```
+
+Property getters can report requested values before native acceptance. Geometry getters report completed observations.
+For example, `box.opacity = 0.5` changes its getter immediately. A width setter does not immediately change the computed `box.width`.
+A native style read flushes pending staging without running Yoga. It accepts the requested width without completing layout.
+
+Layout writes keep their order because Yoga edge, shorthand, and dimension operations can overlap.
+Other visual writes coalesce at the node's latest visual record. The last write wins for each selected field.
+Unselected fields keep their accepted native values.
+
+New or changed translations can merge only into the last stream record.
+Their prepared coordinates depend on the ancestor translations accepted so far.
+Translations identical to the node's latest staged values can coalesce at that node's record. They cause no second native coordinate update.
+A successful flush ends the coalescing window.
+
+Validation and caller getters finish before a staged record becomes visible, including during reentry.
+Explicit `undefined` assignments to `shouldFill`, `focusable`, `translateX`, and `translateY` reject before changing host or native state.
+Omitted fields remain valid in a partial update.
+
+Node creation, tree changes, and immediate text or resource replacements use their own checked calls.
+Their host projections publish after native acceptance.
 
 Before each frame step, `NativeScene.advancePaint()` calls `flushStaged()`.
 Native reads and other operations that need those values also flush them.
 This is why a hook's pending color changes reach native code before a later node draws.
+Before synchronous measurement callbacks, the driver also flushes other scenes so read-only queries can observe their writes.
+React and Solid use these same driver boundaries.
 
 Staging is not an atomic application transaction.
-The native `ot_scene_flush` call reports an accepted prefix if a later update fails.
-Core keeps the unaccepted suffix without replaying accepted entries.
+The native [property flush](/docs/native/frames#submit-property-updates) reports an accepted prefix if a later record fails.
+Core removes that prefix and retains the rejected record and suffix for retry.
 Cancelling a frame does not roll back accepted changes or hook side effects.
+Deferred callback errors can surface after native acceptance and host publication. A thrown host error alone does not prove native rejection.
 
 `getLayout()` reads completed local layout. It does not run Yoga or promise to include a recent setter's change.
 [Layout](/docs/core-concepts/layout) and [custom measurement](/docs/extend/custom-renderables#measure-intrinsic-size) cover the public layout API.
@@ -156,8 +191,9 @@ For a resource used by a renderer, pass `renderer.nativeScene` to its factory.
 That selects the renderer's Context. It does not mean application code should drive `NativeScene.paint()`.
 
 Factories retain the owner's canonical `resourceContext`, not its originating scene.
+The root `NativeSession` owns that Context. Detached Sessions share it directly.
 Resources shared across detached Sessions remain usable after the originating Session closes, while the Context remains alive.
-Destroying a resource removes its event subscriptions; destroying the Context releases all its resources.
+Destroying a resource removes its event subscriptions. Destroying the Context releases all its resources.
 
 For standalone work, `ResourceContext` owns resources without a renderer or terminal Session:
 
@@ -205,6 +241,9 @@ These factories use a `ResourceContext` or the destination `renderer.nativeScene
 Views inherit their buffer's owner. `RenderLib` calls the loaded library but is not a resource owner.
 These factories have no ownerless alternatives or public resource pointers.
 [Buffer API](/docs/reference/buffer-api) and [Editing buffers and views](/docs/extend/editing) describe the drawing and text operations.
+The [image factories](/docs/reference/native-image#choose-a-context-owner) also accept a `ResourceContext`, with a shared automatic Context as their default.
+
+Session, buffer, and scene-node handles have distinct TypeScript brands. Native calls also check Context, kind, Session, and generation as applicable.
 
 Core's detached scrollback surfaces use separate Sessions within the same Context, through `NativeSession.createDetached()`.
 They share resource ownership, not scene or frame state.
@@ -213,6 +252,8 @@ They share resource ownership, not scene or frame state.
 
 After scene painting, Core runs whole-frame post-processing and draws the console overlay.
 It commits the draft and delivers copied Session output to the configured `Writable`.
+Core treats issued frame-authority fields as readonly. Geometry remains a separate observation.
+The driver clears a consumed draft for `PRESENTED`, `PENDING`, `SKIPPED`, and `FAILED` results.
 The write callback acknowledges delivery. The `write()` return value and `drain` event control backpressure, not ticket completion.
 
 `NativeSession.whenPresented()` waits for the frame's endpoint, not later output or a later drain event.
@@ -231,4 +272,4 @@ The [Rendering pipeline](/docs/core-concepts/rendering-pipeline) follows the ful
 There is one rendering implementation: native scene traversal. Earlier OpenTUI versions also used native Yoga, cell drawing, and encoding, but JavaScript directed traversal.
 That earlier traversal is not a selectable backend.
 
-To call the native library directly rather than through Core, choose the [C](/docs/native/c), [Zig](/docs/native/zig), or [Rust](/docs/native/rust) guide.
+To call the native library directly, choose the [C](/docs/native/c) or [Zig](/docs/native/zig) guide.
