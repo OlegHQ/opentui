@@ -29,6 +29,14 @@ pub const OT_STALE_FRAME: i32 = -25;
 pub const OT_LAYOUT_LIMIT: i32 = -26;
 pub const OT_FRAME_BUSY: i32 = -27;
 pub const OT_FRAME_REQUEST_LIMIT: i32 = -28;
+pub const OT_IMAGE_UNSUPPORTED_FORMAT: i32 = -40;
+pub const OT_IMAGE_UNSUPPORTED_COLOR_SPACE: i32 = -41;
+pub const OT_IMAGE_MALFORMED_DATA: i32 = -42;
+pub const OT_IMAGE_DIMENSION_LIMIT: i32 = -43;
+pub const OT_IMAGE_MEMORY_LIMIT: i32 = -44;
+pub const OT_IMAGE_OUTPUT_TOO_SMALL: i32 = -45;
+pub const OT_IMAGE_UNSUPPORTED_FEATURE: i32 = -46;
+pub const OT_IMAGE_BUSY: i32 = -47;
 pub const OT_SCENE_ROOT: u32 = 0;
 pub const OT_SCENE_BOX: u32 = 1;
 pub const OT_SCENE_TEXT: u32 = 2;
@@ -291,6 +299,33 @@ pub const OT_IMAGE_PROTOCOL_SIXEL: u32 = 2;
 pub const OT_IMAGE_PROTOCOL_BLOCKS: u32 = 3;
 pub const OT_IMAGE_DRAW_SOURCE_WIDTH: u32 = 1;
 pub const OT_IMAGE_DRAW_SOURCE_HEIGHT: u32 = 2;
+pub const OT_IMAGE_FORMAT_UNKNOWN: u32 = 0;
+pub const OT_IMAGE_FORMAT_PNG: u32 = 1;
+pub const OT_IMAGE_FORMAT_RGBA: u32 = 2;
+pub const OT_IMAGE_FORMAT_JPEG: u32 = 3;
+pub const OT_IMAGE_FORMAT_WEBP: u32 = 4;
+pub const OT_IMAGE_FORMAT_GIF: u32 = 5;
+pub const OT_IMAGE_ASSUMED_SRGB: u32 = 0;
+pub const OT_IMAGE_EXPLICIT_SRGB: u32 = 1;
+pub const OT_IMAGE_RGBA8: u32 = 0;
+pub const OT_IMAGE_BGRA8: u32 = 1;
+pub const OT_IMAGE_ALPHA_STRAIGHT: u32 = 0;
+pub const OT_IMAGE_ALPHA_OPAQUE: u32 = 1;
+pub const OT_IMAGE_FILTER_DEFAULT: u32 = 0;
+pub const OT_IMAGE_FILTER_AREA: u32 = 1;
+pub const OT_IMAGE_FILTER_TRIANGLE: u32 = 2;
+pub const OT_IMAGE_FILTER_CUBIC_BSPLINE: u32 = 3;
+pub const OT_IMAGE_FILTER_CATMULL_ROM: u32 = 4;
+pub const OT_IMAGE_FILTER_MITCHELL: u32 = 5;
+pub const OT_IMAGE_FILTER_NEAREST: u32 = 6;
+pub const OT_IMAGE_ROTATE_90: u32 = 0;
+pub const OT_IMAGE_ROTATE_180: u32 = 1;
+pub const OT_IMAGE_ROTATE_270: u32 = 2;
+pub const OT_IMAGE_FLIP: u32 = 3;
+pub const OT_IMAGE_FLOP: u32 = 4;
+pub const OT_IMAGE_BLEND_SOURCE_OVER: u32 = 0;
+pub const OT_IMAGE_BLEND_SOURCE: u32 = 1;
+pub const OT_IMAGE_BLEND_DESTINATION_OVER: u32 = 2;
 pub const OT_TEXT_VIEW_WRAP_WIDTH: u32 = 0;
 pub const OT_TEXT_VIEW_WRAP_MODE: u32 = 1;
 pub const OT_TEXT_VIEW_FIRST_LINE_OFFSET: u32 = 2;
@@ -411,6 +446,14 @@ fn constants() -> Vec<u32> {
         OT_LAYOUT_LIMIT as u32,
         OT_FRAME_BUSY as u32,
         OT_FRAME_REQUEST_LIMIT as u32,
+        OT_IMAGE_UNSUPPORTED_FORMAT as u32,
+        OT_IMAGE_UNSUPPORTED_COLOR_SPACE as u32,
+        OT_IMAGE_MALFORMED_DATA as u32,
+        OT_IMAGE_DIMENSION_LIMIT as u32,
+        OT_IMAGE_MEMORY_LIMIT as u32,
+        OT_IMAGE_OUTPUT_TOO_SMALL as u32,
+        OT_IMAGE_UNSUPPORTED_FEATURE as u32,
+        OT_IMAGE_BUSY as u32,
         OT_SCENE_ROOT as u32,
         OT_SCENE_BOX as u32,
         OT_SCENE_TEXT as u32,
@@ -673,6 +716,33 @@ fn constants() -> Vec<u32> {
         OT_IMAGE_PROTOCOL_BLOCKS as u32,
         OT_IMAGE_DRAW_SOURCE_WIDTH as u32,
         OT_IMAGE_DRAW_SOURCE_HEIGHT as u32,
+        OT_IMAGE_FORMAT_UNKNOWN as u32,
+        OT_IMAGE_FORMAT_PNG as u32,
+        OT_IMAGE_FORMAT_RGBA as u32,
+        OT_IMAGE_FORMAT_JPEG as u32,
+        OT_IMAGE_FORMAT_WEBP as u32,
+        OT_IMAGE_FORMAT_GIF as u32,
+        OT_IMAGE_ASSUMED_SRGB as u32,
+        OT_IMAGE_EXPLICIT_SRGB as u32,
+        OT_IMAGE_RGBA8 as u32,
+        OT_IMAGE_BGRA8 as u32,
+        OT_IMAGE_ALPHA_STRAIGHT as u32,
+        OT_IMAGE_ALPHA_OPAQUE as u32,
+        OT_IMAGE_FILTER_DEFAULT as u32,
+        OT_IMAGE_FILTER_AREA as u32,
+        OT_IMAGE_FILTER_TRIANGLE as u32,
+        OT_IMAGE_FILTER_CUBIC_BSPLINE as u32,
+        OT_IMAGE_FILTER_CATMULL_ROM as u32,
+        OT_IMAGE_FILTER_MITCHELL as u32,
+        OT_IMAGE_FILTER_NEAREST as u32,
+        OT_IMAGE_ROTATE_90 as u32,
+        OT_IMAGE_ROTATE_180 as u32,
+        OT_IMAGE_ROTATE_270 as u32,
+        OT_IMAGE_FLIP as u32,
+        OT_IMAGE_FLOP as u32,
+        OT_IMAGE_BLEND_SOURCE_OVER as u32,
+        OT_IMAGE_BLEND_SOURCE as u32,
+        OT_IMAGE_BLEND_DESTINATION_OVER as u32,
         OT_TEXT_VIEW_WRAP_WIDTH as u32,
         OT_TEXT_VIEW_WRAP_MODE as u32,
         OT_TEXT_VIEW_FIRST_LINE_OFFSET as u32,

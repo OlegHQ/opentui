@@ -987,15 +987,178 @@ pub const Context = struct {
     pub fn importImage(self: *Context, source: *const image.Image) !Handle {
         try self.beginMutation();
         defer self.mutating = false;
+        try self.checkImageCapacity();
+        return self.insertImage(try source.cloneOwned(self.allocator, self.io));
+    }
+
+    fn checkImageCapacity(self: *Context) !void {
         try self.objects.checkCapacity();
         if (self.last_image_id == std.math.maxInt(u32)) return error.ObjectLimit;
-        const value = try source.cloneOwned(self.allocator, self.io);
+    }
+
+    fn insertImage(self: *Context, value: *image.Image) !Handle {
         errdefer value.deinit();
         const handle = try self.objects.insert(.image, value);
         self.last_image_id += 1;
         value.render_id = self.last_image_id;
         value.owner_context_id = self.objects.context_id;
+        value.io = self.io;
         return handle;
+    }
+
+    pub fn inspectImage(self: *Context, bytes: []const u8) !image.Info {
+        try self.beginMutation();
+        defer self.mutating = false;
+        return image.inspectOwned(self.allocator, self.io, bytes, .{});
+    }
+
+    pub fn decodeImage(self: *Context, bytes: []const u8) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        try self.checkImageCapacity();
+        return self.insertImage(try image.decodeOwned(self.allocator, self.io, bytes, .{}));
+    }
+
+    pub fn createImagePixels(self: *Context, pixels: []const u8, width: u32, height: u32, options: image.PixelImportOptions) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        try self.checkImageCapacity();
+        return self.insertImage(try image.createFromPixels(self.allocator, pixels, width, height, options));
+    }
+
+    pub fn cloneImageFrom(self: *Context, source_owner: *Context, handle: Handle) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        if (source_owner != self) {
+            try source_owner.beginMutation();
+        }
+        defer if (source_owner != self) {
+            source_owner.mutating = false;
+        };
+        const source = try source_owner.getImage(handle);
+        try self.checkImageCapacity();
+        return self.insertImage(try source.cloneOwned(self.allocator, self.io));
+    }
+
+    pub fn retainImage(self: *Context, handle: Handle) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const source = try self.getImage(handle);
+        try self.objects.checkCapacity();
+        if (source.ref_count == std.math.maxInt(u32)) return error.MemoryLimit;
+        const result = try self.objects.insert(.image, source);
+        source.retain();
+        return result;
+    }
+
+    pub fn imageInfo(self: *Context, handle: Handle) !image.Info {
+        try self.beginMutation();
+        defer self.mutating = false;
+        return (try self.getImage(handle)).info();
+    }
+
+    pub fn updateImagePixels(self: *Context, handle: Handle, pixels: []const u8, options: image.PixelImportOptions) !void {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const value = try self.getImage(handle);
+        if (self.last_image_id == std.math.maxInt(u32)) return error.ObjectLimit;
+        try image.updatePixels(value, pixels, options);
+        // Cache identity belongs to pixel content, including pooled updates.
+        self.last_image_id += 1;
+        value.render_id = self.last_image_id;
+    }
+
+    pub fn resizeImage(self: *Context, handle: Handle, width: u32, height: u32, filter: image.ResizeFilter) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const source = try self.getImage(handle);
+        try self.checkImageCapacity();
+        return self.insertImage(try image.resize(self.allocator, source, width, height, filter));
+    }
+
+    pub fn extractImage(self: *Context, handle: Handle, left: u32, top: u32, width: u32, height: u32) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const source = try self.getImage(handle);
+        try self.checkImageCapacity();
+        return self.insertImage(try image.extract(self.allocator, source, left, top, width, height));
+    }
+
+    pub fn extendImage(self: *Context, handle: Handle, top: u32, right: u32, bottom: u32, left: u32, background: [4]u8) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const source = try self.getImage(handle);
+        try self.checkImageCapacity();
+        return self.insertImage(try image.extend(self.allocator, source, top, right, bottom, left, background));
+    }
+
+    pub fn transformImage(self: *Context, handle: Handle, operation: image.Transform) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const source = try self.getImage(handle);
+        try self.checkImageCapacity();
+        return self.insertImage(try image.transform(self.allocator, source, operation));
+    }
+
+    pub fn compositeImage(self: *Context, base: Handle, overlay: Handle, left: i32, top: i32, blend: image.Blend, opacity: u8) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const source = try self.getImage(base);
+        const layer = try self.getImage(overlay);
+        try self.checkImageCapacity();
+        return self.insertImage(try image.composite(self.allocator, source, layer, left, top, blend, opacity));
+    }
+
+    pub fn copyImagePixels(self: *Context, handle: Handle, destination: []u8, stride: u32, format: image.PixelFormat) !void {
+        try self.beginMutation();
+        defer self.mutating = false;
+        try image.errorFromStatus(image.copyPixels(try self.getImage(handle), destination, stride, format == .bgra8));
+    }
+
+    /// Zero capacity returns the exact encoded byte count. A short output writes nothing.
+    pub fn copyImagePng(self: *Context, handle: Handle, destination: []u8) !usize {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const bytes = try (try self.getImage(handle)).ensureEncodedPng();
+        if (destination.len != 0) {
+            if (destination.len < bytes.len) return error.OutputTooSmall;
+            @memcpy(destination[0..bytes.len], bytes);
+        }
+        return bytes.len;
+    }
+
+    /// Consumes the exclusive image handle; the lease prevents Context teardown.
+    pub fn takeImagePixels(self: *Context, handle: Handle) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        const value = try self.getImage(handle);
+        if (value.ref_count != 1) return error.Busy;
+        try self.objects.checkCapacity();
+        if (self.lease_count == self.lease_count_max) return error.LeaseLimit;
+        const size_bytes = @sizeOf(image.Image) + @as(u64, value.width()) * value.height() * 4;
+        if (size_bytes > self.lease_bytes_max - self.lease_bytes) return error.LeaseBytesLimit;
+        _ = try value.ensurePixels();
+        const result = try self.objects.insert(.image_pixels_lease, value);
+        value.discardEncoded();
+        value.metadata.has_alpha = 1;
+        self.lease_count += 1;
+        self.lease_bytes += size_bytes;
+        // Transfer the reference instead of retaining it: no image handle may alias mutable pixels.
+        self.objects.finishDestroy(self.objects.beginDestroy(handle) catch unreachable);
+        return result;
+    }
+
+    pub fn imagePixelsSnapshot(self: *Context, handle: Handle) ![]u8 {
+        try self.beginMutation();
+        defer self.mutating = false;
+        return (try self.objects.get(handle, .image_pixels_lease, image.Image)).pixels;
+    }
+
+    pub fn releaseImagePixels(self: *Context, handle: Handle) !void {
+        try self.beginMutation();
+        defer self.mutating = false;
+        _ = try self.objects.get(handle, .image_pixels_lease, image.Image);
+        self.destroyToken(try self.objects.beginDestroy(handle));
     }
 
     pub fn createUnicode(self: *Context, text: []const u8, width_method: utf8.WidthMethod) !Handle {
@@ -3442,6 +3605,12 @@ pub const Context = struct {
     fn destroyToken(self: *Context, token: handles.DestroyToken) void {
         defer self.objects.finishDestroy(token);
         switch (token.kind) {
+            .image_pixels_lease => {
+                const value: *image.Image = @ptrCast(@alignCast(token.ptr));
+                self.lease_count -= 1;
+                self.lease_bytes -= @sizeOf(image.Image) + value.pixels.len;
+                value.deinit();
+            },
             .encoded_unicode => {
                 const value: *EncodedUnicode = @ptrCast(@alignCast(token.ptr));
                 value.deinit(self.allocator, &self.graphemes);

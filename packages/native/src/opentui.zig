@@ -4,6 +4,7 @@ pub const buffer = @import("buffer.zig");
 pub const context = @import("context.zig");
 /// Compiler-derived checked C records and named layout, color, and selection vocabulary.
 pub const abi = @import("context_abi_c");
+pub const image = @import("image.zig");
 pub const native_renderable = @import("native-renderable.zig");
 pub const renderer = @import("renderer.zig");
 pub const session = @import("session.zig");
