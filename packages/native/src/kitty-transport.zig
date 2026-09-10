@@ -60,12 +60,22 @@ pub const Transport = struct {
         if (self.mode == .file or self.file_state != .disabled) self.file_state = if (self.pendingCount() == 0) reason else .io_error;
     }
 
+    /// Arm new leases without releasing files referenced by an encoded frame.
+    /// Clamp at the end of the clock range so deadlines never wrap.
+    pub fn arm(self: *Transport, now_ns: u64) void {
+        for (&self.leases) |*lease| {
+            if (lease.path_len != 0 and lease.deadline_ns == null) {
+                lease.deadline_ns = now_ns +| TIMEOUT_NS;
+            }
+        }
+    }
+
     /// Arm new leases on their first host clock observation. Clamp at the end of
     /// the clock range so expiry never wraps or extends beyond five seconds.
     pub fn expire(self: *Transport, now_ns: u64) void {
-        for (&self.leases) |*lease| {
+        self.arm(now_ns);
+        for (self.leases) |lease| {
             if (lease.path_len == 0) continue;
-            if (lease.deadline_ns == null) lease.deadline_ns = now_ns +| TIMEOUT_NS;
             if (now_ns >= lease.deadline_ns.?) {
                 // Timeout is cancellation, never evidence that a terminal consumed a file.
                 // Disable the medium permanently so late ACKs cannot release new leases.

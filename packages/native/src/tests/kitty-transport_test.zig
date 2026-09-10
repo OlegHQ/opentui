@@ -12,6 +12,7 @@ const FileIo = struct {
     fail_write: bool = false,
     fail_remove: bool = false,
     time_ns: i96 = 0,
+    advance_create_ns: ?i96 = null,
 
     fn io(self: *FileIo) std.Io {
         return .{ .userdata = self, .vtable = &vtable };
@@ -38,6 +39,10 @@ const FileIo = struct {
     fn create(data: ?*anyopaque, dir: std.Io.Dir, path: []const u8, options: std.Io.Dir.CreateFileOptions) std.Io.File.OpenError!std.Io.File {
         const self: *FileIo = @ptrCast(@alignCast(data.?));
         self.created += 1;
+        if (self.advance_create_ns) |time_ns| {
+            self.time_ns = time_ns;
+            self.advance_create_ns = null;
+        }
         return std.testing.io.vtable.dirCreateFile(std.testing.io.userdata, dir, path, options);
     }
 
@@ -173,6 +178,134 @@ test "raw Kitty expiry starts at native file creation" {
     _ = f.cli.pollKittyImageTransport();
     try std.testing.expectEqual(.timeout, f.cli.kittyTransport.file_state);
     try std.testing.expectEqual(@as(u32, 0), f.cli.kittyTransport.pendingCount());
+}
+
+const FileReferenceOutput = struct {
+    references: u32 = 0,
+    missing: u32 = 0,
+    raw_references: u32 = 0,
+
+    fn write(ctx: *anyopaque, bytes: []const u8) void {
+        const self: *FileReferenceOutput = @ptrCast(@alignCast(ctx));
+        self.raw_references += @intCast(std.mem.count(u8, bytes, "\x1b_Ga=t,f="));
+        var offset: usize = 0;
+        while (std.mem.findPos(u8, bytes, offset, "\x1b_Ga=t,t=f,")) |start| {
+            const separator = std.mem.findScalarPos(u8, bytes, start, ';').?;
+            const end = std.mem.findPos(u8, bytes, separator, "\x1b\\").?;
+            const encoded = bytes[separator + 1 .. end];
+            var path: [768]u8 = undefined;
+            const path_len = std.base64.standard.Decoder.calcSizeForSlice(encoded) catch unreachable;
+            std.base64.standard.Decoder.decode(path[0..path_len], encoded) catch unreachable;
+            self.references += 1;
+            std.Io.Dir.accessAbsolute(std.testing.io, path[0..path_len], .{}) catch |err| {
+                if (err != error.FileNotFound) @panic("unexpected Kitty path access error");
+                self.missing += 1;
+            };
+            offset = end + 2;
+        }
+    }
+};
+
+const ExpiryCase = enum { before_deadline, crosses_during_create, already_expired };
+
+fn checkRawKittyExpiry(case: ExpiryCase) !void {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    const renderer = @import("../renderer.zig");
+    const gp = @import("../grapheme.zig");
+    var pool = gp.GraphemePool.init(std.testing.allocator);
+    defer pool.deinit();
+    defer @import("../link.zig").deinitGlobalLinkPool();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+    var directory: [512]u8 = undefined;
+    const directory_len = try temporary.dir.realPath(std.testing.io, &directory);
+    var environment = std.process.Environ.Map.init(std.testing.allocator);
+    defer environment.deinit();
+    try environment.put("TMPDIR", directory[0..directory_len]);
+    var supplied: FileIo = .{};
+    var output: FileReferenceOutput = .{};
+    const cli = try renderer.CliRenderer.createWithOptions(std.testing.allocator, 3, 1, &pool, .{
+        .io = supplied.io(),
+        .env_map = &environment,
+        .output = .{ .buffered = .{ .ctx = &output, .write_fn = FileReferenceOutput.write } },
+    });
+    defer cli.destroy();
+    try std.testing.expect(!cli.host_driven_time);
+    cli.terminal.graphics_enabled = true;
+    cli.terminal.caps.kitty_graphics = true;
+    cli.setupTerminal(false);
+    try std.testing.expect(cli.setKittyImageTransport(2));
+    try std.testing.expectEqual(.probing, cli.kittyTransport.file_state);
+    var reply_buffer: [80]u8 = undefined;
+    for ([_]u32{ cli.kittyTransport.query_id, cli.kittyTransport.upload_probe_id }) |id| {
+        const reply = try std.fmt.bufPrint(&reply_buffer, "\x1b_Gi={d};OK\x1b\\", .{id});
+        try std.testing.expect(cli.processKittyImageReply(reply) != 0);
+    }
+    try std.testing.expectEqual(.ready, cli.kittyTransport.file_state);
+    try std.testing.expectEqual(@as(u32, 0), output.missing);
+    const value = try image.createFromRgba(std.testing.allocator, &.{ 1, 2, 3, 255 }, 1, 1, 4);
+    defer value.deinit();
+    output = .{};
+    try std.testing.expect(try cli.getNextBuffer().drawImage(value, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, .kitty));
+    try std.testing.expectEqual(renderer.RenderStatus.rendered, cli.render(true));
+    try std.testing.expectEqual(@as(u32, 1), output.references);
+    try std.testing.expectEqual(@as(u32, 0), output.missing);
+    try std.testing.expectEqual(@as(u32, 1), cli.kittyTransport.pendingCount());
+    const deadline = kitty.TIMEOUT_NS;
+    for (cli.kittyTransport.leases) |lease| if (lease.path_len != 0) {
+        try std.testing.expectEqual(deadline, lease.deadline_ns.?);
+    };
+    supplied.time_ns = if (case == .already_expired) deadline else deadline - std.time.ns_per_ms;
+    if (case == .crosses_during_create) supplied.advance_create_ns = deadline + std.time.ns_per_ms;
+    for (0..3) |x| {
+        try std.testing.expect(try cli.getNextBuffer().drawImage(value, @intCast(x + 1), @intCast(x), 0, 1, 1, 0, 0, 0, 0, 1, 1, .kitty));
+    }
+    output = .{};
+    try std.testing.expectEqual(renderer.RenderStatus.rendered, cli.render(false));
+    try std.testing.expectEqual(@as(u32, 0), output.missing);
+    if (case == .already_expired) {
+        try std.testing.expectEqual(@as(u32, 0), output.references);
+        try std.testing.expectEqual(@as(u32, 3), output.raw_references);
+        try std.testing.expectEqual(.timeout, cli.kittyTransport.file_state);
+    } else {
+        try std.testing.expectEqual(@as(u32, 2), output.references);
+        try std.testing.expectEqual(@as(u32, 0), output.raw_references);
+        try std.testing.expectEqual(.ready, cli.kittyTransport.file_state);
+        try std.testing.expectEqual(@as(u32, 3), cli.kittyTransport.pendingCount());
+        var old_leases: u32 = 0;
+        for (cli.kittyTransport.leases) |lease| {
+            if (lease.path_len == 0) continue;
+            if (lease.deadline_ns.? == deadline) {
+                old_leases += 1;
+            } else {
+                try std.testing.expectEqual(@as(u64, @intCast(supplied.time_ns)) + kitty.TIMEOUT_NS, lease.deadline_ns.?);
+            }
+        }
+        try std.testing.expectEqual(@as(u32, 1), old_leases);
+    }
+    if (case == .crosses_during_create) {
+        for (0..3) |x| {
+            try std.testing.expect(try cli.getNextBuffer().drawImage(value, @intCast(x + 1), @intCast(x), 0, 1, 1, 0, 0, 0, 0, 1, 1, .kitty));
+        }
+        output = .{};
+        try std.testing.expectEqual(renderer.RenderStatus.rendered, cli.render(false));
+        try std.testing.expectEqual(@as(u32, 0), output.references);
+        try std.testing.expectEqual(@as(u32, 3), output.raw_references);
+        try std.testing.expectEqual(.timeout, cli.kittyTransport.file_state);
+        try std.testing.expectEqual(@as(u32, 0), cli.kittyTransport.pendingCount());
+    }
+}
+
+test "raw Kitty references exist at delivery before the oldest deadline" {
+    try checkRawKittyExpiry(.before_deadline);
+}
+
+test "raw Kitty initial expired poll uses inline transport" {
+    try checkRawKittyExpiry(.already_expired);
+}
+
+test "raw Kitty references survive file creation crossing an older deadline" {
+    try checkRawKittyExpiry(.crosses_during_create);
 }
 
 const Fixture = struct {

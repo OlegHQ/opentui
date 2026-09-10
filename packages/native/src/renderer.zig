@@ -2394,7 +2394,7 @@ pub const CliRenderer = struct {
                 defer if (transmit.owned) transmit.image.deinit();
                 const directory = if (self.kittyTransport.mode == .file) self.kittyTempDirectory() else "";
                 try self.kittyTransport.transmit(self.allocator, writer, transmit.image, image_id, tmux, directory);
-                self.expireKittyImageTransport();
+                if (self.kittyImageTransportNow()) |now| self.kittyTransport.arm(now);
             } else if (force_place or previous.?.x != placement.x or previous.?.y != placement.y or previous.?.width != placement.width or previous.?.height != placement.height or
                 previous.?.source_x != placement.source_x or previous.?.source_y != placement.source_y or previous.?.source_width != placement.source_width or
                 previous.?.source_height != placement.source_height)
@@ -3424,7 +3424,7 @@ pub const CliRenderer = struct {
             var buffer: [4096]u8 = undefined;
             var writer: std.Io.Writer = .fixed(&buffer);
             self.kittyTransport.startProbe(&writer, base + 1, self.kittyTempDirectory()) catch {};
-            self.expireKittyImageTransport();
+            if (self.kittyImageTransportNow()) |now| self.kittyTransport.arm(now);
             self.backend.writeOut(writer.buffered());
         } else self.kittyTransport.cancel(.unsupported);
     }
@@ -3455,17 +3455,17 @@ pub const CliRenderer = struct {
         if (builtin.os.tag == .windows or self.terminal.remote or self.terminal.multiplexer != .none or !self.terminal.graphics_enabled) {
             self.kittyTransport.cancel(.unsupported);
         }
-        self.expireKittyImageTransport();
+        if (self.kittyImageTransportNow()) |now| self.kittyTransport.expire(now);
         if (!self.kittyTransport.retry_images) return false;
         self.kittyTransport.retry_images = false;
         self.invalidateKittyImages();
         return true;
     }
 
-    fn expireKittyImageTransport(self: *CliRenderer) void {
-        if (self.host_driven_time or self.kittyTransport.pendingCount() == 0) return;
+    fn kittyImageTransportNow(self: *CliRenderer) ?u64 {
+        if (self.host_driven_time or self.kittyTransport.pendingCount() == 0) return null;
         const now = std.Io.Clock.now(.awake, self.io).nanoseconds;
-        self.kittyTransport.expire(@intCast(std.math.clamp(now, 0, std.math.maxInt(u64))));
+        return @intCast(std.math.clamp(now, 0, std.math.maxInt(u64)));
     }
 
     fn invalidateKittyImages(self: *CliRenderer) void {
