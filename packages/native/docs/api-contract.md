@@ -50,11 +50,13 @@ Geometry getters expose completed native observations. Reading a layout property
 can flush staged mutations without running Yoga; a new requested width therefore
 does not imply a new computed width.
 
-Property updates use one bounded stream. Layout and translation writes retain
-order. A translation update can merge only into the last record: its prepared
-coordinates depend on previously accepted ancestor translations. Other visual
-writes coalesce at the node's latest visual record, with the last write winning for each
-selected field. Unselected fields keep their accepted native values.
+Property updates use one bounded stream. Layout writes retain order. New or
+changed translations can merge only into the last record: their prepared
+coordinates depend on previously accepted ancestor translations. Translations
+identical to the node's latest staged values can coalesce there because they
+cause no second native coordinate update. Other visual writes coalesce at the
+node's latest visual record, with the last write winning for each selected field.
+Unselected fields keep their accepted native values.
 A flush applies records in stream order without calling host code between them.
 Each record publishes atomically, including border appearance and Yoga widths.
 

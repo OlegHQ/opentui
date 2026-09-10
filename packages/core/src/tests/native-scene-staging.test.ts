@@ -51,6 +51,25 @@ test("partial paint retains accepted fields and coalesces into a compact record"
   }
 })
 
+test("unchanged translations retain full-paint coalescing across nodes at the batch limit", () => {
+  const { context, root, node } = setup()
+  try {
+    const staging = new SceneStaging(2)
+    const update = paint()
+    for (let index = 0; index < SceneStaging.limit; index++) {
+      update.opacity = index % 2 === 0 ? 0.5 : 1
+      staging.stagePaint(context, root, update)
+      staging.stagePaint(context, node, update)
+    }
+    assert.equal(staging.count, 2)
+    assert.equal(staging.byteLength, 176)
+    lib.sceneFlush(context, staging)
+    assert.equal(staging.pending, false)
+  } finally {
+    lib.destroyContext(context)
+  }
+})
+
 test("mixed property prefix retry preserves first-touch order and coalesced suffix", () => {
   const { context, session, node, root } = setup()
   try {

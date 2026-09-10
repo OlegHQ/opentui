@@ -1357,8 +1357,8 @@ function propertyWordLength(fields: number): number {
 }
 
 /** One ordered property stream. Visual writes coalesce at the node's latest visual
- * record; last write wins per field. Translations only merge into the last
- * record so prepared coordinates observe preceding ancestor translations.
+ * record; last write wins per field. New or changed translations only merge into
+ * the last record so prepared coordinates observe preceding ancestor translations.
  * Layout writes stay ordered because Yoga shorthand/edge and dimension/flex-shrink
  * operations can overlap. There are no
  * reads or callbacks between records. A successful flush ends coalescing.
@@ -1531,11 +1531,28 @@ export class SceneStaging {
     this.checkHandle(context, scratch.handle)
     if (fields === 0) return false
     const slot = scratch.handle.words[2]
-    const entry = this.paintBySlot.get(slot)
+    let entry = this.paintBySlot.get(slot)
     const translation =
       fields & (nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_X | nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_Y)
+    if (entry !== undefined && translation !== 0 && entry !== this.entryCount - 1) {
+      const base = entry * propertySlotWords
+      // Identical staged doubles cause no second native coordinate update.
+      for (let index = 2; index < 4; index++) {
+        const bit = 1 << index
+        if (!(translation & bit)) continue
+        const offset = scenePropertyWords[index].offset
+        if (
+          !(this.words[base + 4] & bit) ||
+          this.words[base + 4 + offset] !== scratch.record[offset] ||
+          this.words[base + 5 + offset] !== scratch.record[offset + 1]
+        ) {
+          entry = undefined
+          break
+        }
+      }
+    }
     let base: number
-    if (entry === undefined || (translation !== 0 && entry !== this.entryCount - 1)) {
+    if (entry === undefined) {
       base = this.reserve(scratch.handle, fields)
       this.paintBySlot.set(slot, base / propertySlotWords)
     } else {
