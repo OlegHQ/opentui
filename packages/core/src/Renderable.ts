@@ -1851,8 +1851,15 @@ export abstract class Renderable extends BaseRenderable {
    * super calls, while assignment publishes through the same accessors as discovered fields. */
   protected static defineNativeIntegration(integration: NativeRenderableIntegration): NativeRenderableIntegration {
     for (const method of Renderable.nativeSceneMethods) {
-      const own = Object.getOwnPropertyDescriptor(this.prototype, method.name)
-      if (own && "value" in own) this.installNativeSceneMethod(this.prototype, method, own.value)
+      let prototype: object | null = this.prototype
+      while (prototype) {
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, method.name)
+        if (descriptor) {
+          if ("value" in descriptor) this.installNativeSceneMethod(this.prototype, method, descriptor.value)
+          break
+        }
+        prototype = Object.getPrototypeOf(prototype)
+      }
     }
     return integration
   }
@@ -1914,6 +1921,12 @@ export abstract class Renderable extends BaseRenderable {
     const onResize = this.onResize
     const onLayoutResize = this.onLayoutResize
     if (onLayoutResize !== nativeSceneMethodDefaults.onLayoutResize) return true
+    if (
+      !this._nativeSceneHooksRegistered &&
+      this.nativeIntegration.beforeAfter !== false &&
+      (this.renderBefore || this.renderAfter)
+    )
+      return true
     return this.needsHostResize(onResize)
   }
 

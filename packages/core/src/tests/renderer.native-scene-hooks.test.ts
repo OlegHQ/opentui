@@ -48,17 +48,20 @@ test("box and text keep hook accessors on the prototype", async () => {
 test("leaf box, text, and slider constructors skip deferred hook discovery", async () => {
   const { renderer } = await setup()
   const scan = spyOn(NativeScene.prototype, "scheduleHookScan")
+  const publish = spyOn(renderer.nativeScene.driver.renderLib, "sceneSetHooks")
   try {
     new BoxRenderable(renderer, { width: 2, height: 1 })
     new TextRenderable(renderer, { content: "hi", width: 2, height: 1 })
     new SliderRenderable(renderer, { width: 2, height: 1, orientation: "horizontal" })
     expect(scan).not.toHaveBeenCalled()
+    expect(publish).not.toHaveBeenCalled()
 
     class GrowsHooks extends BoxRenderable {}
     new GrowsHooks(renderer, { width: 2, height: 1 })
     expect(scan).toHaveBeenCalledTimes(1)
   } finally {
     scan.mockRestore()
+    publish.mockRestore()
   }
 })
 
@@ -278,6 +281,113 @@ test("native body assignments publish before attachment and can restore native d
     hook.mockRestore()
   }
 })
+
+test("explicit integration captures inherited prototype body assignments without deferred discovery", async () => {
+  const { renderer, renderOnce, captureCharFrame } = await setup()
+  const calls: string[] = []
+  class Intermediate extends Renderable {
+    protected override renderSelf(buffer: OptimizedBuffer, deltaTime: number): void {
+      super.renderSelf(buffer, deltaTime)
+      calls.push("inherited")
+    }
+  }
+  class Leaf extends Intermediate {
+    static override readonly nativeIntegration = this.defineNativeIntegration({
+      kind: "custom",
+      body: { native: this.prototype.renderSelf },
+      construction: "prototype",
+    })
+  }
+  const scan = spyOn(renderer.nativeScene, "scheduleHookScan")
+  const discover = spyOn(Renderable.prototype, "_scanNativeSceneHooks")
+  try {
+    const node = new Leaf(renderer, { width: 3, height: 1 })
+    renderer.root.add(node)
+    await renderOnce()
+    expect(calls).toEqual([])
+    const inherited = node["renderSelf"]
+    node["renderSelf"] = function (buffer, deltaTime) {
+      calls.push("replacement")
+      inherited.call(this, buffer, deltaTime)
+      buffer.drawText("X", this.x, this.y, RGBA.fromInts(255, 255, 255))
+    }
+    await renderOnce()
+    expect(captureCharFrame().split("\n")[0]!.trimEnd()).toBe("X")
+    expect(calls).toEqual(["replacement", "inherited"])
+    node["renderSelf"] = inherited
+    calls.length = 0
+    await renderOnce()
+    expect(captureCharFrame().trim()).toBe("")
+    expect(calls).toEqual([])
+    expect(scan).not.toHaveBeenCalled()
+    expect(discover).not.toHaveBeenCalled()
+  } finally {
+    scan.mockRestore()
+    discover.mockRestore()
+  }
+})
+
+test.each(["prototype", "options"] as const)(
+  "native bodies publish %s decorations on the first frame",
+  async (source) => {
+    const { renderer, renderOnce, captureCharFrame } = await setup()
+    const calls: string[] = []
+    const color = RGBA.fromInts(255, 255, 255)
+    function before(this: Renderable, buffer: OptimizedBuffer) {
+      calls.push("before")
+      buffer.drawText("A", this.x, this.y, color)
+    }
+    function after(this: Renderable, buffer: OptimizedBuffer) {
+      calls.push("after")
+      buffer.drawText("C", this.x + 2, this.y, color)
+    }
+    class Decorated extends Renderable {
+      static {
+        if (source === "prototype") {
+          for (const [name, value] of [
+            ["renderBefore", before],
+            ["renderAfter", after],
+          ] as const) {
+            Object.defineProperty(this.prototype, name, { configurable: true, writable: true, value })
+          }
+        }
+      }
+      static override readonly nativeIntegration = this.defineNativeIntegration({
+        kind: "custom",
+        body: { native: this.prototype.renderSelf },
+        beforeAfter: true,
+        construction: "prototype",
+      })
+
+      protected override renderSelf(buffer: OptimizedBuffer, deltaTime: number): void {
+        super.renderSelf(buffer, deltaTime)
+      }
+    }
+    const publish = spyOn(renderer.nativeScene.driver.renderLib, "sceneSetHooks")
+    const discover = spyOn(Renderable.prototype, "_scanNativeSceneHooks")
+    try {
+      const node = new Decorated(renderer, {
+        width: 3,
+        height: 1,
+        ...(source === "options" ? { renderBefore: before, renderAfter: after } : {}),
+      })
+      expect(publish).toHaveBeenCalledTimes(source === "options" ? 2 : 1)
+      renderer.root.add(node)
+      await renderOnce()
+      expect(captureCharFrame().split("\n")[0]!.trimEnd()).toBe("A C")
+      expect(calls).toEqual(["before", "after"])
+      calls.length = 0
+      node.renderAfter = (buffer) => buffer.drawText("D", node.x + 2, node.y, color)
+      await renderOnce()
+      expect(captureCharFrame().split("\n")[0]!.trimEnd()).toBe("A D")
+      expect(calls).toEqual(["before"])
+      expect(discover).not.toHaveBeenCalled()
+    } finally {
+      publish.mockRestore()
+      discover.mockRestore()
+    }
+  },
+)
 
 test("disabling extension decorations preserves buffered body drawing and resize notifications", async () => {
   const { renderer, renderOnce, captureCharFrame } = await setup()
