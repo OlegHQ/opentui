@@ -221,7 +221,8 @@ test "Context layout-only measurement validates ownership and preserves frame pr
     const child = try core.sceneCreateNode(id, 1, 2);
     try core.sceneSetStyle(child, 4, 1, 0, 1, 2, 1);
     try core.sceneMoveNode(child, root, 0);
-    try core.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
+    const first = try core.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
+    try core.sceneFrameCancel(id, first.frame_id);
     try core.sceneSetStyle(child, 4, 1, 0, 1, 3, 1);
     const session_c = abi.handleToC(id);
     const root_c = abi.handleToC(root);
@@ -233,7 +234,8 @@ test "Context layout-only measurement validates ownership and preserves frame pr
     try std.testing.expectEqual(@as(f32, 2), (try core.sceneGetLayout(child, false)).height);
     try std.testing.expectEqual(frame_id, owned.last_frame_id);
     try std.testing.expect(owned.attempt == null and owned.painted == null);
-    try core.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
+    const second = try core.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
+    try core.sceneFrameCancel(id, second.frame_id);
     try std.testing.expectEqual(@as(f32, 3), (try core.sceneGetLayout(child, false)).height);
 
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_measure_layout(context, &session_c, &child_c));

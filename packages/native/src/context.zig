@@ -2385,7 +2385,9 @@ pub const Context = struct {
         return scene.getPaintLayout(try self.sceneNode(handle));
     }
 
-    pub fn scenePaint(self: *Context, session_handle: Handle, background: buf.RGBA, use_mouse: bool, excluded_hit_num: u32) !void {
+    /// Paints a hook-free scene and retains its DONE draft. Commit or cancel the
+    /// returned request before painting again; frame-qualified effects may run first.
+    pub fn scenePaint(self: *Context, session_handle: Handle, background: buf.RGBA, use_mouse: bool, excluded_hit_num: u32) !scene.FrameRequest {
         try self.beginMutation();
         defer self.mutating = false;
         const value = try self.getSession(session_handle);
@@ -2407,8 +2409,7 @@ pub const Context = struct {
             .max_host_requests = 65536,
         }, false);
         std.debug.assert(result.kind == 0);
-        // Direct Zig callers consume the paint synchronously without a host ticket.
-        owned.painted = null;
+        return result;
     }
 
     pub fn sceneFrameStep(self: *Context, session_handle: Handle, previous: ?scene.FrameRequest, options: scene.FrameOptions) !scene.FrameRequest {

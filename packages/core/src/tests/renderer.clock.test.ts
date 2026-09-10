@@ -167,12 +167,17 @@ test("intermediateRender() replaces the pending live frame timer", async () => {
   expect(clock.timers.size).toBe(1)
 })
 
+function skipNativeFrame(): NativeSessionRenderStatus {
+  renderer.nativeScene.cancelFrame()
+  return NativeSessionRenderStatus.Skipped
+}
+
 test("Session output backpressure retries a skipped native frame", async () => {
   const driver = renderer.nativeScene.driver
   const originalRender = driver.render.bind(driver)
   let calls = 0
   const render = spyOn(driver, "render").mockImplementation((...args) =>
-    calls++ === 0 ? NativeSessionRenderStatus.Skipped : originalRender(...args),
+    calls++ === 0 ? skipNativeFrame() : originalRender(...args),
   )
   try {
     renderer.requestRender()
@@ -201,7 +206,7 @@ test("threaded output backpressure delivers the final automatic animation frame 
   const originalRender = driver.render.bind(driver)
   let attempts = 0
   const render = spyOn(driver, "render").mockImplementation((...args) =>
-    attempts++ === 0 ? NativeSessionRenderStatus.Skipped : originalRender(...args),
+    attempts++ === 0 ? skipNativeFrame() : originalRender(...args),
   )
   try {
     renderer.requestAnimationFrame(() => {
@@ -227,9 +232,7 @@ test.each(["pause", "stop"] as const)(
   "Session output backpressure does not restart a loop cancelled by %s() during its callback",
   async (method) => {
     let frameCalls = 0
-    const render = spyOn(renderer.nativeScene.driver, "render").mockImplementation(
-      () => NativeSessionRenderStatus.Skipped,
-    )
+    const render = spyOn(renderer.nativeScene.driver, "render").mockImplementation(skipNativeFrame)
     renderer.setFrameCallback(async () => {
       frameCalls++
       renderer[method]()
@@ -257,7 +260,7 @@ test.each(["pause", "stop"] as const)(
     let calls = 0
     let callbacks = 0
     const render = spyOn(driver, "render").mockImplementation((...args) =>
-      calls++ === 0 ? NativeSessionRenderStatus.Skipped : original(...args),
+      calls++ === 0 ? skipNativeFrame() : original(...args),
     )
     renderer.setFrameCallback(async () => {
       if (++callbacks !== 1) return
@@ -282,9 +285,7 @@ test.each(["pause", "stop"] as const)(
   "repeating %s() inside a one-shot callback cancels its output retry",
   async (method) => {
     let callbacks = 0
-    const render = spyOn(renderer.nativeScene.driver, "render").mockImplementation(
-      () => NativeSessionRenderStatus.Skipped,
-    )
+    const render = spyOn(renderer.nativeScene.driver, "render").mockImplementation(skipNativeFrame)
     renderer[method]()
     renderer.setFrameCallback(async () => {
       callbacks++
@@ -322,7 +323,9 @@ test("fps counts rendered frames and excludes dropped frames", async () => {
   ]
   const render = spyOn(driver, "render").mockImplementation((...args) => {
     const status = statuses.shift()!
-    return status === NativeSessionRenderStatus.Presented ? originalRender(...args) : status
+    if (status === NativeSessionRenderStatus.Presented) return originalRender(...args)
+    renderer.nativeScene.cancelFrame()
+    return status
   })
   const errors = spyOn(console, "error").mockImplementation(() => {})
   try {

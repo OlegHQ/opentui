@@ -156,9 +156,10 @@ test("native text submission rejection preserves previous cells and hits until r
   const frameCount = target.renderer.getStats().nativeFrameCount
   text.content = "after \u4e16\u754c"
   text.left = 10
-  const rejected = spyOn(resolveRenderLib(), "sceneFrameCommit").mockImplementation(
-    () => NativeSessionRenderStatus.Failed,
-  )
+  const rejected = spyOn(resolveRenderLib(), "sceneFrameCommit").mockImplementation((context, session, frame) => {
+    resolveRenderLib().sceneFrameCancel(context, session, frame.frameId)
+    return NativeSessionRenderStatus.Failed
+  })
   const logged = spyOn(console, "error").mockImplementation(() => {})
   try {
     await target.renderOnce()

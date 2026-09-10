@@ -782,9 +782,8 @@ export class NativeScene {
     const frame = this.paintedFrame
     if (!frame) throw new Error("Native scene has no painted frame")
     const result = this.driver.render(force, frame)
-    if (result === NativeSessionRenderStatus.Pending || result === NativeSessionRenderStatus.Presented) {
-      this.paintedFrame = null
-    }
+    // A returned status consumes the draft. Admission exceptions leave it retryable.
+    this.paintedFrame = null
     return result
   }
 
@@ -797,9 +796,7 @@ export class NativeScene {
     const frame = this.paintedFrame
     if (!frame) throw new Error("Native scene has no painted frame")
     const result = this.driver.renderSplit(frame, commits, pinnedRenderOffset, force)
-    if (result.status === NativeSessionRenderStatus.Pending || result.status === NativeSessionRenderStatus.Presented) {
-      this.paintedFrame = null
-    }
+    this.paintedFrame = null
     return result
   }
 

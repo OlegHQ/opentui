@@ -38,14 +38,15 @@ fn main() -> opentui::Result<()> {
     let text = Node::new(&session, ffi::OT_SCENE_TEXT, 2)?;
     text.mount(&root)?;
     text.set_text(b"Hello from Rust")?;
-    session.paint([0, 0, 0, 255], false, 0)?;
+    let draft = session.paint([0, 0, 0, 255], false, 0)?;
+    drop(draft); // This capture-only example cancels its unsubmitted draft.
     Ok(())
 }
 ```
 
-This example paints a native framebuffer but does not present it. Call
-`render(force)` to submit the painted frame. Then deliver output as described
-below. See [`examples/tasks.rs`](examples/tasks.rs) for a complete host.
+This example paints a native framebuffer but does not present it. To submit
+output, keep the returned draft and call `draft.commit(force)`. Then deliver output
+as described below. See [`examples/tasks.rs`](examples/tasks.rs) for a complete host.
 
 Renderer attachment is separate from `Session` creation. A `Session` can carry
 output without a renderer. The attachment call copies the supplied environment
@@ -75,11 +76,18 @@ A copied ticket still counts against output limits. Only one ticket can be
 outstanding. Do not acknowledge a ticket just because an asynchronous transport
 queued a write.
 
-`render` returns an `OT_RENDER_*` outcome separately from ABI errors:
+`PaintedFrame::commit` returns an `OT_RENDER_*` outcome separately from ABI errors.
+Every `Ok` outcome consumes the draft:
 
-- `PENDING`: output completion is necessary.
-- `PRESENTED`: presentation is already complete.
-- `SKIPPED` and `FAILED`: pumping does not retry the render.
+- `PENDING`: this draft was accepted; output completion is necessary.
+- `PRESENTED`: this draft was accepted and presentation is already complete.
+- `SKIPPED`: no output was accepted. Wait for output capacity and paint a new draft.
+- `FAILED`: no output was accepted. Paint a new draft; pumping does not retry encoding.
+
+An `Err` preserves a live draft for retry after you resolve the admission error.
+Dropping the draft cancels it. You cannot commit a consumed draft again.
+`Session::render` submits immediate drawing without a scene draft; its `PENDING`
+can describe an earlier submission that accepted no new drawing.
 
 Frame statistics and hit results describe completed presentation, not just
 painted or copied output.

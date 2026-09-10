@@ -4,6 +4,20 @@ const session = @import("../session.zig");
 const scene = @import("../scene.zig");
 const renderer = @import("../renderer.zig");
 
+/// Starts a fresh draft for paint/layout assertions, cancelling any preceding capture.
+pub fn repaint(owner: *context.Context, id: context.Handle, background: @import("../buffer.zig").RGBA, use_mouse: bool, excluded_hit_num: u32) !void {
+    const value = try owner.getSession(id);
+    if (value.scene) |state| {
+        if (state.painted) |painted| try owner.sceneFrameCancel(id, painted.ticket.frame_id);
+    }
+    _ = try owner.scenePaint(id, background, use_mouse, excluded_hit_num);
+}
+
+pub fn present(owner: *context.Context, id: context.Handle, force: bool) !session.RenderStatus {
+    const value = try owner.getSession(id);
+    return owner.sceneFrameCommit(id, value.scene.?.painted.?.ticket, force);
+}
+
 pub const Fixture = struct {
     owner: *context.Context,
     id: context.Handle,

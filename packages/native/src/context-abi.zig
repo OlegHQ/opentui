@@ -2228,6 +2228,25 @@ pub fn frameRequestFromC(record: c.ot_scene_frame_request) !scene.FrameRequest {
     };
 }
 
+fn frameRequestToC(result: scene.FrameRequest) c.ot_scene_frame_request {
+    return .{
+        .struct_size = @sizeOf(c.ot_scene_frame_request),
+        .abi_version = c.OT_CONTEXT_ABI_VERSION,
+        .session = handleToC(result.session),
+        .root = handleToC(result.root),
+        .node = handleToC(result.node),
+        .frame_id = result.frame_id,
+        .request_id = result.request_id,
+        .layout_epoch = result.layout_epoch,
+        .hook_generation = result.hook_generation,
+        .kind = result.kind,
+        .num = result.num,
+        .width = result.width,
+        .height = result.height,
+        .reserved = .{ 0, 0 },
+    };
+}
+
 pub fn ot_scene_frame_step_with_geometry(context: ?*ContextHandle, session_ptr: ?*const c.ot_handle, previous_ptr: ?*const c.ot_scene_frame_request, options_ptr: ?*const c.ot_scene_frame_options, max_paint_members: u32, max_work_items: u32, out_ptr: ?*c.ot_scene_frame_request, geometry_ptr: ?*c.ot_scene_frame_geometry) callconv(.c) c.ot_status {
     const status = sessionContextStatus(context);
     if (status != c.OT_OK) return status;
@@ -2251,22 +2270,7 @@ pub fn ot_scene_frame_step_with_geometry(context: ?*ContextHandle, session_ptr: 
         .max_host_requests = options.max_host_requests,
         .preserve_unwritten = options.preserve_unwritten == 1,
     }, max_paint_members, max_work_items) catch |err| return sessionError(owner, err);
-    out.* = .{
-        .struct_size = @sizeOf(c.ot_scene_frame_request),
-        .abi_version = c.OT_CONTEXT_ABI_VERSION,
-        .session = handleToC(result.session),
-        .root = handleToC(result.root),
-        .node = handleToC(result.node),
-        .frame_id = result.frame_id,
-        .request_id = result.request_id,
-        .layout_epoch = result.layout_epoch,
-        .hook_generation = result.hook_generation,
-        .kind = result.kind,
-        .num = result.num,
-        .width = result.width,
-        .height = result.height,
-        .reserved = .{ 0, 0 },
-    };
+    out.* = frameRequestToC(result);
     geometry.* = std.mem.zeroes(c.ot_scene_frame_geometry);
     geometry.struct_size = @sizeOf(c.ot_scene_frame_geometry);
     geometry.abi_version = c.OT_CONTEXT_ABI_VERSION;
@@ -2351,14 +2355,18 @@ pub fn ot_scene_frame_commit(
     return c.OT_OK;
 }
 
-pub fn ot_scene_paint(context: ?*ContextHandle, session_ptr: ?*const c.ot_handle, background_ptr: ?*const [4]u16, use_mouse: u32, excluded_hit_num: u32) callconv(.c) c.ot_status {
+pub fn ot_scene_paint(context: ?*ContextHandle, session_ptr: ?*const c.ot_handle, background_ptr: ?*const [4]u16, use_mouse: u32, excluded_hit_num: u32, out_ptr: ?*c.ot_scene_frame_request) callconv(.c) c.ot_status {
     const status = sessionContextStatus(context);
     if (status != c.OT_OK) return status;
     const owner = context.?;
     const id = session_ptr orelse return sessionError(owner, error.InvalidOptions);
     const background = background_ptr orelse return sessionError(owner, error.InvalidOptions);
+    const out = out_ptr orelse return sessionError(owner, error.InvalidOptions);
+    if (out.struct_size != @sizeOf(c.ot_scene_frame_request) or out.reserved[0] != 0 or out.reserved[1] != 0) return sessionError(owner, error.InvalidOptions);
+    if (out.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
     if (use_mouse > 1) return sessionError(owner, error.InvalidOptions);
-    owner.core.scenePaint(handleFromC(id.*), background.*, use_mouse == 1, excluded_hit_num) catch |err| return sessionError(owner, err);
+    const result = owner.core.scenePaint(handleFromC(id.*), background.*, use_mouse == 1, excluded_hit_num) catch |err| return sessionError(owner, err);
+    out.* = frameRequestToC(result);
     return c.OT_OK;
 }
 
@@ -3533,7 +3541,10 @@ test "Scene ABI custom measurement checks identity reentry and registration life
     Probe.owner = owner;
     Probe.expected = leaf;
     Probe.calls = 0;
-    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0));
+    var frame = std.mem.zeroes(c.ot_scene_frame_request);
+    frame.struct_size = @sizeOf(c.ot_scene_frame_request);
+    frame.abi_version = c.OT_CONTEXT_ABI_VERSION;
+    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0, &frame));
     try std.testing.expect(Probe.calls > 0);
     try std.testing.expectEqual(c.OT_OK, Probe.read_status);
     try std.testing.expectEqual(c.OT_OK, Probe.paint_layout_status);
@@ -3544,10 +3555,12 @@ test "Scene ABI custom measurement checks identity reentry and registration life
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, Probe.replace_status);
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, Probe.destroy_status);
     const calls = Probe.calls;
-    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_frame_cancel(handle, &session_c, frame.frame_id));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0, &frame));
     try std.testing.expectEqual(calls, Probe.calls);
     try std.testing.expectEqual(c.OT_OK, ot_scene_mark_dirty(handle, &leaf));
-    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_frame_cancel(handle, &session_c, frame.frame_id));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0, &frame));
     try std.testing.expect(Probe.calls > calls);
     try std.testing.expectEqual(c.OT_OK, ot_scene_move_node(handle, &leaf, null, 0));
     try std.testing.expectEqual(c.OT_OK, ot_scene_destroy_node(handle, &leaf));
@@ -3588,14 +3601,18 @@ test "Scene ABI records preserve rejected outputs and read real Session metadata
     try std.testing.expectEqual(c.OT_UNSUPPORTED_VERSION, ot_scene_get_layout(handle, &box, 0, &layout));
     try std.testing.expectEqualDeep(before, layout);
     layout.abi_version = c.OT_CONTEXT_ABI_VERSION;
-    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 1, 0));
+    var frame = std.mem.zeroes(c.ot_scene_frame_request);
+    frame.struct_size = @sizeOf(c.ot_scene_frame_request);
+    frame.abi_version = c.OT_CONTEXT_ABI_VERSION;
+    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 1, 0, &frame));
     try std.testing.expectEqual(c.OT_OK, ot_scene_get_layout(handle, &box, 0, &layout));
     try std.testing.expectEqual(@as(f32, 3), layout.width);
     const before_selector = layout;
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_get_layout(handle, &box, 3, &layout));
     try std.testing.expectEqualDeep(before_selector, layout);
     try owner.core.sceneSetStyle(handleFromC(box), 4, 0, 0, 1, 0, 1);
-    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_frame_cancel(handle, &session_c, frame.frame_id));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &session_c, &.{ 0, 0, 0, 255 }, 0, 0, &frame));
     try std.testing.expectEqual(c.OT_OK, ot_scene_get_layout(handle, &box, 0, &layout));
     try std.testing.expectEqual(@as(f32, 1), layout.width);
     try std.testing.expectEqual(c.OT_OK, ot_scene_get_layout(handle, &box, 1, &layout));
@@ -3787,14 +3804,15 @@ test "Scene styled text ABI validates linked chunk bounds and preserves the lega
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text_with_links(handle, &id, "next", 4, &.{ linked, linked }, 2, &urls, urls.len));
     @memset(&urls, '!');
     try owner.sceneMoveNode(node, root, 0);
-    try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
+    const frame = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
     const target = (try owner.getSessionRenderer(session)).getNextBuffer();
     const link_id = @import("ansi.zig").TextAttributes.getLinkId(target.get(0, 0).?.attributes);
     try std.testing.expectEqualStrings("\xff\x00\x1b", try owner.links.get(link_id));
     try std.testing.expectEqual(link_id, @import("ansi.zig").TextAttributes.getLinkId(target.get(3, 0).?.attributes));
     try std.testing.expectEqual(@as(u32, 2), try owner.links.getRefcount(link_id));
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_styled_text_with_links(handle, &id, null, 0, null, 0, null, 0));
-    try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
+    try owner.sceneFrameCancel(session, frame.frame_id);
+    _ = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
     try std.testing.expectEqual(@as(u64, 0), owner.links.getLiveSlotCount());
 }
 
@@ -3927,7 +3945,10 @@ test "Scene text ABI validates options and copies bounded text queries" {
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_text_options(handle, &text, &text_options));
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_text(handle, &text, "one two\r\nlast", 13));
     try std.testing.expectEqual(c.OT_OK, ot_scene_move_node(handle, &text, &root, 0));
-    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &id, &.{ 0, 0, 0, 255 }, 0, 0));
+    var frame = std.mem.zeroes(c.ot_scene_frame_request);
+    frame.struct_size = @sizeOf(c.ot_scene_frame_request);
+    frame.abi_version = c.OT_CONTEXT_ABI_VERSION;
+    try std.testing.expectEqual(c.OT_OK, ot_scene_paint(handle, &id, &.{ 0, 0, 0, 255 }, 0, 0, &frame));
     var info = std.mem.zeroes(c.ot_scene_text_info);
     info.struct_size = @sizeOf(c.ot_scene_text_info);
     info.abi_version = c.OT_CONTEXT_ABI_VERSION;

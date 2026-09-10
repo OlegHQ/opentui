@@ -54,7 +54,7 @@ const Callbacks = struct {
 
 fn layout(owner: *context.Context, node: context.Handle) !@import("../scene.zig").Layout {
     const session = (try owner.getRenderable(node)).scene_node.?.owner.session;
-    try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
+    try @import("scene_fixture_test.zig").repaint(owner, session, .{ 0, 0, 0, 255 }, false, 0);
     return owner.sceneGetLayout(node, true);
 }
 
@@ -72,7 +72,7 @@ test "Session scene teardown releases measure borrowers without destroying share
         const node = try owner.sceneCreateNode(session, 7, 2);
         try owner.sceneMoveNode(node, root, 0);
         try owner.sceneSetTextView(node, view);
-        try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
+        _ = try owner.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
         const cli = try owner.getSessionRenderer(session);
         try std.testing.expectEqual(@as(u32, 'o'), cli.getNextBuffer().get(0, 0).?.char);
         try std.testing.expect((try owner.getTextBufferView(view)).view.measure_dependents != null);
@@ -111,7 +111,7 @@ test "Shared text preserves explicit measure providers and never transfers node 
     try std.testing.expect(!(try owner.sceneHasMeasure(node)));
     try owner.sceneSetMeasure(node, Probe.measure);
     try owner.sceneSetTextView(node, second);
-    try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
+    _ = try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
     try std.testing.expectEqual(@as(f32, 2), (try owner.sceneGetLayout(node, true)).height);
     try owner.destroy(second);
     try std.testing.expect(try owner.sceneHasMeasure(node));
@@ -141,14 +141,14 @@ test "Shared text pending paint retains native geometry viewport and hits" {
     (try owner.getTextBufferView(view)).view.setWrapMode(.char);
     try owner.textBufferSetText(text, "abcdef");
     try owner.sceneSetTextViewPaint(node, false);
-    try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, true, 0);
+    try @import("scene_fixture_test.zig").repaint(owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
     try std.testing.expectEqual(@as(u32, ' '), f.cli.getNextBuffer().get(0, 0).?.char);
     try std.testing.expectEqual((try owner.getRenderable(node)).scene_node.?.token, f.cli.nextHitGrid[0]);
     const resource = try owner.getTextBufferView(view);
     try std.testing.expectEqual(@as(u32, 4), resource.view.getViewport().?.width);
     try std.testing.expectEqual(@as(u32, 2), resource.view.getVirtualLineCount());
     try owner.sceneSetTextViewPaint(node, true);
-    try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, true, 0);
+    try @import("scene_fixture_test.zig").repaint(owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
     try std.testing.expectEqual(@as(u32, 'a'), f.cli.getNextBuffer().get(0, 0).?.char);
     try std.testing.expectEqual(@as(u32, 'e'), f.cli.getNextBuffer().get(0, 1).?.char);
     const target = try owner.createBuffer(6, 3, .{});
@@ -643,7 +643,7 @@ test "Context editors preserve custom and empty measure slots through binding an
     try owner.sceneSetEditorView(node, other);
     try std.testing.expect(try owner.sceneHasMeasure(node));
     try std.testing.expectEqual(@as(u32, 1), owner.scene_measures.count());
-    try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
+    _ = try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
     try std.testing.expectEqual(@as(f32, 2), (try owner.sceneGetLayout(node, true)).height);
     try owner.destroy(other);
     try std.testing.expect(try owner.sceneHasMeasure(node));
@@ -736,7 +736,7 @@ test "Context scene measurement text queries preserve viewport and measurement c
     Probe.calls = 0;
     Probe.failure = null;
     try owner.sceneSetMeasure(text, &Probe.measure);
-    try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
+    _ = try owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
     if (Probe.failure) |err| return err;
     try std.testing.expect(Probe.calls > 0);
 }
@@ -1290,7 +1290,7 @@ const RenderTask = struct {
         const value = try self.owner.getSessionRenderer(self.renderer_id);
         value.terminal.caps.hyperlinks = true;
         try value.getNextBuffer().drawText(self.grapheme, 0, 1, ansi.rgbColor(255, 255, 255, 255), null, ansi.TextAttributes.setLinkId(0, self.link_id));
-        try std.testing.expectEqual(.pending, try self.owner.renderSession(self.renderer_id, true));
+        try std.testing.expectEqual(.pending, try @import("scene_fixture_test.zig").present(self.owner, self.renderer_id, true));
         const bytes = try drain(self.owner, self.renderer_id, &self.output);
         self.output_len = bytes.len;
         try std.testing.expect(std.mem.find(u8, bytes, self.text) != null);

@@ -90,6 +90,47 @@ pub struct Session<'context> {
     handle: ffi::ot_handle,
 }
 
+/// An issued DONE draft. Drop cancels an unsubmitted draft; fields stay opaque.
+pub struct PaintedFrame<'session, 'context> {
+    session: &'session Session<'context>,
+    request: Option<ffi::ot_scene_frame_request>,
+}
+
+impl PaintedFrame<'_, '_> {
+    /// Submits once. Every Ok status consumes the draft, including SKIPPED and
+    /// FAILED. Err preserves it for retry. PENDING requires output completion.
+    pub fn commit(&mut self, force: bool) -> Result<u32> {
+        let operation = "ot_scene_frame_commit";
+        let request = self.request.as_ref().ok_or(Error { operation, status: ffi::OT_STALE_FRAME })?;
+        let mut result = 0;
+        check(operation, unsafe {
+            ffi::ot_scene_frame_commit(
+                self.session.context.ptr(),
+                &self.session.handle,
+                request,
+                u32::from(force),
+                &mut result,
+            )
+        })?;
+        self.request = None;
+        Ok(result)
+    }
+}
+
+impl Drop for PaintedFrame<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(request) = self.request.take() {
+            let status = unsafe {
+                ffi::ot_scene_frame_cancel(self.session.context.ptr(), &self.session.handle, request.frame_id)
+            };
+            // Session shutdown may already have cancelled the draft.
+            if status != ffi::OT_STALE_FRAME {
+                cleanup("ot_scene_frame_cancel", status);
+            }
+        }
+    }
+}
+
 impl<'context> Session<'context> {
     pub fn new(context: &'context Context, options: ffi::ot_session_options) -> Result<Self> {
         let mut handle = ffi::ot_handle::default();
@@ -186,8 +227,14 @@ impl<'context> Session<'context> {
         })
     }
 
-    /// Paints built-in scene nodes without presenting output.
-    pub fn paint(&self, background: [u16; 4], use_mouse: bool, excluded_hit_num: u32) -> Result<()> {
+    /// Paints built-in nodes into a retained draft. Commit it to submit output.
+    pub fn paint(
+        &self,
+        background: [u16; 4],
+        use_mouse: bool,
+        excluded_hit_num: u32,
+    ) -> Result<PaintedFrame<'_, 'context>> {
+        let mut request = ffi::ot_scene_frame_request::default();
         check("ot_scene_paint", unsafe {
             ffi::ot_scene_paint(
                 self.context.ptr(),
@@ -195,12 +242,14 @@ impl<'context> Session<'context> {
                 background.as_ptr(),
                 u32::from(use_mouse),
                 excluded_hit_num,
+                &mut request,
             )
-        })
+        })?;
+        Ok(PaintedFrame { session: self, request: Some(request) })
     }
 
-    /// Encodes the painted frame. Pending output must be delivered and completed
-    /// before native code publishes frame statistics and hit results.
+    /// Submits immediate drawing when no scene draft is live. PENDING may refer
+    /// to an earlier submission; use PaintedFrame::commit for retained scenes.
     pub fn render(&self, force: bool) -> Result<u32> {
         let mut result = 0;
         check("ot_session_render", unsafe {

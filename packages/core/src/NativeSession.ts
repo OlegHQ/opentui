@@ -378,7 +378,7 @@ export class NativeSession {
     return this.changeTerminal("resume")
   }
 
-  /** Returns the native admission/presentation result; skipped or pending frames are not retried. */
+  /** A frame is consumed on every returned status. Without one, Pending may describe earlier output. */
   render(force = false, frame: NativeSceneFrameRequest | null = null): NativeSessionRenderStatus {
     this.checkOpen()
     const result = frame

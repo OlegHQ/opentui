@@ -134,12 +134,12 @@ test "Session owns scene nodes and borrows shared measured text through the publ
     try owner.textBufferSetText(text_id, "context");
     try owner.sceneSetTextView(node_id, view_id);
     try owner.sceneMoveNode(node_id, root, 0);
-    try owner.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
+    const frame = try owner.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
     const layout = try owner.sceneGetLayout(node_id, true);
     try std.testing.expectEqual(@as(f32, 7), layout.width);
     try std.testing.expectEqual(@as(f32, 1), layout.height);
 
-    try std.testing.expectEqual(.pending, try owner.renderSession(id, true));
+    try std.testing.expectEqual(.pending, try owner.sceneFrameCommit(id, frame, true));
     try std.testing.expectError(error.ContextBusy, owner.deinit());
     var bytes: [4096]u8 = undefined;
     const ticket = (try owner.readOutput(id, &bytes)).?;

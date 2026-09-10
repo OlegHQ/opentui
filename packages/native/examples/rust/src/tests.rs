@@ -3,6 +3,33 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 const OUTPUT_BYTES_MAX: usize = ffi::OT_SESSION_CONTROL_PACKET_BYTES as usize;
 
+#[test]
+fn painted_drafts_consume_statuses_and_cancel_on_drop() -> Result<()> {
+    for expected in [ffi::OT_RENDER_PENDING, ffi::OT_RENDER_SKIPPED, ffi::OT_RENDER_FAILED] {
+        let context = context(4)?;
+        let chunk_size = if expected == ffi::OT_RENDER_PENDING { 4096 } else { 32 };
+        let session = Session::new(
+            &context,
+            ffi::ot_session_options {
+                chunk_size,
+                span_capacity: 2,
+                max_bytes: 2 * u64::from(chunk_size),
+                ..Default::default()
+            },
+        )?;
+        session.attach_renderer(4, 1, ffi::OT_SESSION_REMOTE_REMOTE, &[])?;
+        let _root = Node::new(&session, ffi::OT_SCENE_ROOT, 1)?;
+        drop(session.paint([0, 0, 0, 255], false, 0)?);
+        let mut frame = session.paint([0, 0, 0, 255], false, 0)?;
+        if expected == ffi::OT_RENDER_SKIPPED {
+            session.write(&[b'x'; 64])?;
+        }
+        assert_eq!(frame.commit(true)?, expected);
+        assert_eq!(frame.commit(true).unwrap_err().status, ffi::OT_STALE_FRAME);
+    }
+    Ok(())
+}
+
 fn context(object_capacity: u32) -> Result<Context> {
     abi_matches_checked_c_header();
     Context::new(ffi::ot_context_options { object_capacity, render_cells_max: 4096, ..Default::default() })
@@ -30,8 +57,7 @@ fn session(context: &Context, width: u32, height: u32) -> Result<Session<'_>> {
 
 impl Session<'_> {
     fn present(&self) -> Result<u32> {
-        self.paint([0, 0, 0, 255], true, 0)?;
-        self.render(true)
+        self.paint([0, 0, 0, 255], true, 0)?.commit(true)
     }
 
     fn pump_until_quiet(&self, now_ns: &mut u64) -> Result<Vec<u8>> {

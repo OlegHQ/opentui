@@ -1,4 +1,5 @@
 const std = @import("std");
+const repaint = @import("scene_fixture_test.zig").repaint;
 const testing = std.testing;
 const context = @import("../context.zig");
 const scene = @import("../scene.zig");
@@ -50,7 +51,7 @@ test "Scene box details rejects invalid replacement before publication" {
     }
     const oversized = "a" ** (buffer.text_bytes_max + 1);
     try testing.expectError(error.TextLimit, owner.sceneSetBoxDetails(fixture.box, .{ .title = oversized }));
-    try owner.scenePaint(fixture.session, options.background, true, 0);
+    try repaint(owner, fixture.session, options.background, true, 0);
     try expectRow((try owner.getSessionRenderer(fixture.session)).getNextBuffer(), 0, "A-old------B");
 }
 
@@ -68,7 +69,7 @@ test "Scene box details allocation failure preserves old titles and releases rep
         if (result) |_| break else |err| {
             try testing.expectEqual(error.OutOfMemory, err);
             failures += 1;
-            try owner.scenePaint(fixture.session, options.background, true, 0);
+            try repaint(owner, fixture.session, options.background, true, 0);
             const target = (try owner.getSessionRenderer(fixture.session)).getNextBuffer();
             try expectRow(target, 0, "A-old------B");
             try expectRow(target, 2, "C-old------D");
@@ -120,7 +121,7 @@ test "Scene box details checked title draw reports allocation failure and defaul
     const fixture = try setup(owner);
     try owner.resizeSessionRenderer(fixture.session, 5000, 5);
     try owner.sceneSetStyle(fixture.box, 4, 0, 0, 1, 5000, 1);
-    try owner.scenePaint(fixture.session, options.background, true, 0);
+    try repaint(owner, fixture.session, options.background, true, 0);
     const state = (try owner.getSession(fixture.session)).scene.?;
     const target = (try owner.getSessionRenderer(fixture.session)).getNextBuffer();
     var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
@@ -130,18 +131,18 @@ test "Scene box details checked title draw reports allocation failure and defaul
     const scene_allocator = state.allocator;
     state.allocator = failing.allocator();
     defer state.allocator = scene_allocator;
-    try owner.scenePaint(fixture.session, options.background, true, 0);
+    try repaint(owner, fixture.session, options.background, true, 0);
     try testing.expect(!failing.has_induced_failure);
     state.allocator = scene_allocator;
     // Keep a visible title large enough to exercise heap fallback, not the stack path.
     const title = [_]u8{'x'} ** 4097;
     try owner.sceneSetBoxDetails(fixture.box, .{ .title = &title });
-    try testing.expectError(error.OutOfMemory, owner.scenePaint(fixture.session, options.background, true, 0));
+    try testing.expectError(error.OutOfMemory, repaint(owner, fixture.session, options.background, true, 0));
     try testing.expect(failing.has_induced_failure);
     try testing.expect(state.attempt == null and state.prefix == null);
     for (target.buffer.char) |char| try testing.expectEqual(@as(u32, ' '), char);
     target.allocator = allocator;
-    try owner.scenePaint(fixture.session, options.background, true, 0);
+    try repaint(owner, fixture.session, options.background, true, 0);
     try testing.expectEqual(@as(u32, 'x'), target.get(2, 0).?.char);
 }
 
@@ -153,8 +154,9 @@ test "Scene box details checked drawing allocation failures release title graphe
             const owner = try context.Context.init(failing.allocator(), testing.io, .{});
             defer owner.deinit() catch unreachable;
             const fixture = try setup(owner);
-            try owner.scenePaint(fixture.session, options.background, true, 0);
+            try repaint(owner, fixture.session, options.background, true, 0);
             try owner.sceneSetBoxDetails(fixture.box, .{ .title = "e\u{301}", .bottom_title = "\u{4e16}" });
+            try owner.sceneFrameCancel(fixture.session, (try owner.getSession(fixture.session)).scene.?.last_frame_id);
             var before: ?scene.FrameRequest = null;
             if (prefix) {
                 try owner.sceneSetHooks(fixture.box, 8, 1, 12, 3);

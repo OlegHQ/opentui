@@ -311,9 +311,9 @@ test "Session early width replies preserve forced text widths during setup and r
         try f.drive(&now_ns, .active);
         try testing.expectEqual(.wcwidth, f.cli.terminal.caps.unicode);
         try testing.expectEqual(@as(u32, 5), (try owner.sceneGetTextInfo(text)).width_cols_max);
-        try owner.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
+        const frame = try owner.scenePaint(id, .{ 0, 0, 0, 255 }, false, 0);
         try testing.expectEqual(@as(u32, 'X'), f.cli.getNextBuffer().buffer.char[pass * 8 + 4]);
-        try testing.expectEqual(.pending, try owner.renderSession(id, true));
+        try testing.expectEqual(.pending, try owner.sceneFrameCommit(id, frame, true));
         _ = try f.drain(&bytes);
         if (pass == 0) {
             try owner.suspendSession(id);
@@ -355,7 +355,7 @@ test "Session suspended resize requires drained output and preserves rendering g
     try f.owner.resumeSession(f.id);
     try testing.expectError(error.TerminalInactive, f.owner.resizeSessionRenderer(f.id, 4, 2));
     try f.drive(&now_ns, .active);
-    try f.owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
+    _ = try f.owner.scenePaint(f.id, .{ 0, 0, 0, 255 }, false, 0);
 }
 
 test "Session suspended snapshots preserve restoration through deferred presentation and close" {

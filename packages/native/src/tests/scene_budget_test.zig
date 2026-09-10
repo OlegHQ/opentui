@@ -226,7 +226,8 @@ test "Scene warmed preparation cannot bypass work or paint budgets" {
         .{ 4, unlimited },
         .{ unlimited, 16 },
     }, 0..) |budget, index| {
-        try f.owner.scenePaint(f.id, options.background, true, 0);
+        try @import("scene_fixture_test.zig").repaint(f.owner, f.id, options.background, true, 0);
+        try f.owner.sceneFrameCancel(f.id, f.state.last_frame_id);
         f.state.test_prepare_steps = 0;
         const request = try f.owner.sceneFrameStepWorkBudgeted(f.id, null, options, budget[0], budget[1]);
         try testing.expectEqual(@as(u32, if (index < 2) 6 else 0), request.kind);

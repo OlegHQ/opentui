@@ -340,18 +340,19 @@ export interface NativeSceneFrameOptions {
   preserveUnwritten?: boolean
 }
 
+/** An issued request. Pass it back unchanged; geometry is observation, not acknowledgement authority. */
 export interface NativeSceneFrameRequest {
-  session: SessionHandle
-  root: SceneNodeHandle
-  node: SceneNodeHandle
-  frameId: bigint
-  requestId: bigint
-  layoutEpoch: bigint
-  hookGeneration: bigint
-  kind: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
-  num: number
-  width: number
-  height: number
+  readonly session: SessionHandle
+  readonly root: SceneNodeHandle
+  readonly node: SceneNodeHandle
+  readonly frameId: bigint
+  readonly requestId: bigint
+  readonly layoutEpoch: bigint
+  readonly hookGeneration: bigint
+  readonly kind: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+  readonly num: number
+  readonly width: number
+  readonly height: number
   paintLayout?: NativeSceneLayout
   publicLayout?: NativeSceneLayout
   /** Host observation revision; never part of native ticket authority. */
@@ -6788,6 +6789,7 @@ export class FFIRenderLib {
     return this.acquireBufferLease(context, session, which, frame)
   }
 
+  /** Every returned status consumes the draft; an admission exception preserves it for retry. */
   public sceneFrameCommit(
     context: NativeContextHandle,
     session: SessionHandle,

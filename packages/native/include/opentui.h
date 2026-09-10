@@ -633,14 +633,17 @@ ot_status ot_scene_get_text_lines(ot_context *, const ot_handle *node, ot_scene_
  * change those coordinates; the node's own translation setters refresh them.
  * These reads do not run layout. Other selectors reject without changing output. */
 ot_status ot_scene_get_layout(ot_context *, const ot_handle *node, uint32_t raw_yoga, ot_scene_layout *out_layout);
-/* Layout and paint only. No output or hit-grid publication occurs until the
- * existing Session render/output-completion path accepts and presents the frame.
+/* Paint a hook-free scene and retain its DONE draft in out_frame. Commit it with
+ * ot_scene_frame_commit, or cancel it before painting again. Frame-qualified
+ * effects and capture may run before commit. Initialize out_frame's exact
+ * size/version and zero reserved fields; rejection leaves it unchanged.
+ * No output or hit-grid publication occurs until commit and output completion.
  * Pending presentation rejects painting; accepted scene mutations remain valid.
  * excluded_hit_num is the captured node's public number, or zero. It excludes
  * only that node from this frame's hits, not its painting or descendants.
  * Uses the same phase engine, but rejects registered hooks before layout with
  * OT_UNSUPPORTED_RESOURCE. Use ot_scene_frame_step_with_geometry for host hooks. */
-ot_status ot_scene_paint(ot_context *, const ot_handle *session, const uint16_t background[4], uint32_t use_mouse, uint32_t excluded_hit_num);
+ot_status ot_scene_paint(ot_context *, const ot_handle *session, const uint16_t background[4], uint32_t use_mouse, uint32_t excluded_hit_num, ot_scene_frame_request *out_frame);
 ot_status ot_scene_hit_test(ot_context *, const ot_handle *session, int32_t x, int32_t y, uint32_t *out_num);
 ot_status ot_scene_get_stats(ot_context *, const ot_handle *session, ot_scene_stats *out_stats);
 /* Copied renderer cursor state. Style: block=0 line=1 underline=2 default=3.
@@ -751,7 +754,10 @@ ot_status ot_scene_measure_layout(ot_context *, const ot_handle *session, const 
  * After suspension completes, null-frame snapshots remain permitted without reactivating
  * terminal modes; their output packet leaves the cursor restored. Non-null frames and
  * submissions during terminal transitions retain the ordinary rendering restrictions.
- * force is 0/1. Output records publish only on successful admission. */
+ * force is 0/1. OT_OK writes the output records, including SKIPPED and FAILED.
+ * With a frame, all statuses consume the draft under ot_scene_frame_commit's rules.
+ * Without a frame, PENDING may describe an earlier submission; no new snapshots
+ * were accepted in that case. Admission errors preserve a live draft for retry. */
 ot_status ot_session_render_split(ot_context *, const ot_handle *session, const ot_scene_frame_request *,
     const ot_split_snapshot *, uint32_t count, uint32_t pinned_render_offset, uint32_t force,
     uint32_t *out_status, uint32_t *out_render_offset);
@@ -1544,7 +1550,14 @@ ot_status ot_scene_frame_acquire_buffer_lease(ot_context *, const ot_handle *ses
  * and publication rules. Only output completion publishes frame_count and pending
  * hits. No qualified scope may remain, or commit returns OT_FRAME_BUSY. The frame
  * requires exact size/version and zero reserved fields. Rejection leaves out_status
- * unchanged. A consumed, cancelled, foreign, or altered frame cannot submit again. */
+ * unchanged and preserves a live draft for retry after the admission error is
+ * resolved. OT_OK consumes the draft for EVERY out_status:
+ * PRESENTED: output accepted and presentation complete, including no-byte frames.
+ * PENDING: this draft accepted; output completion is still pending.
+ * SKIPPED: no output accepted; paint a new draft after output capacity returns.
+ * FAILED: encoding/admission failed with no output accepted; paint a new draft.
+ * In particular, OT_OK with OT_RENDER_FAILED is not an ot_status error.
+ * A consumed, cancelled, foreign, or altered frame cannot submit again. */
 ot_status ot_scene_frame_commit(ot_context *, const ot_handle *session,
     const ot_scene_frame_request *frame_request, uint32_t force, uint32_t *out_status);
 

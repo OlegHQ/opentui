@@ -118,7 +118,9 @@ function mockNativeRender(renderer: CliRenderer, render: () => NativeSessionRend
   const originalRender = driver.render.bind(driver)
   driver.render = (...args) => {
     const status = render()
-    return status === NativeSessionRenderStatus.Presented ? originalRender(...args) : status
+    if (status === NativeSessionRenderStatus.Presented) return originalRender(...args)
+    renderer.nativeScene.cancelFrame()
+    return status
   }
   destroyFns.unshift(() => {
     driver.render = originalRender
@@ -160,11 +162,16 @@ function deferOutputIdle(renderer: CliRenderer): {
 }
 
 function forceNativeSplitSkip(renderer: CliRenderer): () => void {
-  const render = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() => ({
-    renderOffset: 0,
-    status: NativeSessionRenderStatus.Skipped,
-  }))
+  const render = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() =>
+    consumeNativeSplit(renderer, NativeSessionRenderStatus.Skipped),
+  )
   return () => render.mockRestore()
+}
+
+function consumeNativeSplit(renderer: CliRenderer, status: NativeSessionRenderStatus) {
+  // Returned statuses consume native drafts even when the test bypasses encoding.
+  renderer.nativeScene.cancelFrame()
+  return { renderOffset: 0, status }
 }
 
 async function finishRender(renderer: CliRenderer): Promise<void> {
@@ -1639,7 +1646,7 @@ test("split-footer coalesces render requests while waiting for Session idle", as
   let calls = 0
   driver.renderSplit = (...args) => {
     calls++
-    return calls === 1 ? { renderOffset: 0, status: NativeSessionRenderStatus.Skipped } : originalCommit(...args)
+    return calls === 1 ? consumeNativeSplit(renderer, NativeSessionRenderStatus.Skipped) : originalCommit(...args)
   }
   destroyFns.unshift(() => {
     driver.renderSplit = originalCommit
@@ -1685,10 +1692,9 @@ test("split-footer custom stdout retains captured commits when native fails and 
   renderers.add(renderer)
 
   const rendererAny = renderer as any
-  const commit = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() => ({
-    renderOffset: 0,
-    status: NativeSessionRenderStatus.Failed,
-  }))
+  const commit = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() =>
+    consumeNativeSplit(renderer, NativeSessionRenderStatus.Failed),
+  )
 
   stdout.write("captured-while-native-failed\n")
   expect(rendererAny.externalOutputQueue.size).toBeGreaterThan(0)
@@ -1721,10 +1727,9 @@ test("split-footer retains the whole batch when native publication fails", async
   renderers.add(renderer)
 
   const rendererAny = renderer as any
-  const commit = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() => ({
-    renderOffset: 0,
-    status: NativeSessionRenderStatus.Failed,
-  }))
+  const commit = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() =>
+    consumeNativeSplit(renderer, NativeSessionRenderStatus.Failed),
+  )
 
   stdout.write("first\nsecond\n")
   expect(rendererAny.externalOutputQueue.size).toBe(2)
@@ -1760,10 +1765,9 @@ test("split-footer native failure in memory output does not schedule automatic r
 
   const rendererAny = renderer as any
   const originalError = console.error
-  const commit = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() => ({
-    renderOffset: 0,
-    status: NativeSessionRenderStatus.Failed,
-  }))
+  const commit = spyOn(renderer.nativeScene.driver, "renderSplit").mockImplementation(() =>
+    consumeNativeSplit(renderer, NativeSessionRenderStatus.Failed),
+  )
   console.error = () => {}
   destroyFns.unshift(() => {
     commit.mockRestore()

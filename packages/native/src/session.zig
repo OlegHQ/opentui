@@ -247,6 +247,8 @@ pub const Session = struct {
         return self.renderReady(force, null);
     }
 
+    /// Every returned status consumes the draft, including skipped and failed.
+    /// Admission errors preserve it for retry after the caller resolves the error.
     pub fn commitSceneFrame(self: *Session, frame: scene.FrameRequest, force: bool) Error!RenderStatus {
         try self.checkRendering();
         const owned = self.scene orelse return error.SceneNotAttached;
@@ -254,7 +256,7 @@ pub const Session = struct {
         if (self.frame_lease_count != 0) return error.FrameBusy;
         const attached = self.renderer orelse return error.RendererNotAttached;
         if (!painted.destination.matches(attached.getNextBuffer())) return error.StaleFrame;
-        errdefer self.cancelSceneFrame();
+        if (self.frame_end_offset != null) return error.PresentationPending;
         const status = try self.renderReady(force, null);
         owned.painted = null;
         // A failed encoder may leave scratch cells intact, but cannot authorize their replay.
@@ -284,13 +286,14 @@ pub const Session = struct {
             try self.checkRendering();
         }
         const attached = self.renderer orelse return error.RendererNotAttached;
-        if (self.frame_end_offset != null) return .pending;
+        if (frame == null and self.frame_end_offset != null) return .pending;
         if (snapshots.len > split_snapshots_max or pinned_render_offset > std.math.maxInt(u16)) return error.InvalidOptions;
         if (frame) |request| {
             const owned = self.scene orelse return error.SceneNotAttached;
             const painted = try owned.checkPainted(request);
             if (self.frame_lease_count != 0) return error.FrameBusy;
             if (!painted.destination.matches(attached.getNextBuffer())) return error.StaleFrame;
+            if (self.frame_end_offset != null) return error.PresentationPending;
         } else try self.checkFrameIdle();
         var copies: [split_snapshots_max]renderer.SplitSnapshot = undefined;
         var count: usize = 0;

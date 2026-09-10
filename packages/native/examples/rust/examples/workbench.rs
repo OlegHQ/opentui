@@ -922,8 +922,7 @@ fn run(session: &Session<'_>, terminal: &Terminal<'_, '_>) -> Result<()> {
                 let began = Instant::now();
                 view.update(&model, &stats, terminal.elapsed(), dimensions)?;
                 let updated = Instant::now();
-                session.paint(BACKGROUND, false, 0)?;
-                let outcome = session.render(false)?;
+                let outcome = session.paint(BACKGROUND, false, 0)?.commit(false)?;
                 match outcome {
                     ffi::OT_RENDER_PENDING | ffi::OT_RENDER_PRESENTED | ffi::OT_RENDER_SKIPPED => {}
                     status => return Err(format!("native frame failed with outcome {status}").into()),
@@ -1154,8 +1153,7 @@ mod tests {
                 if dimensions == (50, 14) {
                     assert!(String::from_utf8(view.summary.text()?)?.contains("FPS"));
                 }
-                session.paint(BACKGROUND, false, 0)?;
-                assert_eq!(session.render(true)?, ffi::OT_RENDER_PENDING);
+                assert_eq!(session.paint(BACKGROUND, false, 0)?.commit(true)?, ffi::OT_RENDER_PENDING);
                 let mut frame = Vec::new();
                 let mut packet = [0; 4096];
                 for _ in 0..128 {

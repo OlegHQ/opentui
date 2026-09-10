@@ -40,8 +40,9 @@ fn write_frame(context: *opentui.Context, session: opentui.context.Handle, path:
     const file = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
 
-    try context.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
-    switch (try context.renderSession(session, false)) {
+    const frame = try context.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
+    errdefer context.sceneFrameCancel(session, frame.frame_id) catch {};
+    switch (try context.sceneFrameCommit(session, frame, false)) {
         .pending, .presented => {},
         .skipped, .failed => return error.FrameNotAccepted,
     }

@@ -109,8 +109,7 @@ fn run(session: &Session<'_>, terminal: &Terminal<'_, '_>) -> Result<()> {
             dirty = true;
         }
         if dirty {
-            session.paint(BACKGROUND, false, 0)?;
-            if session.render(true)? != ffi::OT_RENDER_PENDING {
+            if session.paint(BACKGROUND, false, 0)?.commit(true)? != ffi::OT_RENDER_PENDING {
                 return Err("native renderer did not accept the frame".into());
             }
             terminal.drain()?;

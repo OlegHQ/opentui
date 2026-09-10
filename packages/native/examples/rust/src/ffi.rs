@@ -58,6 +58,7 @@ constants! {
     OT_RENDER_FAILED: u32 = 3;
     OT_WRONG_CONTEXT: i32 = -7;
     OT_WRONG_SESSION: i32 = -10;
+    OT_STALE_FRAME: i32 = -25;
 }
 
 #[repr(C)]
@@ -122,6 +123,20 @@ macro_rules! records {
 }
 
 records! {
+    ot_scene_frame_request {
+        session: ot_handle,
+        root: ot_handle,
+        node: ot_handle,
+        frame_id: u64,
+        request_id: u64,
+        layout_epoch: u64,
+        hook_generation: u64,
+        kind: u32,
+        num: u32,
+        width: u32,
+        height: u32,
+        reserved: [u32; 2],
+    }
     ot_context_options {
         flags: u32,
         object_capacity: u32,
@@ -320,7 +335,16 @@ unsafe extern "C" {
         background: *const u16,
         use_mouse: u32,
         excluded_hit_num: u32,
+        out_frame: *mut ot_scene_frame_request,
     ) -> ot_status;
+    pub fn ot_scene_frame_commit(
+        context: *mut ot_context,
+        session: *const ot_handle,
+        frame: *const ot_scene_frame_request,
+        force: u32,
+        out_status: *mut u32,
+    ) -> ot_status;
+    pub fn ot_scene_frame_cancel(context: *mut ot_context, session: *const ot_handle, frame_id: u64) -> ot_status;
     pub fn ot_scene_hit_test(
         context: *mut ot_context,
         session: *const ot_handle,
