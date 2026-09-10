@@ -86,8 +86,8 @@ fn write_frame(context: *opentui.Context, session: opentui.context.Handle, path:
     const file = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
 
-    try context.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
-    switch (try context.renderSession(session, false)) {
+    const frame = try context.scenePaint(session, .{ 0, 0, 0, 255 }, false, 0);
+    switch (try context.sceneFrameCommit(session, frame, false)) {
         .pending, .presented => {},
         .skipped, .failed => return error.FrameNotAccepted,
     }
@@ -109,7 +109,8 @@ In `sceneCreateNode`, the kind values are root `0`, box `1`, and text `2`. The f
 The box uses all four border sides. Paint defaults supply opacity `1` and a white single-line border.
 `sceneMoveNode` attaches each child at index zero in its parent.
 
-`scenePaint` lays out and paints the retained scene. `renderSession` encodes its cells and queues output.
+`scenePaint` lays out and paints the retained scene and returns its retained `DONE` draft.
+`sceneFrameCommit` consumes that draft, encodes its cells, and queues output.
 The helper delivers every output ticket before returning, so the next call can render another frame.
 Changing the label reuses the same nodes rather than rebuilding the tree.
 
@@ -175,11 +176,11 @@ Use drawing methods to change it rather than writing raw character entries.
 
 ## Stay within the checked Context API
 
-Pointers from Context getters are borrowed. Destroy the resource through the Context, not through the raw object's destructor.
+Pointers from `Context.raw()` getters are borrowed. Destroy the resource through the Context, not through the raw object's destructor.
 Keep callback data and borrowed environment state alive until the Context no longer needs them.
 
 The public module also exports raw primitives such as `CliRenderer` and `OptimizedBuffer`.
 Those have separate lifetime contracts. Importing the module does not give raw objects the Context's checks.
 
-For host drawing and scheduling yields, use `sceneFrameStepWorkBudgeted` and `sceneFrameCommit` instead of the simple `scenePaint`/`renderSession` pair.
+For host drawing and scheduling yields, use `sceneFrameStepWorkBudgeted` to produce the draft, then submit it with the same `sceneFrameCommit` operation.
 The [frame protocol](/docs/native/frames) explains when to resume, commit, cancel, and complete output.

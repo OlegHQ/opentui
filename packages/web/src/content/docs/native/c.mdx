@@ -144,16 +144,19 @@ This program never sets terminal modes, so it has no terminal restoration to del
 
 ### Paint and encode the frame
 
-`ot_scene_paint` calculates layout and paints the scene into the Session's next framebuffer.
-`ot_session_render` then encodes those cells and submits output to the Session queue.
+`ot_scene_paint` calculates layout, paints the scene into the Session's next framebuffer, and returns its retained `DONE` draft.
+`ot_scene_frame_commit` consumes that draft, encodes those cells, and submits output to the Session queue.
 The `0` force argument permits normal diff output rather than forcing a full repaint.
 
 ```c example=submit
 static ot_status submit_frame(ot_context *context, const ot_handle *session, uint32_t *outcome) {
     const uint16_t background[4] = {0, 0, 0, 255};
-    ot_status status = ot_scene_paint(context, session, background, 0, 0);
+    ot_scene_frame_request frame = {0};
+    frame.struct_size = sizeof(frame);
+    frame.abi_version = OT_CONTEXT_ABI_VERSION;
+    ot_status status = ot_scene_paint(context, session, background, 0, 0, &frame);
     if (status != OT_OK) return status;
-    return ot_session_render(context, session, 0, outcome);
+    return ot_scene_frame_commit(context, session, &frame, 0, outcome);
 }
 ```
 

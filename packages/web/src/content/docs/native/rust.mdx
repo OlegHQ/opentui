@@ -100,14 +100,15 @@ They do not choose resource limits or set opacity to one. Supply those values ex
 ## Write the frame's output
 
 Painting and output delivery are separate operations.
-`Session::paint` lays out and paints the native scene. `Session::render` encodes the cells and queues output bytes.
+`Session::paint` lays out and paints the native scene and returns a `PaintedFrame`.
+Committing that draft encodes its cells and queues output bytes. Dropping an unsubmitted draft cancels it.
 This helper then delivers each copied output ticket to a file:
 
 ```rust
 fn write_frame(session: &Session<'_>, path: &str) -> Result<()> {
     let mut file = File::create(path)?;
-    session.paint([0, 0, 0, 255], false, 0)?;
-    let outcome = session.render(false)?;
+    let mut frame = session.paint([0, 0, 0, 255], false, 0)?;
+    let outcome = frame.commit(false)?;
     if !matches!(outcome, ffi::OT_RENDER_PENDING | ffi::OT_RENDER_PRESENTED) {
         return Err(std::io::Error::other(format!("frame not accepted: {outcome}")).into());
     }

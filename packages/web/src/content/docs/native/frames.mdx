@@ -16,8 +16,8 @@ The frame API keeps these stages separate. It also lets the host draw at specifi
 
 Start with a frame that needs only native drawing:
 
-1. `ot_scene_paint` calculates layout and paints cells in memory.
-2. `ot_session_render` encodes those cells and queues output.
+1. `ot_scene_paint` calculates layout, paints cells in memory, and returns a retained `DONE` draft.
+2. `ot_scene_frame_commit` consumes that draft, encodes its cells, and queues output.
 3. The host reads output, writes it to its transport, and reports delivery with `ot_session_complete_output`.
 
 A finished cell grid is not yet a presented frame. The host must report delivery of the frame's output.
