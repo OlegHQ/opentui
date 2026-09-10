@@ -115,14 +115,14 @@ describe("native Yoga API coverage", () => {
     config.free()
   })
 
-  test("scene facades reject topology queries without flushing staged styles", async () => {
+  test("scene facades expose layout without topology capabilities or implicit flushing", async () => {
     const { renderer } = await createTestRenderer({ width: 20, height: 10 })
     const scene = renderer.nativeScene
     const node = getYogaNode(renderer.root)
     try {
       node.setWidth(12)
-      for (const query of [() => node.getChild(0), () => node.getChildCount(), () => node.getParent()]) {
-        expect(query).toThrow("Native scene Yoga nodes do not support topology queries")
+      for (const name of ["getChild", "getChildCount", "getParent"]) {
+        expect(name in node).toBe(false)
       }
       expect(scene.hasStagedMutations).toBe(true)
       expect(node.getWidth().value).toBe(12)
