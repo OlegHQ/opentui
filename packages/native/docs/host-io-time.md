@@ -16,36 +16,19 @@ injecting Context I/O does not install a terminal transport or an event loop.
 ## One Session deadline clock
 
 `ot_session_pump` and `ot_session_poll_kitty_image_transport` take unsigned
-64-bit nanoseconds from the same host clock. Each Session records its last
-accepted sample. Equal samples are valid. A backwards sample returns
-`OT_INVALID_ARGUMENT` (`error.InvalidClock` in Zig) before expiring files or
-consuming a Kitty retry notification. Different Sessions have independent clocks.
-
-Cursor-restoration waits start when a pump observes completed output. They need
-enough remaining clock range for the pending waits; range exhaustion rejects the
-pump. A host with no valid later time must cancel the Session. `pump_exit` is the
-process-exit restoration fallback: it bypasses cursor waits without advancing the
-clock or bypassing output completion.
+64-bit nanoseconds from the same host clock. Equal samples are valid; a
+backwards sample returns `OT_INVALID_ARGUMENT` before expiry or Kitty retries.
+Sessions have independent clocks. Cursor waits start when a pump observes
+completed output; range exhaustion rejects the pump. `pump_exit` bypasses cursor
+waits without advancing the clock or skipping output completion.
 
 Kitty file leases start their five-second deadline on the first accepted pump or
-Kitty poll after creation. This also works after a long idle interval: an old
-sample never shortens a new lease. The deadline saturates at
-`UINT64_MAX`. A sample at that deadline expires the lease, including an initial
-sample at `UINT64_MAX`. No subtraction, unit conversion, or wrapping arithmetic
-decides expiry.
-
-Every accepted pump and Kitty poll checks at most eight leases, including while
-terminal output is pending. Pump results describe terminal lifecycle work;
-`WAIT_UNTIL` does not schedule Kitty cleanup. Keep polling while files may be
-pending, including after switching to an inline image transport. Polling advances
-the shared clock and file expiry without advancing terminal lifecycle or
-delivering output. Without host calls, native time does not advance these leases.
-
-TypeScript passes `NativeSession.scheduler.now()` to both operations. Its default
-is `process.hrtime.bigint()`, on both Bun and Node. `CliRenderer` retains its
-one-second Kitty polling interval and existing probe/reply dispatch. The renderer
-`Clock` controls that interval's cadence; the Session scheduler supplies its time
-sample. A deterministic host injects both when it needs to drive both schedules.
+poll after creation, saturating at `UINT64_MAX`. An old sample never shortens a
+new lease. Each call checks at most eight leases, including while output is
+pending. `WAIT_UNTIL` does not schedule Kitty cleanup. Polling advances file
+expiry without terminal lifecycle or output. TypeScript passes
+`NativeSession.scheduler.now()` (default `process.hrtime.bigint()`) to both
+operations; `CliRenderer.Clock` only sets the one-second poll cadence.
 
 ## Native files and cleanup
 

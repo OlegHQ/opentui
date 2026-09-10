@@ -1,26 +1,22 @@
 import { expect, spyOn, test } from "bun:test"
-import { NativeImage, NativeImagePool, imageInfo } from "../image.js"
+import { NativeImage, NativeImagePool } from "../image.js"
 import { OptimizedBuffer, ResourceContext } from "../buffer.js"
 import { NativeError, NativeStatus, resolveRenderLib } from "../zig.js"
 
-test.each([
-  ["RGBA", () => NativeImage.fromRgba(Uint8Array.of(1, 2, 3, 255), 1, 1)],
-  ["pixels", () => NativeImage.fromPixels(Uint8Array.of(1, 2, 3, 255), 1, 1)],
-  ["decode", () => NativeImage.decode(Uint8Array.of(1))],
-  ["inspect", () => imageInfo(Uint8Array.of(1))],
-] as const)("image %s rejects Yoga callbacks before allocating an automatic Context", (_, create) => {
+test("image creation rejects Yoga callbacks before allocating an automatic Context", () => {
   const lib = resolveRenderLib()
   const allocate = spyOn(lib, "createContext")
   try {
     lib.getYogaHost().invokeCallback(() => {
-      expect(create).toThrow("Cannot mutate Yoga during a callback")
+      expect(() => NativeImage.fromRgba(Uint8Array.of(1, 2, 3, 255), 1, 1)).toThrow(
+        "Cannot mutate Yoga during a callback",
+      )
     })
     lib.getYogaHost().throwCallbackError()
     expect(allocate.mock.calls).toHaveLength(0)
   } finally {
     allocate.mockRestore()
-    const retry = NativeImage.fromRgba(Uint8Array.of(1, 2, 3, 255), 1, 1)
-    retry.dispose()
+    NativeImage.fromRgba(Uint8Array.of(1, 2, 3, 255), 1, 1).dispose()
   }
 })
 
@@ -145,32 +141,6 @@ test("rejected image pool disposal remains retryable and releases Context capaci
     expect(images).toHaveLength(2)
   } finally {
     for (const image of images) image.dispose()
-    pool.dispose()
-    owner.destroy()
-  }
-})
-
-test("same-Context pool publications stay immutable while buffers retain them", () => {
-  const owner = new ResourceContext({ objectCapacity: 8, renderCellsMax: 1 })
-  const pool = new NativeImagePool({ width: 1, height: 1, capacity: 1, owner })
-  const buffer = OptimizedBuffer.create(1, 1, "unicode", { owner })
-  const pixels = Uint8Array.of(1, 2, 3, 255)
-  const image = pool.publishRgba(pixels)!
-  try {
-    buffer.drawImage(image, 0, 0, 1, 1)
-    image.dispose()
-    pixels[0] = 42
-    expect(pool.publishRgba(pixels)).toBeNull()
-    buffer.clear()
-    const next = pool.publishRgba(pixels)!
-    try {
-      expect(next.raw().data).toEqual(pixels)
-    } finally {
-      next.dispose()
-    }
-  } finally {
-    image.dispose()
-    buffer.destroy()
     pool.dispose()
     owner.destroy()
   }

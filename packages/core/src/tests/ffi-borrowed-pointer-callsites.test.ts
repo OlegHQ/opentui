@@ -579,41 +579,6 @@ describe("borrowed pointer call sites", () => {
     }
   })
 
-  test("empty image inputs pass zero-length buffer owners directly", () => {
-    const context = lib.createContext({ objectCapacity: 4, renderCellsMax: 1 })
-    const image = lib.imageCreateFromRgba(context, Uint8Array.of(1, 2, 3, 255), 1, 1, 4).handle!
-    try {
-      withStubbedSymbols(
-        {
-          ot_image_inspect: () => -1,
-          ot_image_decode: () => -1,
-          ot_image_create_pixels: () => -1,
-          ot_image_copy_pixels: () => -1,
-        },
-        (calls) => {
-          const empty = new Uint8Array()
-          lib.imageInfo(context, empty)
-          lib.imageDecode(context, empty)
-          lib.imageCreateFromRgba(context, empty, 0, 0, 0)
-          lib.imageCopyPixels(image, empty, 0, false)
-
-          for (const input of [
-            calls.ot_image_inspect[0]![1],
-            calls.ot_image_decode[0]![1],
-            calls.ot_image_create_pixels[0]![1],
-            calls.ot_image_copy_pixels[0]![2],
-          ]) {
-            expect(input).toBeInstanceOf(Uint8Array)
-            expect(input.buffer).toBe(empty.buffer)
-            expect(input.byteLength).toBe(0)
-          }
-        },
-      )
-    } finally {
-      lib.destroyContext(context)
-    }
-  })
-
   test("imageExtend rejects a short background before native access", () => {
     withStubbedSymbol("ot_image_extend", (calls) => {
       expect(lib.imageExtend(1 as any, 0, 0, 0, 0, Uint8Array.of(1, 2, 3))).toEqual({

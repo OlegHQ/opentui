@@ -108,30 +108,29 @@ test("small visual edits never reconstruct a full host paint projection", async 
   await target.frame()
 })
 
-test.each(["shouldFill", "focusable", "translateX", "translateY"] as const)(
-  "undefined %s rejects before changing host or native paint state",
-  async (property) => {
-    const target = await setup()
-    class InheritedBox extends BoxRenderable {
-      protected renderSelf(buffer: OptimizedBuffer): void {
-        super.renderSelf(buffer)
-      }
+test("undefined paint properties reject before changing host or native paint state", async () => {
+  const target = await setup()
+  class InheritedBox extends BoxRenderable {
+    protected renderSelf(buffer: OptimizedBuffer): void {
+      super.renderSelf(buffer)
     }
-    const boxes = [BoxRenderable, InheritedBox].map((Box) => {
-      const box = new Box(target.renderer, { width: 3, height: 1, backgroundColor: "red", focusable: true })
-      target.renderer.root.add(box)
-      return box
-    })
-    const before = await target.frame()
+  }
+  const boxes = [BoxRenderable, InheritedBox].map((Box) => {
+    const box = new Box(target.renderer, { width: 3, height: 1, backgroundColor: "red", focusable: true })
+    target.renderer.root.add(box)
+    return box
+  })
+  const before = await target.frame()
+  for (const property of ["shouldFill", "focusable", "translateX", "translateY"] as const) {
     for (const box of boxes) {
       const accepted = box[property]
       assert.throws(() => Reflect.set(box, property, undefined))
       assert.equal(box[property], accepted)
     }
-    assert.equal(target.renderer.nativeScene.hasStagedMutations, false)
-    assert.deepEqual((await target.frame()).lines, before.lines)
-  },
-)
+  }
+  assert.equal(target.renderer.nativeScene.hasStagedMutations, false)
+  assert.deepEqual((await target.frame()).lines, before.lines)
+})
 
 test.each([false, true])(
   "background staging preserves explicit translation order (inherited body: %s)",

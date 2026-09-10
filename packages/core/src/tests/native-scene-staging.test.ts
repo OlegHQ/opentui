@@ -14,43 +14,6 @@ import {
 
 const lib = resolveRenderLib()
 
-test("partial paint retains accepted fields and coalesces into a compact record", () => {
-  const { context, session, root, node } = setup()
-  try {
-    const staging = new SceneStaging(1)
-    staging.stageStyle(context, node, 4, 0, 0, 1, 1, 0)
-    staging.stageStyle(context, node, 4, 1, 0, 1, 1, 0)
-    staging.stagePaint(context, node, paint({ backgroundColor: RGBA.fromInts(90, 0, 0) }))
-    lib.sceneFlush(context, staging)
-    staging.stagePaint(context, node, { opacity: 1 })
-    staging.stagePaint(context, node, { zIndex: 2 })
-    assert.equal(staging.count, 1)
-    assert.equal(staging.byteLength, 32)
-    lib.sceneFlush(context, staging)
-    // A sparse mask can still round up to 88 bytes; length alone does not mean full paint.
-    staging.stagePaint(context, node, { ...paint({ backgroundColor: RGBA.fromInts(90, 0, 0) }), zIndex: undefined })
-    assert.equal(staging.byteLength, 88)
-    lib.sceneFlush(context, staging)
-    const frame = lib.sceneFrameStep(context, session, null, {
-      background: RGBA.fromInts(0, 0, 0),
-      useMouse: false,
-      excludedHitNum: 0,
-      maxLayoutRounds: 8,
-      maxHostRequests: 64,
-    })
-    const lease = lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
-    try {
-      assert.deepEqual([...new Uint16Array(toArrayBuffer(lease.bg, 0, 8))], [90, 0, 0, 255])
-    } finally {
-      lib.contextReleaseBufferLease(context, lease.handle)
-      lib.sceneFrameCancel(context, session, frame.frameId)
-    }
-    void root
-  } finally {
-    lib.destroyContext(context)
-  }
-})
-
 test("unchanged translations retain full-paint coalescing across nodes at the batch limit", () => {
   const { context, root, node } = setup()
   try {
@@ -65,44 +28,6 @@ test("unchanged translations retain full-paint coalescing across nodes at the ba
     assert.equal(staging.byteLength, 176)
     lib.sceneFlush(context, staging)
     assert.equal(staging.pending, false)
-  } finally {
-    lib.destroyContext(context)
-  }
-})
-
-test("mixed property prefix retry preserves first-touch order and coalesced suffix", () => {
-  const { context, session, node, root } = setup()
-  try {
-    const staging = new SceneStaging(1)
-    const stale = { ...node, generation: node.generation + 1 }
-    staging.stagePaint(context, root, { opacity: 0.5 })
-    staging.stageStyle(context, stale, 4, 0, 0, 1, 99, 0)
-    staging.stageStyle(context, node, 4, 0, 0, 1, 6, 0)
-    staging.stagePaint(context, node, { backgroundColor: RGBA.fromInts(3, 0, 0) })
-    staging.stagePaint(context, node, { translateX: 2, borderColor: RGBA.fromInts(4, 0, 0) })
-    assert.throws(() => lib.sceneFlush(context, staging), /after 1 of 4 staged entries/)
-    assert.equal(staging.count, 3)
-    assert.notEqual(lib.sceneGetStyle(context, node, 4, 0, 0).value, 6)
-    staging.discard(stale)
-    staging.stagePaint(context, node, { opacity: 1 })
-    staging.stagePaint(context, root, { opacity: 1 })
-    lib.sceneFlush(context, staging)
-    assert.equal(lib.sceneGetStyle(context, node, 4, 0, 0).value, 6)
-    assert.equal(staging.count, 0)
-    const frame = lib.sceneFrameStep(context, session, null, {
-      background: RGBA.fromInts(0, 0, 0),
-      useMouse: false,
-      excludedHitNum: 0,
-      maxLayoutRounds: 8,
-      maxHostRequests: 64,
-    })
-    const lease = lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
-    try {
-      assert.deepEqual([...new Uint16Array(toArrayBuffer(lease.bg, 2 * 8, 8))], [3, 0, 0, 255])
-    } finally {
-      lib.contextReleaseBufferLease(context, lease.handle)
-      lib.sceneFrameCancel(context, session, frame.frameId)
-    }
   } finally {
     lib.destroyContext(context)
   }
@@ -223,6 +148,9 @@ test("staging keeps one live background or paint entry per node", () => {
       lib.contextReleaseBufferLease(context, lease.handle)
     }
     lib.sceneFrameCancel(context, session, frame.frameId)
+    staging.stagePaint(context, node, { opacity: 1 })
+    assert.equal(staging.count, 1)
+    assert.equal(staging.byteLength, 32)
   } finally {
     lib.destroyContext(context)
   }

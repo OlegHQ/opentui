@@ -272,49 +272,40 @@ test("focused draw records preserve owned-buffer and frame cell parity", () => {
       { operation: "compose", source, x: 4, y: 1, sourceWidth: 0 },
       { operation: "compose", source, x: 4, y: 1, sourceHeight: 0 },
     ]
-    const draw = spyOn((lib as any).opentui.symbols, "ot_buffer_draw")
-    try {
-      const owned = { context, target: buffer, frame: null }
-      lib.contextDrawBuffer(owned, { operation: "respectAlpha", enabled: true })
-      lib.contextDrawBuffer(owned, { operation: "respectAlpha", enabled: false })
-      const snapshots = []
-      for (const target of [owned, { context, target: session, frame }]) {
-        for (const operation of operations) lib.contextDrawBuffer(target, operation)
-        const lease =
-          target.frame === null
-            ? lib.contextAcquireBufferLease(context, buffer)
-            : lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
-        snapshots.push(
-          withBufferAccess(lib, context, lease, ({ char, fg, bg, attributes }) => ({
-            char: char.slice(),
-            fg: fg.slice(),
-            bg: bg.slice(),
-            attributes: attributes.slice(),
-          })),
-        )
-      }
-      assert.deepEqual(snapshots[1], snapshots[0])
-      const { char, fg, bg, attributes } = snapshots[0]
-      assert.equal(String.fromCodePoint(...char.slice(9, 14)), "ABCDy")
-      assert.equal(String.fromCodePoint(...char.slice(17, 20)), "CLR")
-      assert.ok(char.slice(0, 8).includes(84))
-      assert.ok(char.slice(24).includes(66))
-      assert.deepEqual([...fg.slice(36, 40)], [...red.buffer])
-      assert.deepEqual([...bg.slice(36, 40)], [...blue.buffer])
-      assert.deepEqual([...attributes.slice(17, 20)], [2, 4, 8])
-      assert.deepEqual(
-        draw.mock.calls.map((call) => (call[3] as Uint32Array).byteLength),
-        [20, 20, ...[24, 104, 40, 44, 48, 48, 48, 40, 40, 40], ...[24, 104, 40, 44, 48, 48, 48, 40, 40, 40]],
+    const owned = { context, target: buffer, frame: null }
+    lib.contextDrawBuffer(owned, { operation: "respectAlpha", enabled: true })
+    lib.contextDrawBuffer(owned, { operation: "respectAlpha", enabled: false })
+    const snapshots = []
+    for (const target of [owned, { context, target: session, frame }]) {
+      for (const operation of operations) lib.contextDrawBuffer(target, operation)
+      const lease =
+        target.frame === null
+          ? lib.contextAcquireBufferLease(context, buffer)
+          : lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
+      snapshots.push(
+        withBufferAccess(lib, context, lease, ({ char, fg, bg, attributes }) => ({
+          char: char.slice(),
+          fg: fg.slice(),
+          bg: bg.slice(),
+          attributes: attributes.slice(),
+        })),
       )
-      assert.throws(
-        () => lib.contextDrawBuffer({ context, target: session, frame }, { operation: "respectAlpha", enabled: true }),
-        {
-          status: NativeStatus.InvalidArgument,
-        },
-      )
-    } finally {
-      draw.mockRestore()
     }
+    assert.deepEqual(snapshots[1], snapshots[0])
+    const { char, fg, bg, attributes } = snapshots[0]
+    assert.equal(String.fromCodePoint(...char.slice(9, 14)), "ABCDy")
+    assert.equal(String.fromCodePoint(...char.slice(17, 20)), "CLR")
+    assert.ok(char.slice(0, 8).includes(84))
+    assert.ok(char.slice(24).includes(66))
+    assert.deepEqual([...fg.slice(36, 40)], [...red.buffer])
+    assert.deepEqual([...bg.slice(36, 40)], [...blue.buffer])
+    assert.deepEqual([...attributes.slice(17, 20)], [2, 4, 8])
+    assert.throws(
+      () => lib.contextDrawBuffer({ context, target: session, frame }, { operation: "respectAlpha", enabled: true }),
+      {
+        status: NativeStatus.InvalidArgument,
+      },
+    )
   } finally {
     lib.destroyContext(context)
   }

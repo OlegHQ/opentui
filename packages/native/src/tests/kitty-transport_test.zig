@@ -77,13 +77,18 @@ const FileIo = struct {
     }
 };
 
-test "Session Kitty files use Context I/O for creation writes and cleanup" {
+fn sessionKitty(supplied: *FileIo) !@import("session-terminal_test.zig").Fixture {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
-    var supplied: FileIo = .{};
     const f = try @import("session-terminal_test.zig").Fixture.init(std.testing.allocator, supplied.io(), 2, 1);
-    defer f.deinit();
     f.cli.terminal.graphics_enabled = true;
     try f.owner.setupSessionTerminal(f.id, .{});
+    return f;
+}
+
+test "Session Kitty files use Context I/O for creation writes and cleanup" {
+    var supplied: FileIo = .{};
+    const f = try sessionKitty(&supplied);
+    defer f.deinit();
     var now_ns: u64 = 100;
     try f.drive(&now_ns, .active);
     try f.value.setKittyImageTransport(2);
@@ -97,12 +102,9 @@ test "Session Kitty files use Context I/O for creation writes and cleanup" {
 }
 
 test "Session Kitty expiry follows host pump time while terminal output is pending" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var supplied: FileIo = .{};
-    const f = try @import("session-terminal_test.zig").Fixture.init(std.testing.allocator, supplied.io(), 2, 1);
+    const f = try sessionKitty(&supplied);
     defer f.deinit();
-    f.cli.terminal.graphics_enabled = true;
-    try f.owner.setupSessionTerminal(f.id, .{});
     var now_ns: u64 = 100;
     try f.drive(&now_ns, .active);
     try f.value.setKittyImageTransport(2);
@@ -119,12 +121,9 @@ test "Session Kitty expiry follows host pump time while terminal output is pendi
 }
 
 test "Session Kitty polls share clock admission with pumps and arm after an idle host" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var supplied: FileIo = .{};
-    const f = try @import("session-terminal_test.zig").Fixture.init(std.testing.allocator, supplied.io(), 2, 1);
+    const f = try sessionKitty(&supplied);
     defer f.deinit();
-    f.cli.terminal.graphics_enabled = true;
-    try f.owner.setupSessionTerminal(f.id, .{});
     var now_ns: u64 = 0;
     try f.drive(&now_ns, .active);
     try f.value.setKittyImageTransport(2);
@@ -147,12 +146,9 @@ test "Session Kitty polls share clock admission with pumps and arm after an idle
 }
 
 test "Session Kitty file preparation closes files and uses injected failure cleanup" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var supplied: FileIo = .{ .fail_write = true };
-    const f = try @import("session-terminal_test.zig").Fixture.init(std.testing.allocator, supplied.io(), 2, 1);
+    const f = try sessionKitty(&supplied);
     defer f.deinit();
-    f.cli.terminal.graphics_enabled = true;
-    try f.owner.setupSessionTerminal(f.id, .{});
     var now_ns: u64 = 0;
     try f.drive(&now_ns, .active);
     try f.value.setKittyImageTransport(2);
@@ -296,15 +292,9 @@ fn checkRawKittyExpiry(case: ExpiryCase) !void {
     }
 }
 
-test "raw Kitty references exist at delivery before the oldest deadline" {
+test "raw Kitty file references respect expiry at delivery" {
     try checkRawKittyExpiry(.before_deadline);
-}
-
-test "raw Kitty initial expired poll uses inline transport" {
     try checkRawKittyExpiry(.already_expired);
-}
-
-test "raw Kitty references survive file creation crossing an older deadline" {
     try checkRawKittyExpiry(.crosses_during_create);
 }
 
