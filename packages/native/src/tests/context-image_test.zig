@@ -7,6 +7,104 @@ const ansi = @import("../ansi.zig");
 const grapheme = @import("../grapheme.zig");
 const Fixture = @import("scene_fixture_test.zig").Fixture;
 
+test "Context checked image creation retains bindings and publishes fresh pixel identities" {
+    const owner = try context.Context.init(testing.allocator, testing.io, .{});
+    defer owner.deinit() catch unreachable;
+    const pixels = [_]u8{ 3, 2, 1, 0 };
+    const source = try owner.createImagePixels(&pixels, 1, 1, .{ .stride = 4, .format = .bgra8, .alpha = .@"opaque" });
+    const value = try owner.getImage(source);
+    try testing.expectEqual(owner.io.userdata, value.io.userdata);
+    try testing.expectEqual(owner.objects.context_id, value.owner_context_id);
+    const first_id = value.render_id;
+    const retained = try owner.retainImage(source);
+    try testing.expectEqual(value, try owner.getImage(retained));
+    try testing.expectError(error.Busy, owner.updateImagePixels(source, &pixels, .{ .stride = 4 }));
+    try owner.destroy(retained);
+    try owner.updateImagePixels(source, &pixels, .{ .stride = 4 });
+    try testing.expect(value.render_id > first_id);
+    const target = try owner.createBuffer(1, 1, .{});
+    try testing.expect(try owner.drawBufferImage(target, null, source, .{ .width = 1, .height = 1 }));
+    try testing.expectError(error.Busy, owner.takeImagePixels(source));
+    try owner.destroy(source);
+    try testing.expectError(error.StaleHandle, owner.getImage(source));
+    try testing.expectEqualSlices(u8, &pixels, try value.ensurePixels());
+}
+
+test "Context checked image decode transform and raw transfer use bounded owned storage" {
+    const owner = try context.Context.init(testing.allocator, testing.io, .{ .lease_bytes_max = @sizeOf(image.Image) + 4 });
+    defer owner.deinit() catch unreachable;
+    const source = try owner.createImagePixels(&.{ 1, 2, 3, 255 }, 1, 1, .{ .stride = 4 });
+    var png: [1024]u8 = undefined;
+    const length = try owner.copyImagePng(source, &png);
+    const decoded = try owner.decodeImage(png[0..length]);
+    const transformed = try owner.transformImage(decoded, .rotate_90);
+    const lease = try owner.takeImagePixels(transformed);
+    try testing.expectError(error.StaleHandle, owner.getImage(transformed));
+    try testing.expectError(error.ContextBusy, owner.deinit());
+    try testing.expectError(error.LeaseBytesLimit, owner.takeImagePixels(decoded));
+    const raw = try owner.imagePixelsSnapshot(lease);
+    try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 255 }, raw);
+    raw[0] = 42;
+    try testing.expectEqual(@as(u8, 42), (try owner.imagePixelsSnapshot(lease))[0]);
+    try owner.releaseImagePixels(lease);
+    try testing.expectError(error.StaleHandle, owner.imagePixelsSnapshot(lease));
+    try testing.expectEqual(@as(u64, 0), owner.lease_bytes);
+}
+
+test "Context checked image failed creation leaves capacity identities and admission intact" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{});
+    const owner = try context.Context.init(failing.allocator(), testing.io, .{ .object_capacity = 1 });
+    defer owner.deinit() catch unreachable;
+    const pixels = [_]u8{ 1, 2, 3, 255 };
+    for (0..2) |offset| {
+        failing.fail_index = failing.alloc_index + offset;
+        try testing.expectError(error.OutOfMemory, owner.createImagePixels(&pixels, 1, 1, .{ .stride = 4 }));
+        failing.fail_index = std.math.maxInt(usize);
+        try testing.expectEqual(@as(u32, 0), owner.objects.live_count);
+        try testing.expectEqual(@as(u32, 0), owner.last_image_id);
+        try testing.expect(!owner.mutating);
+    }
+    try testing.expectError(error.InvalidArgument, owner.createImagePixels(&pixels, 2, 1, .{ .stride = 4 }));
+    try testing.expectError(error.UnsupportedFormat, owner.decodeImage("not an image"));
+    const handle = try owner.createImagePixels(&pixels, 1, 1, .{ .stride = 4 });
+    try testing.expectError(error.ObjectLimit, owner.retainImage(handle));
+    try testing.expectEqual(@as(u32, 1), (try owner.getImage(handle)).ref_count);
+    try testing.expectError(error.ObjectLimit, owner.takeImagePixels(handle));
+    try owner.destroy(handle);
+    owner.last_image_id = std.math.maxInt(u32);
+    try testing.expectError(error.ObjectLimit, owner.createImagePixels(&pixels, 1, 1, .{ .stride = 4 }));
+}
+
+test "Context checked image lazy decode failures preserve handles and lease accounting" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{});
+    const owner = try context.Context.init(failing.allocator(), testing.io, .{});
+    defer owner.deinit() catch unreachable;
+    const source = try owner.createImagePixels(&.{ 1, 2, 3, 255 }, 1, 1, .{ .stride = 4 });
+    var encoded: [1024]u8 = undefined;
+    const count = try owner.copyImagePng(source, &encoded);
+    const last_id = owner.last_image_id;
+    for (0..2) |offset| {
+        failing.fail_index = failing.alloc_index + offset;
+        try testing.expectError(error.OutOfMemory, owner.decodeImage(encoded[0..count]));
+        failing.fail_index = std.math.maxInt(usize);
+        try testing.expectEqual(@as(u32, 1), owner.objects.live_count);
+        try testing.expectEqual(last_id, owner.last_image_id);
+        try testing.expect(!owner.mutating);
+    }
+    const decoded = try owner.decodeImage(encoded[0..count]);
+    failing.fail_index = failing.alloc_index;
+    try testing.expectError(error.OutOfMemory, owner.takeImagePixels(decoded));
+    failing.fail_index = std.math.maxInt(usize);
+    try testing.expectEqual(@as(usize, 0), (try owner.getImage(decoded)).pixels.len);
+    try testing.expectEqual(@as(u32, 0), owner.lease_count);
+    try testing.expectEqual(@as(u64, 0), owner.lease_bytes);
+    var short = [_]u8{99};
+    try testing.expectError(error.OutputTooSmall, owner.copyImagePng(decoded, &short));
+    try testing.expectEqual(@as(u8, 99), short[0]);
+    const lease = try owner.takeImagePixels(decoded);
+    try owner.releaseImagePixels(lease);
+}
+
 test "Context image import owns lazy PNG and rejects stale foreign and exhausted identities" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;

@@ -2,6 +2,7 @@ pub const ansi = @import("ansi.zig");
 pub const audio = @import("audio.zig");
 pub const buffer = @import("buffer.zig");
 pub const context = @import("context.zig");
+pub const image = @import("image.zig");
 pub const native_renderable = @import("native-renderable.zig");
 pub const renderer = @import("renderer.zig");
 pub const session = @import("session.zig");

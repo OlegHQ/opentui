@@ -326,6 +326,24 @@ pub fn statusFromError(err: anyerror) Status {
     };
 }
 
+pub fn errorFromStatus(status: Status) !void {
+    return switch (status) {
+        .ok => {},
+        .invalid_handle => error.StaleHandle,
+        .unsupported_format => error.UnsupportedFormat,
+        .unsupported_color_space => error.UnsupportedColorSpace,
+        .malformed_input => error.MalformedInput,
+        .dimension_limit => error.DimensionLimit,
+        .memory_limit => error.MemoryLimit,
+        .invalid_argument => error.InvalidArgument,
+        .out_of_memory => error.OutOfMemory,
+        .output_too_small => error.OutputTooSmall,
+        .internal_error => error.InternalError,
+        .unsupported_feature => error.UnsupportedFeature,
+        .busy => error.Busy,
+    };
+}
+
 const PngMetadata = struct {
     width: u32,
     height: u32,
@@ -746,19 +764,22 @@ pub fn probe(data: []const u8, limits: Limits, out: *Info) Status {
 }
 
 pub fn inspect(allocator: Allocator, data: []const u8, limits: Limits, out: *Info) Status {
+    out.* = inspectOwned(allocator, io, data, limits) catch |err| return statusFromError(err);
+    return .ok;
+}
+
+pub fn inspectOwned(allocator: Allocator, owner_io: std.Io, data: []const u8, limits: Limits) !Info {
     var encoded_info: Info = .{};
     const probe_status = probeInternal(data, limits, &encoded_info, null, null, false);
-    if (probe_status != .ok) return probe_status;
+    try errorFromStatus(probe_status);
     if (encoded_info.format == @intFromEnum(Format.png) and encoded_info.has_alpha == 0 and encoded_info.orientation == 1) {
-        out.* = encoded_info;
-        return .ok;
+        return encoded_info;
     }
 
-    const decoded = decodeInternal(allocator, data, limits, false) catch |err| return statusFromError(err);
+    const decoded = try decodeInternal(allocator, owner_io, data, limits, false);
     defer decoded.deinit();
     encoded_info.has_alpha = decoded.metadata.has_alpha;
-    out.* = encoded_info;
-    return .ok;
+    return encoded_info;
 }
 
 fn allocateImage(allocator: Allocator, metadata: Info) !*Image {
@@ -867,7 +888,7 @@ pub fn updatePixels(image: *Image, pixels: []const u8, options: PixelImportOptio
     image.metadata.has_alpha = @intFromBool(alpha_mask != 0xff000000 or vector_alpha != 255);
 }
 
-fn decodeInternal(allocator: Allocator, data: []const u8, limits: Limits, retain_encoded_png: bool) !*Image {
+fn decodeInternal(allocator: Allocator, owner_io: std.Io, data: []const u8, limits: Limits, retain_encoded_png: bool) !*Image {
     var image_info: Info = .{};
     var effective_len = data.len;
     var png_metadata: PngMetadata = undefined;
@@ -947,7 +968,7 @@ fn decodeInternal(allocator: Allocator, data: []const u8, limits: Limits, retain
     };
     if (format == .png and png_metadata.iccp_compressed_len > 0) {
         const compressed = decode_data[png_metadata.iccp_compressed_offset..][0..png_metadata.iccp_compressed_len];
-        try transformPngIcc(io, compressed, png_metadata.color_type, source, image_info.source_width, image_info.source_height);
+        try transformPngIcc(owner_io, compressed, png_metadata.color_type, source, image_info.source_width, image_info.source_height);
     }
     image_info.has_alpha = @intFromBool(pixelsHaveTransparency(source));
 
@@ -997,7 +1018,13 @@ fn decodeInternal(allocator: Allocator, data: []const u8, limits: Limits, retain
 }
 
 pub fn decode(allocator: Allocator, data: []const u8, limits: Limits) !*Image {
-    return decodeInternal(allocator, data, limits, true);
+    return decodeOwned(allocator, io, data, limits);
+}
+
+pub fn decodeOwned(allocator: Allocator, owner_io: std.Io, data: []const u8, limits: Limits) !*Image {
+    const value = try decodeInternal(allocator, owner_io, data, limits, true);
+    value.io = owner_io;
+    return value;
 }
 
 fn writePngChunk(destination: []u8, kind: *const [4]u8, payload: []const u8) usize {

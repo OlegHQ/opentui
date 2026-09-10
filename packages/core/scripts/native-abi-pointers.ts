@@ -66,6 +66,22 @@ export const nativePointerPolicies = {
   ot_embedded_terminal_drain_responses: { 0: context, 1: buffer, 2: buffer, 4: buffer },
   ot_image_import_compat: { 0: context, 2: buffer },
   ot_image_destroy: { 0: context, 1: buffer },
+  ot_image_inspect: { 0: context, 1: buffer, 3: buffer },
+  ot_image_decode: { 0: context, 1: buffer, 3: buffer },
+  ot_image_create_pixels: { 0: context, 1: buffer, 8: buffer },
+  ot_image_update_pixels: { 0: context, 1: buffer, 2: buffer },
+  ot_image_clone: { 0: context, 1: context, 2: buffer, 3: buffer },
+  ot_image_retain: { 0: context, 1: buffer, 2: buffer },
+  ot_image_get_info: { 0: context, 1: buffer, 2: buffer },
+  ot_image_resize: { 0: context, 1: buffer, 5: buffer },
+  ot_image_extract: { 0: context, 1: buffer, 6: buffer },
+  ot_image_extend: { 0: context, 1: buffer, 6: buffer, 7: buffer },
+  ot_image_transform: { 0: context, 1: buffer, 3: buffer },
+  ot_image_composite: { 0: context, 1: buffer, 2: buffer, 7: buffer },
+  ot_image_copy_pixels: { 0: context, 1: buffer, 2: buffer },
+  ot_image_copy_png: { 0: context, 1: buffer, 2: buffer, 4: buffer },
+  ot_image_take_pixels: { 0: context, 1: buffer, 2: buffer },
+  ot_image_pixels_release: { 0: context, 1: buffer },
   ot_scene_set_image: { 0: context, 1: buffer, 2: optional, 5: optional },
   ot_buffer_draw_image: { 0: context, 1: buffer, 2: optional, 3: buffer, 4: buffer, 5: buffer },
   ot_session_set_image_resolution: { 0: context, 1: buffer },
@@ -247,6 +263,9 @@ export const nativePointerPolicies = {
 // The header intentionally transports these native addresses as fixed-width u64.
 // Their storage is borrowed until lease release; record copying never retains it.
 export const nativeAddressFields = {
+  ot_image_pixels: {
+    pixels: { type: "u64", nullable: false, lifetime: "lease", release: "ot_image_pixels_release", element: "u8" },
+  },
   ot_buffer_lease_snapshot: {
     char_ptr: { type: "u64", nullable: false, lifetime: "lease", release: "ot_buffer_lease_release", element: "u32" },
     fg_ptr: { type: "u64", nullable: false, lifetime: "lease", release: "ot_buffer_lease_release", element: "u16" },

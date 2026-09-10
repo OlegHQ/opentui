@@ -14,6 +14,7 @@ const text_transport = @import("context-text-abi.zig");
 const unicode_transport = @import("context-unicode-abi.zig");
 const terminal_transport = @import("context-terminal-abi.zig");
 const output_transport = @import("context-output-abi.zig");
+const image_transport = @import("context-image-abi.zig");
 pub const ot_edit_buffer_command = editor_transport.ot_edit_buffer_command;
 
 pub const ContextHandle = struct {
@@ -4286,7 +4287,7 @@ pub fn export_symbols() void {
         // The image loader owns the remaining compatibility-to-Context bridge.
         if (std.mem.eql(u8, declaration.name, "ot_image_import_compat")) continue;
         const implementation = find: {
-            for (.{ @This(), editor_transport, text_transport, unicode_transport, terminal_transport, output_transport }) |module| {
+            for (.{ @This(), editor_transport, text_transport, unicode_transport, terminal_transport, output_transport, image_transport }) |module| {
                 if (@hasDecl(module, declaration.name)) break :find &@field(module, declaration.name);
             }
             @compileError("Missing checked ABI implementation: " ++ declaration.name);

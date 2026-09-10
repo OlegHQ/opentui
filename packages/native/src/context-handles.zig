@@ -20,6 +20,7 @@ pub const Kind = enum(u32) {
     image,
     encoded_unicode,
     embedded_terminal,
+    image_pixels_lease,
 };
 
 pub const Error = error{

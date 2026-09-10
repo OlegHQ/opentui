@@ -43,6 +43,14 @@ typedef int32_t ot_status;
 #define OT_LAYOUT_LIMIT (-INT32_C(26))
 #define OT_FRAME_BUSY (-INT32_C(27))
 #define OT_FRAME_REQUEST_LIMIT (-INT32_C(28))
+#define OT_IMAGE_UNSUPPORTED_FORMAT (-INT32_C(40))
+#define OT_IMAGE_UNSUPPORTED_COLOR_SPACE (-INT32_C(41))
+#define OT_IMAGE_MALFORMED_DATA (-INT32_C(42))
+#define OT_IMAGE_DIMENSION_LIMIT (-INT32_C(43))
+#define OT_IMAGE_MEMORY_LIMIT (-INT32_C(44))
+#define OT_IMAGE_OUTPUT_TOO_SMALL (-INT32_C(45))
+#define OT_IMAGE_UNSUPPORTED_FEATURE (-INT32_C(46))
+#define OT_IMAGE_BUSY (-INT32_C(47))
 
 /* A context owns its native resources and I/O storage. Only its creating OS
  * thread may call its functions, including error queries and destruction.
@@ -1222,6 +1230,83 @@ ot_status ot_scene_set_editor_options(ot_context *, const ot_handle *node, const
  * to the copy. Failure preserves out_image. */
 ot_status ot_image_import_compat(ot_context *, uint32_t source, ot_handle *out_image);
 ot_status ot_image_destroy(ot_context *, const ot_handle *image);
+
+/* Image resources use Context allocation, I/O and handle capacity. Encoded inputs
+ * are limited to 64 MiB; dimensions to 16384 per axis and 25000000 pixels.
+ * Inputs are copied during creation. Failed operations leave outputs unchanged.
+ * Transform/clone/retain return independently releasable handles. Clone copies
+ * pixels and encoded data; retain shares immutable storage within one Context.
+ * Nodes and buffers retain storage after ot_image_destroy releases the public handle.
+ * Only update_pixels mutates an existing image; retained storage returns OT_IMAGE_BUSY.
+ * Successful updates assign fresh render-cache identities. */
+typedef struct ot_image_info {
+    uint32_t width, height, source_width, source_height;
+    uint32_t format, color_status, orientation, has_alpha;
+} ot_image_info;
+#define OT_IMAGE_FORMAT_UNKNOWN UINT32_C(0)
+#define OT_IMAGE_FORMAT_PNG UINT32_C(1)
+#define OT_IMAGE_FORMAT_RGBA UINT32_C(2)
+#define OT_IMAGE_FORMAT_JPEG UINT32_C(3)
+#define OT_IMAGE_FORMAT_WEBP UINT32_C(4)
+#define OT_IMAGE_FORMAT_GIF UINT32_C(5)
+#define OT_IMAGE_ASSUMED_SRGB UINT32_C(0)
+#define OT_IMAGE_EXPLICIT_SRGB UINT32_C(1)
+#define OT_IMAGE_RGBA8 UINT32_C(0)
+#define OT_IMAGE_BGRA8 UINT32_C(1)
+#define OT_IMAGE_ALPHA_STRAIGHT UINT32_C(0)
+#define OT_IMAGE_ALPHA_OPAQUE UINT32_C(1)
+#define OT_IMAGE_FILTER_DEFAULT UINT32_C(0)
+#define OT_IMAGE_FILTER_AREA UINT32_C(1)
+#define OT_IMAGE_FILTER_TRIANGLE UINT32_C(2)
+#define OT_IMAGE_FILTER_CUBIC_BSPLINE UINT32_C(3)
+#define OT_IMAGE_FILTER_CATMULL_ROM UINT32_C(4)
+#define OT_IMAGE_FILTER_MITCHELL UINT32_C(5)
+#define OT_IMAGE_FILTER_NEAREST UINT32_C(6)
+#define OT_IMAGE_ROTATE_90 UINT32_C(0)
+#define OT_IMAGE_ROTATE_180 UINT32_C(1)
+#define OT_IMAGE_ROTATE_270 UINT32_C(2)
+#define OT_IMAGE_FLIP UINT32_C(3)
+#define OT_IMAGE_FLOP UINT32_C(4)
+#define OT_IMAGE_BLEND_SOURCE_OVER UINT32_C(0)
+#define OT_IMAGE_BLEND_SOURCE UINT32_C(1)
+#define OT_IMAGE_BLEND_DESTINATION_OVER UINT32_C(2)
+ot_status ot_image_inspect(ot_context *, const uint8_t *bytes, uint64_t byte_count, ot_image_info *out_info);
+ot_status ot_image_decode(ot_context *, const uint8_t *bytes, uint64_t byte_count, ot_handle *out_image);
+ot_status ot_image_create_pixels(ot_context *, const uint8_t *pixels, uint64_t byte_count,
+    uint32_t width, uint32_t height, uint32_t stride, uint32_t format, uint32_t alpha, ot_handle *out_image);
+ot_status ot_image_update_pixels(ot_context *, const ot_handle *image, const uint8_t *pixels,
+    uint64_t byte_count, uint32_t stride, uint32_t format, uint32_t alpha);
+ot_status ot_image_clone(ot_context *destination, ot_context *source, const ot_handle *image, ot_handle *out_image);
+ot_status ot_image_retain(ot_context *, const ot_handle *image, ot_handle *out_image);
+ot_status ot_image_get_info(ot_context *, const ot_handle *image, ot_image_info *out_info);
+ot_status ot_image_resize(ot_context *, const ot_handle *image, uint32_t width, uint32_t height,
+    uint32_t filter, ot_handle *out_image);
+ot_status ot_image_extract(ot_context *, const ot_handle *image, uint32_t left, uint32_t top,
+    uint32_t width, uint32_t height, ot_handle *out_image);
+ot_status ot_image_extend(ot_context *, const ot_handle *image, uint32_t top, uint32_t right,
+    uint32_t bottom, uint32_t left, const uint8_t *background_rgba, ot_handle *out_image);
+ot_status ot_image_transform(ot_context *, const ot_handle *image, uint32_t operation, ot_handle *out_image);
+ot_status ot_image_composite(ot_context *, const ot_handle *base, const ot_handle *overlay,
+    int32_t left, int32_t top, uint32_t blend, uint8_t opacity, ot_handle *out_image);
+ot_status ot_image_copy_pixels(ot_context *, const ot_handle *image, uint8_t *destination,
+    uint64_t byte_count, uint32_t stride, uint32_t format);
+/* Zero capacity reports the exact PNG byte count and ensures its cached encoding.
+ * A short nonempty destination returns OT_IMAGE_OUTPUT_TOO_SMALL without writing. */
+ot_status ot_image_copy_png(ot_context *, const ot_handle *image, uint8_t *destination,
+    uint64_t capacity, uint64_t *out_byte_count);
+/* Transfer requires exclusive storage. Success consumes image and returns a mutable
+ * pixel lease; the old handle becomes stale. Leases share Context lease count/byte
+ * limits and prevent Context destruction until release. Admission needs one free
+ * handle slot; lease bytes include pixels and their native image header. Pixels
+ * are packed straight sRGB RGBA8. No image operation accepts the lease. All aliases
+ * expire on release. */
+typedef struct ot_image_pixels {
+    ot_handle lease;
+    uint64_t pixels;
+    uint64_t byte_count;
+} ot_image_pixels;
+ot_status ot_image_take_pixels(ot_context *, const ot_handle *image, ot_image_pixels *out_pixels);
+ot_status ot_image_pixels_release(ot_context *, const ot_handle *lease);
 /* Bind only IMAGE nodes. NULL image clears the binding. Nodes and drawn placements
  * retain their image independently of the imported handle. Optional buffer names
  * Context-owned backing storage for buffered Image drawing, not a legacy buffer.
