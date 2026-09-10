@@ -155,6 +155,10 @@ Core's drawing and text wrappers still need an explicit resource owner.
 For a resource used by a renderer, pass `renderer.nativeScene` to its factory.
 That selects the renderer's Context. It does not mean application code should drive `NativeScene.paint()`.
 
+Factories retain the owner's canonical `resourceContext`, not its originating scene.
+Resources shared across detached Sessions remain usable after the originating Session closes, while the Context remains alive.
+Destroying a resource removes its event subscriptions; destroying the Context releases all its resources.
+
 For standalone work, `ResourceContext` owns resources without a renderer or terminal Session:
 
 ```typescript example=resource
