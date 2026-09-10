@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { format } from "oxfmt"
@@ -15,8 +15,6 @@ import { variants } from "./variants.js"
 const scriptRoot = dirname(fileURLToPath(import.meta.url))
 const nativeRoot = resolve(scriptRoot, "../../native")
 const outputPath = resolve(scriptRoot, "../src/native-abi.generated.ts")
-const rustConstantsPath = resolve(nativeRoot, "examples/rust/src/constants.generated.rs")
-const rustProbePath = resolve(nativeRoot, "examples/rust/tests/constants.generated.h")
 const archNames: Record<string, string> = { x64: "x86_64", arm64: "aarch64" }
 const osNames: Record<string, string> = { linux: "linux-musl", darwin: "macos", win32: "windows-gnu" }
 
@@ -274,12 +272,23 @@ export function sceneStyleEnumMaxima(abi: HeaderABI): number[] {
   })
 }
 
+export function rustBindingRoot(): string | undefined {
+  const dir = process.env.OPENTUI_RUST_DIR
+  if (dir === undefined || dir.trim() === "") return undefined
+  const root = resolve(dir)
+  if (!existsSync(root)) throw new Error(`OPENTUI_RUST_DIR does not exist: ${root}`)
+  return root
+}
+
 export function generateRustConstants(abi: HeaderABI): Map<string, string> {
+  const rustRoot = rustBindingRoot()
+  if (rustRoot === undefined) return new Map()
   const entries = Object.entries(abi.constants)
-  const notice = "// Generated from packages/native/include/opentui.h. Run bun run generate:abi in packages/core.\n"
+  const notice =
+    "// Generated from packages/native/include/opentui.h. Run bun run generate:abi in packages/core with OPENTUI_RUST_DIR.\n"
   return new Map([
     [
-      rustConstantsPath,
+      resolve(rustRoot, "src/constants.generated.rs"),
       notice +
         entries
           .map(([name, value]) => `pub const ${name}: ${value < 0 || name === "OT_OK" ? "i32" : "u32"} = ${value};\n`)
@@ -288,7 +297,7 @@ export function generateRustConstants(abi: HeaderABI): Map<string, string> {
         entries.map(([name]) => `        ${name} as u32,\n`).join("") +
         "    ]\n}\n",
     ],
-    [rustProbePath, notice + entries.map(([name]) => `${name},\n`).join("")],
+    [resolve(rustRoot, "tests/constants.generated.h"), notice + entries.map(([name]) => `${name},\n`).join("")],
   ])
 }
 

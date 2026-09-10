@@ -8,13 +8,12 @@ description: Create a native box and label with the example Rust binding, then r
 The example Rust binding can build the [box and label](/docs/native/overview) without JavaScript.
 Rust owns values that represent the Context, Session, and nodes. The native library stores the scene and does layout, drawing, and encoding.
 
-The binding is a local Cargo crate, not a published crates.io package or a complete Rust UI framework.
+The binding is a separate Cargo crate. It is not part of this repository, a published crates.io package, or a complete Rust UI framework.
 Its build script supports native Linux x86_64 glibc builds only. It rejects cross-compilation.
 
 ## Add the binding to a program
 
-First build the native library from the same checkout as the binding.
-Use Zig `0.16.0` and Bun for the repository's build scripts. From the repository root:
+First build the native library. Use Zig `0.16.0` and Bun for this repository's build scripts. From this repository root:
 
 ```sh
 bun install
@@ -24,7 +23,7 @@ bun run build
 
 Cargo links the resulting artifacts. It does not build the native library itself.
 
-Create a Cargo project with this `Cargo.toml`. Replace `/path/to/opentui` with your checkout's absolute path:
+Create a Cargo project with this `Cargo.toml`. Replace `/path/to/opentui-rust` with the binding crate's absolute path:
 
 ```toml
 [package]
@@ -33,7 +32,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-opentui = { path = "/path/to/opentui/packages/native/examples/rust" }
+opentui = { path = "/path/to/opentui-rust" }
 ```
 
 ## Create the scene and change its label
@@ -153,7 +152,7 @@ The second file updates the first frame. It is not a complete independent screen
 Run the [frame preview](/docs/native/frames#view-both-frames) from your Cargo project directory to see both frames.
 
 `OPENTUI_LIB_DIR` selects the directory containing the matching header and library.
-Without it, the build script uses `../../lib/x86_64-linux` relative to the binding's Cargo manifest.
+Without it, set `OPENTUI_ROOT` to this repository's root. The build script then uses `packages/native/lib/x86_64-linux`.
 Shared executables also need a runtime library search path, such as `LD_LIBRARY_PATH` above.
 
 The optional `static` feature selects the static library.
@@ -199,10 +198,10 @@ Set `control_capacity` to at least `ffi::OT_SESSION_CONTROL_PACKET_BYTES` while 
 [Frames and output](/docs/native/frames#pump-terminal-work-and-close) explains this lifecycle and transport failure handling.
 The crate does not supply a terminal transport, input parser, event loop, or framework reconciler.
 
-The bundled applications show those host responsibilities. From the repository root:
+The bundled applications show those host responsibilities. From the binding crate, with `OPENTUI_ROOT` set to this repository:
 
 ```sh
-cd packages/native/examples/rust
+cd /path/to/opentui-rust
 sh run.sh tasks
 sh run.sh workbench
 ```
@@ -212,10 +211,11 @@ The workbench adds a build queue, job inspector, activity view, and command prom
 Their terminal and input code belongs to the examples, not the binding library.
 Use `sh run.sh workbench static` to run the workbench with static linkage.
 
-To check the binding itself, run from the native workspace:
+To check the binding itself, with the same `OPENTUI_ROOT`:
 
 ```sh
-bun run test:rust
+cd /path/to/opentui-rust
+sh test.sh
 ```
 
 The checks cover shared/static linkage, C/Rust record layouts, output, cleanup, an external consumer, and compiler-enforced lifetimes and thread restrictions.

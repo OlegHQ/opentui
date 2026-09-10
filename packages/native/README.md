@@ -72,6 +72,6 @@ checks do not establish macOS/Windows runtime linkage or terminal behavior.
 The external [`examples/hello`](examples/hello) package imports the public Zig module
 without JavaScript.
 
-The [`examples/rust`](examples/rust) Cargo crate provides Rust bindings to the checked
-C ABI with thread-affine Context, Session, and Node owners. It is an example.
-The crate links existing native artifacts without JavaScript or a Zig implementation bridge.
+Rust bindings live in a separate Cargo crate. They are not part of this repository.
+Set `OPENTUI_LIB_DIR` to `lib/<target>/` when linking them. Set `OPENTUI_RUST_DIR` when
+`bun run generate:abi` should refresh that crate's generated constants.

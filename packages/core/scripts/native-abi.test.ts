@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import {
   compileHeader,
   generateNativeABI,
+  generateRustConstants,
   serializeNativeABIAudit,
   verifyNativeABI,
   verifyRustConstants,
@@ -25,6 +26,13 @@ describe("checked native ABI generation", () => {
     verifyNativeABI(await generateNativeABI(abi))
     verifyRustConstants(abi)
   }, 120_000)
+
+  test.skipIf(Boolean(process.env.OPENTUI_RUST_DIR))(
+    "Rust constant generation is skipped without OPENTUI_RUST_DIR",
+    () => {
+      expect(generateRustConstants(abi).size).toBe(0)
+    },
+  )
 
   test("style constraints follow the header and fail closed when a kind has no constraint", () => {
     expect(sceneStyleEnumMaxima(abi)[abi.constants.OT_STYLE_ENUM_DISPLAY]).toBe(abi.constants.OT_DISPLAY_NONE)
