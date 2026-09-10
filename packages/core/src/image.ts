@@ -150,6 +150,7 @@ class ImageOwner {
   ) {}
 
   static acquire(options: ImageCreateOptions): ImageOwner {
+    resolveRenderLib().getYogaHost().assertMutable()
     const owner = options.owner
     let result: ImageOwner
     if (owner !== undefined) {
