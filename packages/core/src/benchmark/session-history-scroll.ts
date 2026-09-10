@@ -458,7 +458,7 @@ async function revealNewerRows(
     session.revealingNewerRows ||
     current === session.workload.totalRows ||
     session.scroll.scrollTop + session.scroll.viewport.height <
-    session.scroll.scrollHeight - session.scroll.viewport.height
+      session.scroll.scrollHeight - session.scroll.viewport.height
   ) {
     return undefined
   }
