@@ -178,6 +178,28 @@ test("Context destruction suppresses queued edit events and permits wrapper clea
   assert.equal(edit.listenerCount("content-changed"), 0)
 })
 
+test("Session wrappers finish cleanup once after shared Context destruction", async () => {
+  const calls: string[] = []
+  const parent = new NativeSession(new Writable({ write: (_bytes, _encoding, done) => done() }))
+  parent.attachRenderer(dimensions, () => calls.push("parent"))
+  const child = parent.createDetached(dimensions, () => calls.push("child"))
+  try {
+    parent.resourceContext.destroy()
+    assert.equal(parent.contextDisposed, true)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      parent.dispose()
+      child.dispose()
+      assert.equal(parent.disposed, true)
+      assert.equal(child.disposed, true)
+      assert.deepEqual(calls, ["child", "parent"])
+      await assert.rejects(parent.closed, /NativeSession disposed without graceful close/)
+      await assert.rejects(child.closed, /NativeSession disposed without graceful close/)
+    }
+  } finally {
+    parent.dispose()
+  }
+})
+
 test("resource wrappers release Context handles after detached Session disposal", async () => {
   const { renderer } = await setup()
   const surface = renderer.createScrollbackSurface()

@@ -837,8 +837,10 @@ export class NativeSession {
         }
         try {
           this.lib.getYogaHost().runMutation(() => {
-            if (this.owner) this.lib.destroySession(this.context, this.session)
-            else this.resourceContext.destroy()
+            if (!this.resourceContext.disposed) {
+              if (this.owner) this.lib.destroySession(this.context, this.session)
+              else this.resourceContext.destroy()
+            }
             this._disposed = true
             this.owner?.detachedSessions.delete(this)
           })
