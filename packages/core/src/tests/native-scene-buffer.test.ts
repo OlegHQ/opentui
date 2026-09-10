@@ -108,18 +108,27 @@ test.each([
   try {
     lib.sessionAttachRenderer(context, session, { width, height: 2, remote: true })
     lib.sceneCreateNode(context, session, "root", 1)
-    lib.contextDrawBuffer(context, source, null, { operation: "clear", background: RGBA.fromInts(0, 0, 0) })
-    lib.contextDrawBuffer(context, source, null, {
-      operation: "text",
-      text,
-      foreground: RGBA.fromInts(255, 255, 255),
-    })
-    lib.contextDrawBuffer(context, source, null, {
-      operation: "text",
-      text: "Z",
-      y: 1,
-      foreground: RGBA.fromInts(255, 255, 255),
-    })
+    lib.contextDrawBuffer(
+      { context, target: source, frame: null },
+      { operation: "clear", background: RGBA.fromInts(0, 0, 0) },
+    )
+    lib.contextDrawBuffer(
+      { context, target: source, frame: null },
+      {
+        operation: "text",
+        text,
+        foreground: RGBA.fromInts(255, 255, 255),
+      },
+    )
+    lib.contextDrawBuffer(
+      { context, target: source, frame: null },
+      {
+        operation: "text",
+        text: "Z",
+        y: 1,
+        foreground: RGBA.fromInts(255, 255, 255),
+      },
+    )
     const frame = lib.sceneFrameStep(context, session, null, {
       background: RGBA.fromInts(0, 0, 0),
       useMouse: false,
@@ -130,7 +139,7 @@ test.each([
     const buffer = OptimizedBuffer.fromSession(lib, context, session, "next", () => frame)
     try {
       assert.equal(frame.kind, 0)
-      lib.contextDrawBuffer(context, session, frame, { operation: "compose", source })
+      lib.contextDrawBuffer({ context, target: session, frame }, { operation: "compose", source })
       lib.destroyContextBuffer(context, source)
       assert.equal(new TextDecoder().decode(buffer.getRealCharBytes()), `${text}Z${" ".repeat(width - 1)}`)
       assert.equal(new TextDecoder().decode(buffer.getRealCharBytes(true)), `${text}\nZ${" ".repeat(width - 1)}\n`)

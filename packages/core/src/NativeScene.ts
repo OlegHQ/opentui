@@ -529,14 +529,7 @@ export class NativeScene {
   drawText(renderable: Renderable, buffer: OptimizedBuffer, x: number, y: number): void {
     this.flushStaged()
     const target = buffer._getSceneDrawTarget(this)
-    this.driver.renderLib.contextDrawSceneText(
-      target.context,
-      target.target,
-      target.frame,
-      renderable._getSceneHandle(this),
-      x,
-      y,
-    )
+    this.driver.renderLib.contextDrawSceneText(target, renderable._getSceneHandle(this), x, y)
   }
 
   setTextSelection(

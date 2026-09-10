@@ -264,11 +264,11 @@ static ot_status submit_frame(ot_context *context, const ot_handle *session, uin
             return OT_UNSUPPORTED_RESOURCE;
         }
 
-        const ot_buffer_draw_options mark = {
-            RECORD(ot_buffer_draw_options), .operation = OT_BUFFER_DRAW_TEXT,
+        const ot_buffer_draw_text_record mark = {
+            .header = { RECORD(ot_buffer_draw_text_record), .operation = OT_BUFFER_DRAW_TEXT },
             .x = 10, .y = 1, .foreground = {255, 255, 255, 255},
         };
-        status = ot_buffer_draw(context, session, &request, &mark, NULL,
+        status = ot_buffer_draw(context, session, &request, &mark.header, NULL,
             (const uint8_t *)"!", 1, NULL, 0);
         if (status != OT_OK) return status;
         previous = &request;

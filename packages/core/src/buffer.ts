@@ -10,6 +10,7 @@ import {
   type SessionBuffer,
   type ContextBufferHandle,
   type NativeBufferDraw,
+  type NativeDrawingTarget,
   type NativeBufferStack,
   type NativeBufferGrid,
   type NativeContextBufferLease,
@@ -155,11 +156,7 @@ export class OptimizedBuffer {
     if ("buffer" in this.source) this.source.owner.assertAlive()
   }
 
-  private checkedTarget(): {
-    context: NativeContextHandle
-    target: ContextBufferHandle | SessionHandle
-    frame: NativeSceneFrameRequest | null
-  } {
+  private checkedTarget(): NativeDrawingTarget {
     const source = this.source
     if ("buffer" in source) {
       return { context: source.context, target: source.buffer, frame: null }
@@ -196,7 +193,7 @@ export class OptimizedBuffer {
 
   private drawChecked(options: NativeBufferDraw): void {
     const target = this.checkedTarget()
-    this.lib.contextDrawBuffer(target.context, target.target, target.frame, options)
+    this.lib.contextDrawBuffer(target, options)
   }
 
   /** Raw planes are available only during a synchronous native paint scope. Prefer withBuffers(). */
@@ -345,7 +342,7 @@ export class OptimizedBuffer {
 
   public setRespectAlpha(respectAlpha: boolean): void {
     this.guard()
-    this.drawChecked({ operation: "respectAlpha", packedOptions: Number(respectAlpha) })
+    this.drawChecked({ operation: "respectAlpha", enabled: respectAlpha })
     this.respectAlpha = respectAlpha
   }
 
@@ -533,15 +530,7 @@ export class OptimizedBuffer {
     this.guard()
     if (matrix.length !== 16) throw new RangeError(`colorMatrix matrix must have length 16, got ${matrix.length}`)
     const destination = this.checkedTarget()
-    this.lib.contextColorMatrixBuffer(
-      destination.context,
-      destination.target,
-      destination.frame,
-      matrix,
-      cellMask,
-      strength,
-      target,
-    )
+    this.lib.contextColorMatrixBuffer(destination, matrix, cellMask, strength, target)
   }
 
   public colorMatrixUniform(
@@ -553,15 +542,7 @@ export class OptimizedBuffer {
     if (matrix.length !== 16)
       throw new RangeError(`colorMatrixUniform matrix must have length 16, got ${matrix.length}`)
     const destination = this.checkedTarget()
-    this.lib.contextColorMatrixBuffer(
-      destination.context,
-      destination.target,
-      destination.frame,
-      matrix,
-      null,
-      strength,
-      target,
-    )
+    this.lib.contextColorMatrixBuffer(destination, matrix, null, strength, target)
   }
 
   public drawFrameBuffer(
@@ -607,14 +588,7 @@ export class OptimizedBuffer {
     if (owner.renderLib !== this.lib || owner.context !== target.context) {
       throw new Error("Text drawing requires a view owned by the same Context")
     }
-    this.lib.contextDrawTextBufferView(
-      target.context,
-      target.target,
-      target.frame,
-      textBufferView._getSceneHandle(owner),
-      x,
-      y,
-    )
+    this.lib.contextDrawTextBufferView(target, textBufferView._getSceneHandle(owner), x, y)
   }
 
   public drawEditorView(editorView: EditorView, x: number, y: number): void {
@@ -624,7 +598,7 @@ export class OptimizedBuffer {
     if (owner.renderLib !== this.lib || owner.context !== target.context) {
       throw new Error("Editor drawing requires a view owned by the same Context")
     }
-    this.lib.contextDrawEditorView(target.context, target.target, target.frame, editorView._getSceneHandle(owner), x, y)
+    this.lib.contextDrawEditorView(target, editorView._getSceneHandle(owner), x, y)
   }
 
   public drawSuperSampleBuffer(
@@ -637,17 +611,7 @@ export class OptimizedBuffer {
   ): void {
     this.guard()
     const target = this.checkedTarget()
-    this.lib.contextDrawSuperSampleBuffer(
-      target.context,
-      target.target,
-      target.frame,
-      pixelData,
-      pixelDataLength,
-      x,
-      y,
-      format,
-      alignedBytesPerRow,
-    )
+    this.lib.contextDrawSuperSampleBuffer(target, pixelData, pixelDataLength, x, y, format, alignedBytesPerRow)
   }
 
   public drawImage(
@@ -679,13 +643,19 @@ export class OptimizedBuffer {
       throw new RangeError("image destination coordinates and dimensions exceed i32 bounds")
     }
     const target = this.checkedTarget()
-    return this.lib.contextDrawImage(
-      target.context,
-      target.target,
-      target.frame,
-      image._getContextHandle(this.lib, target.context),
-      { x, y, width, height, pixelWidth, pixelHeight, sourceX, sourceY, sourceWidth, sourceHeight, protocol },
-    )
+    return this.lib.contextDrawImage(target, image._getContextHandle(this.lib, target.context), {
+      x,
+      y,
+      width,
+      height,
+      pixelWidth,
+      pixelHeight,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      protocol,
+    })
   }
 
   public drawPackedBuffer(
@@ -698,17 +668,7 @@ export class OptimizedBuffer {
   ): void {
     this.guard()
     const target = this.checkedTarget()
-    this.lib.contextDrawPackedBuffer(
-      target.context,
-      target.target,
-      target.frame,
-      data,
-      dataLen,
-      posX,
-      posY,
-      terminalWidthCells,
-      terminalHeightCells,
-    )
+    this.lib.contextDrawPackedBuffer(target, data, dataLen, posX, posY, terminalWidthCells, terminalHeightCells)
   }
 
   public drawGrayscaleBuffer(
@@ -722,19 +682,7 @@ export class OptimizedBuffer {
   ): void {
     this.guard()
     const target = this.checkedTarget()
-    this.lib.contextDrawGrayscaleBuffer(
-      target.context,
-      target.target,
-      target.frame,
-      intensities,
-      posX,
-      posY,
-      srcWidth,
-      srcHeight,
-      fg,
-      bg,
-      false,
-    )
+    this.lib.contextDrawGrayscaleBuffer(target, intensities, posX, posY, srcWidth, srcHeight, fg, bg, false)
   }
 
   public drawGrayscaleBufferSupersampled(
@@ -748,19 +696,7 @@ export class OptimizedBuffer {
   ): void {
     this.guard()
     const target = this.checkedTarget()
-    this.lib.contextDrawGrayscaleBuffer(
-      target.context,
-      target.target,
-      target.frame,
-      intensities,
-      posX,
-      posY,
-      srcWidth,
-      srcHeight,
-      fg,
-      bg,
-      true,
-    )
+    this.lib.contextDrawGrayscaleBuffer(target, intensities, posX, posY, srcWidth, srcHeight, fg, bg, true)
   }
 
   public resize(width: number, height: number): void {
@@ -858,7 +794,7 @@ export class OptimizedBuffer {
 
   private stackChecked(options: NativeBufferStack): number {
     const target = this.checkedTarget()
-    return this.lib.contextBufferStack(target.context, target.target, target.frame, options)
+    return this.lib.contextBufferStack(target, options)
   }
 
   public encodeUnicode(text: string): EncodedUnicode {
@@ -907,7 +843,7 @@ export class OptimizedBuffer {
   public drawGrid(options: NativeBufferGrid): void {
     this.guard()
     const target = this.checkedTarget()
-    this.lib.contextDrawGrid(target.context, target.target, target.frame, options)
+    this.lib.contextDrawGrid(target, options)
   }
 
   public drawChar(char: number, x: number, y: number, fg: RGBA, bg: RGBA, attributes: number = 0): void {
@@ -918,18 +854,7 @@ export class OptimizedBuffer {
       if (!glyph || glyph.owner.lib !== this.lib) {
         throw new Error("Encoded Unicode must be live and owned by the same Context")
       }
-      this.lib.contextBufferDrawUnicode(
-        target.context,
-        target.target,
-        target.frame,
-        glyph.owner.handle,
-        glyph.index,
-        x,
-        y,
-        fg,
-        bg,
-        attributes,
-      )
+      this.lib.contextBufferDrawUnicode(target, glyph.owner.handle, glyph.index, x, y, fg, bg, attributes)
       return
     }
     this.drawChecked({ operation: "char", char, x, y, foreground: fg, background: bg, attributes })

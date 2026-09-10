@@ -39,13 +39,19 @@ test.each(["Session", "Context"] as const)("%s buffer drawing reaches checked te
         maxHostRequests: 64,
       })
       assert.equal(frame.kind, 0)
-      lib.contextDrawBuffer(context, source, null, { operation: "clear", background: RGBA.fromInts(68, 85, 102) })
-      lib.contextDrawBuffer(context, source, null, {
-        operation: "text",
-        text: "T\u4e2dZ",
-        foreground: RGBA.fromInts(17, 34, 51),
-        attributes: 1,
-      })
+      lib.contextDrawBuffer(
+        { context, target: source, frame: null },
+        { operation: "clear", background: RGBA.fromInts(68, 85, 102) },
+      )
+      lib.contextDrawBuffer(
+        { context, target: source, frame: null },
+        {
+          operation: "text",
+          text: "T\u4e2dZ",
+          foreground: RGBA.fromInts(17, 34, 51),
+          attributes: 1,
+        },
+      )
     }
     const copy = access((cells) => {
       assert.deepEqual([cells.width, cells.height, cells.char.length, cells.fg.length], [4, 1, 4, 16])
@@ -65,7 +71,8 @@ test.each(["Session", "Context"] as const)("%s buffer drawing reaches checked te
       return cells.char.slice()
     })
     if (source) {
-      lib.contextDrawBuffer(context, { ...session }, frame, { operation: "compose", source: { ...source } })
+      assert.ok(frame)
+      lib.contextDrawBuffer({ context, target: { ...session }, frame }, { operation: "compose", source: { ...source } })
       access((cells) => assert.deepEqual(cells.char, copy))
       lib.destroyContextBuffer(context, source)
     }

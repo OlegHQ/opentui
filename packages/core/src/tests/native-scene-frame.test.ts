@@ -17,19 +17,23 @@ test("Context buffers compose only through current frame tickets and survive sou
   const { context, session, paint } = setup(5)
   const source = lib.createContextBuffer(context, { width: 2, height: 1 })
   try {
-    lib.contextDrawBuffer(context, source, null, { operation: "clear", background: RGBA.fromInts(0, 0, 0) })
-    lib.contextDrawBuffer(context, source, null, {
-      operation: "text",
-      text: "\u754c",
-      foreground: RGBA.fromInts(255, 255, 255),
-    })
+    lib.contextDrawBuffer(
+      { context, target: source, frame: null },
+      { operation: "clear", background: RGBA.fromInts(0, 0, 0) },
+    )
+    lib.contextDrawBuffer(
+      { context, target: source, frame: null },
+      {
+        operation: "text",
+        text: "\u754c",
+        foreground: RGBA.fromInts(255, 255, 255),
+      },
+    )
     const frame = paint()
     assert.throws(
       () =>
         lib.contextDrawBuffer(
-          context,
-          session,
-          { ...frame, frameId: frame.frameId + 1n },
+          { context, target: session, frame: { ...frame, frameId: frame.frameId + 1n } },
           {
             operation: "compose",
             source,
@@ -41,15 +45,23 @@ test("Context buffers compose only through current frame tickets and survive sou
     )
     for (const value of [-0x8000_0001, 0x8000_0000, 0.5, NaN, Infinity, "1", 1n]) {
       assert.throws(
-        () => lib.contextDrawBuffer(context, session, frame, { operation: "compose", source, x: value as never }),
+        () =>
+          lib.contextDrawBuffer(
+            { context, target: session, frame },
+            { operation: "compose", source, x: value as never },
+          ),
         RangeError,
       )
       assert.throws(
-        () => lib.contextDrawBuffer(context, session, frame, { operation: "compose", source, y: value as never }),
+        () =>
+          lib.contextDrawBuffer(
+            { context, target: session, frame },
+            { operation: "compose", source, y: value as never },
+          ),
         RangeError,
       )
     }
-    lib.contextDrawBuffer(context, session, frame, { operation: "compose", source, x: 1 })
+    lib.contextDrawBuffer({ context, target: session, frame }, { operation: "compose", source, x: 1 })
     lib.destroyContextBuffer(context, source)
     const lease = lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
     try {
@@ -60,7 +72,7 @@ test("Context buffers compose only through current frame tickets and survive sou
       lib.contextReleaseBufferLease(context, lease.handle)
     }
     lib.sceneFrameCancel(context, session, frame.frameId)
-    assert.throws(() => lib.contextDrawBuffer(context, session, frame, { operation: "compose", source }), {
+    assert.throws(() => lib.contextDrawBuffer({ context, target: session, frame }, { operation: "compose", source }), {
       status: NativeStatus.StaleFrame,
     })
   } finally {

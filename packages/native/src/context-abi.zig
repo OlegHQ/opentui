@@ -2,6 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const c = @import("context_abi_c");
 const Context = @import("context.zig").Context;
+const BufferDraw = @import("context.zig").BufferDraw;
 const ObjectHandle = @import("context-handles.zig").Handle;
 const scene = @import("scene.zig");
 
@@ -668,40 +669,92 @@ pub fn ot_buffer_draw_text(
     return c.OT_OK;
 }
 
-pub fn ot_buffer_draw(context: ?*ContextHandle, target_ptr: ?*const c.ot_handle, frame_ptr: ?*const c.ot_scene_frame_request, options_ptr: ?*const c.ot_buffer_draw_options, source_ptr: ?*const c.ot_handle, text_ptr: ?[*]const u8, text_len: u32, bottom_ptr: ?[*]const u8, bottom_len: u32) callconv(.c) c.ot_status {
+fn bufferDrawRecord(comptime T: type, header: *const c.ot_buffer_draw_header, flags: u32) !*const T {
+    if (header.struct_size != @sizeOf(T) or header.flags & ~flags != 0) return error.InvalidOptions;
+    return @ptrCast(header);
+}
+
+fn bufferDrawFromC(header: *const c.ot_buffer_draw_header) !BufferDraw {
+    if (header.struct_size < @sizeOf(c.ot_buffer_draw_header)) return error.InvalidOptions;
+    if (header.abi_version != c.OT_CONTEXT_ABI_VERSION) return error.UnsupportedVersion;
+    if (header.operation > c.OT_BUFFER_DRAW_RESPECT_ALPHA) return error.InvalidOptions;
+    var draw: BufferDraw = .{ .operation = @enumFromInt(header.operation) };
+    switch (draw.operation) {
+        .clear => {
+            const record = try bufferDrawRecord(c.ot_buffer_draw_clear, header, 0);
+            draw.background = record.background;
+        },
+        .fill => {
+            const record = try bufferDrawRecord(c.ot_buffer_draw_fill, header, 0);
+            draw.x = record.x;
+            draw.y = record.y;
+            draw.width = record.width;
+            draw.height = record.height;
+            draw.background = record.background;
+        },
+        .text => {
+            const record = try bufferDrawRecord(c.ot_buffer_draw_text_record, header, c.OT_BUFFER_DRAW_HAS_BACKGROUND);
+            draw.x = record.x;
+            draw.y = record.y;
+            draw.attributes = record.attributes;
+            draw.foreground = record.foreground;
+            if (header.flags & c.OT_BUFFER_DRAW_HAS_BACKGROUND != 0) draw.background = record.background;
+        },
+        .cell, .cell_blend, .char => {
+            const record = try bufferDrawRecord(c.ot_buffer_draw_cell, header, 0);
+            draw.x = record.x;
+            draw.y = record.y;
+            draw.char = record.character;
+            draw.attributes = record.attributes;
+            draw.foreground = record.foreground;
+            draw.background = record.background;
+        },
+        .box => {
+            const record = try bufferDrawRecord(c.ot_buffer_draw_box, header, 0);
+            draw.x = record.x;
+            draw.y = record.y;
+            draw.width = record.width;
+            draw.height = record.height;
+            draw.packed_options = record.packed_options;
+            draw.foreground = record.foreground;
+            draw.background = record.background;
+            draw.title_color = record.title_color;
+            draw.border_chars = record.border_chars;
+        },
+        .compose => {
+            const record = try bufferDrawRecord(c.ot_buffer_draw_compose, header, c.OT_BUFFER_DRAW_HAS_SOURCE_WIDTH | c.OT_BUFFER_DRAW_HAS_SOURCE_HEIGHT);
+            draw.x = record.x;
+            draw.y = record.y;
+            draw.crop = .{
+                .x = record.source_x,
+                .y = record.source_y,
+                .width = if (header.flags & c.OT_BUFFER_DRAW_HAS_SOURCE_WIDTH != 0) record.source_width else null,
+                .height = if (header.flags & c.OT_BUFFER_DRAW_HAS_SOURCE_HEIGHT != 0) record.source_height else null,
+            };
+        },
+        .respect_alpha => {
+            const record = try bufferDrawRecord(c.ot_buffer_draw_alpha, header, 0);
+            draw.packed_options = record.enabled;
+        },
+    }
+    return draw;
+}
+
+pub fn ot_buffer_draw(context: ?*ContextHandle, target_ptr: ?*const c.ot_handle, frame_ptr: ?*const c.ot_scene_frame_request, options_ptr: ?*const c.ot_buffer_draw_header, source_ptr: ?*const c.ot_handle, text_ptr: ?[*]const u8, text_len: u32, bottom_ptr: ?[*]const u8, bottom_len: u32) callconv(.c) c.ot_status {
     const status = sessionContextStatus(context);
     if (status != c.OT_OK) return status;
     const owner = context.?;
     const target = target_ptr orelse return sessionError(owner, error.InvalidOptions);
     const options = options_ptr orelse return sessionError(owner, error.InvalidOptions);
-    if (options.struct_size != @sizeOf(c.ot_buffer_draw_options) or options.reserved != 0 or options.reserved2 != 0 or
-        options.flags & ~@as(u32, 7) != 0 or options.operation > c.OT_BUFFER_DRAW_RESPECT_ALPHA) return sessionError(owner, error.InvalidOptions);
-    if (options.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
+    var draw = bufferDrawFromC(options) catch |err| return sessionError(owner, err);
     if (text_len > c.OT_BUFFER_TEXT_BYTES_MAX or bottom_len > c.OT_BUFFER_TEXT_BYTES_MAX or
         (text_len != 0 and text_ptr == null) or (bottom_len != 0 and bottom_ptr == null) or
-        (options.operation == c.OT_BUFFER_DRAW_COMPOSE) != (source_ptr != null)) return sessionError(owner, error.InvalidOptions);
+        (draw.operation == .compose) != (source_ptr != null) or
+        (text_len != 0 and draw.operation != .text and draw.operation != .box) or
+        (bottom_len != 0 and draw.operation != .box)) return sessionError(owner, error.InvalidOptions);
     const frame = if (frame_ptr) |record| frameRequestFromC(record.*) catch |err| return sessionError(owner, err) else null;
-    owner.core.drawBuffer(handleFromC(target.*), frame, .{
-        .operation = @enumFromInt(options.operation),
-        .x = options.x,
-        .y = options.y,
-        .width = options.width,
-        .height = options.height,
-        .char = options.character,
-        .attributes = options.attributes,
-        .foreground = options.foreground,
-        .background = if (options.flags & c.OT_BUFFER_DRAW_HAS_BACKGROUND != 0) options.background else null,
-        .title_color = options.title_color,
-        .packed_options = options.packed_options,
-        .border_chars = options.border_chars,
-        .source = if (source_ptr) |source| handleFromC(source.*) else null,
-        .crop = .{
-            .x = options.source_x,
-            .y = options.source_y,
-            .width = if (options.flags & c.OT_BUFFER_DRAW_HAS_SOURCE_WIDTH != 0) options.source_width else null,
-            .height = if (options.flags & c.OT_BUFFER_DRAW_HAS_SOURCE_HEIGHT != 0) options.source_height else null,
-        },
-    }, if (text_ptr) |bytes| bytes[0..text_len] else &.{}, if (bottom_ptr) |bytes| bytes[0..bottom_len] else &.{}) catch |err| return sessionError(owner, err);
+    draw.source = if (source_ptr) |source| handleFromC(source.*) else null;
+    owner.core.drawBuffer(handleFromC(target.*), frame, draw, if (text_ptr) |bytes| bytes[0..text_len] else &.{}, if (bottom_ptr) |bytes| bytes[0..bottom_len] else &.{}) catch |err| return sessionError(owner, err);
     return c.OT_OK;
 }
 
@@ -2724,6 +2777,54 @@ test "Context image ABI rejects invalid records identities and mutation reentry"
     try std.testing.expectEqual(c.OT_OK, ot_scene_set_image(context, &node, null, 0, 0, null));
 }
 
+test "Context focused draw records validate exact size before payload access" {
+    const context: ?*ContextHandle = try createTestContext(.{ .object_capacity = 4, .render_cells_max = 8 });
+    defer std.testing.expectEqual(c.OT_OK, ot_context_destroy(context)) catch unreachable;
+    const core = context.?.core;
+    const buffer = handleToC(try core.createBuffer(2, 1, .{}));
+    const clear: c.ot_buffer_draw_clear = .{
+        .header = .{
+            .struct_size = @sizeOf(c.ot_buffer_draw_clear),
+            .abi_version = c.OT_CONTEXT_ABI_VERSION,
+            .operation = c.OT_BUFFER_DRAW_CLEAR,
+            .flags = 0,
+        },
+        .background = .{ 255, 0, 0, 255 },
+    };
+    try std.testing.expectEqual(c.OT_OK, ot_buffer_draw(context, &buffer, null, &clear.header, null, null, 0, null, 0));
+    const target = try core.raw().getBuffer(handleFromC(buffer));
+    try std.testing.expectEqual([4]u16{ 255, 0, 0, 255 }, target.buffer.bg[0]);
+    inline for (.{
+        .{ c.ot_buffer_draw_clear, c.OT_BUFFER_DRAW_CLEAR },
+        .{ c.ot_buffer_draw_fill, c.OT_BUFFER_DRAW_FILL },
+        .{ c.ot_buffer_draw_text_record, c.OT_BUFFER_DRAW_TEXT },
+        .{ c.ot_buffer_draw_cell, c.OT_BUFFER_DRAW_CELL },
+        .{ c.ot_buffer_draw_cell, c.OT_BUFFER_DRAW_CELL_BLEND },
+        .{ c.ot_buffer_draw_cell, c.OT_BUFFER_DRAW_CHAR },
+        .{ c.ot_buffer_draw_box, c.OT_BUFFER_DRAW_BOX },
+        .{ c.ot_buffer_draw_compose, c.OT_BUFFER_DRAW_COMPOSE },
+        .{ c.ot_buffer_draw_alpha, c.OT_BUFFER_DRAW_RESPECT_ALPHA },
+    }) |entry| {
+        var header: c.ot_buffer_draw_header = .{
+            .struct_size = @sizeOf(entry[0]),
+            .abi_version = c.OT_CONTEXT_ABI_VERSION,
+            .operation = entry[1],
+            .flags = 0,
+        };
+        for ([_]u32{ 0, @sizeOf(entry[0]) - 4, @sizeOf(entry[0]) + 4, 136 }) |size| {
+            header.struct_size = size;
+            try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(context, &buffer, null, &header, null, null, 0, null, 0));
+        }
+        header.struct_size = @sizeOf(entry[0]);
+        header.flags = 8;
+        try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(context, &buffer, null, &header, null, null, 0, null, 0));
+        header.flags = 0;
+        header.abi_version += 1;
+        try std.testing.expectEqual(c.OT_UNSUPPORTED_VERSION, ot_buffer_draw(context, &buffer, null, &header, null, null, 0, null, 0));
+        try std.testing.expectEqual([4]u16{ 255, 0, 0, 255 }, target.buffer.bg[0]);
+    }
+}
+
 test "Context console ABI validates rectangle frame and diagnostic arguments" {
     const handle: ?*ContextHandle = try createTestContext(.{ .object_capacity = 4, .render_cells_max = 8 });
     defer std.testing.expectEqual(c.OT_OK, ot_context_destroy(handle)) catch unreachable;
@@ -2768,29 +2869,30 @@ test "Context console ABI validates rectangle frame and diagnostic arguments" {
     frame.reserved[0] = 0;
     try std.testing.expectEqual(c.OT_OK, ot_scene_frame_draw_buffer(handle, &session, &frame, &buffer, 1, 0));
     try std.testing.expectEqual(red, (try core.raw().getSessionRenderer(handleFromC(session))).getNextBuffer().buffer.bg[1]);
-    var draw = std.mem.zeroes(c.ot_buffer_draw_options);
-    draw.struct_size = @sizeOf(c.ot_buffer_draw_options);
-    draw.abi_version = c.OT_CONTEXT_ABI_VERSION;
-    draw.operation = c.OT_BUFFER_DRAW_TEXT;
-    draw.foreground = red;
-    try std.testing.expectEqual(c.OT_OK, ot_buffer_draw(handle, &buffer, null, &draw, null, "AB", 2, null, 0));
-    try std.testing.expectEqual(c.OT_OK, ot_buffer_draw(handle, &session, &frame, &draw, null, "CD", 2, null, 0));
-    try std.testing.expectEqual(c.OT_WRONG_KIND, ot_buffer_draw(handle, &session, null, &draw, null, "AB", 2, null, 0));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, &buffer, null, &draw, null, null, 1, null, 0));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, &buffer, null, &draw, null, "\xff", 1, null, 0));
-    draw.reserved = 1;
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, &buffer, null, &draw, null, null, 0, null, 0));
-    draw.reserved = 0;
+    var text_draw = std.mem.zeroes(c.ot_buffer_draw_text_record);
+    text_draw.header.struct_size = @sizeOf(c.ot_buffer_draw_text_record);
+    text_draw.header.abi_version = c.OT_CONTEXT_ABI_VERSION;
+    text_draw.header.operation = c.OT_BUFFER_DRAW_TEXT;
+    text_draw.foreground = red;
+    const draw = &text_draw.header;
+    try std.testing.expectEqual(c.OT_OK, ot_buffer_draw(handle, &buffer, null, draw, null, "AB", 2, null, 0));
+    try std.testing.expectEqual(c.OT_OK, ot_buffer_draw(handle, &session, &frame, draw, null, "CD", 2, null, 0));
+    try std.testing.expectEqual(c.OT_WRONG_KIND, ot_buffer_draw(handle, &session, null, draw, null, "AB", 2, null, 0));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, &buffer, null, draw, null, null, 1, null, 0));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, &buffer, null, draw, null, "\xff", 1, null, 0));
+    draw.flags = 2;
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, &buffer, null, draw, null, null, 0, null, 0));
+    draw.flags = 0;
     try std.testing.expectEqualSlices(u32, &.{ 'C', 'D' }, (try core.raw().getSessionRenderer(handleFromC(session))).getNextBuffer().buffer.char[0..2]);
     core.mutating = true;
-    try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_buffer_draw(handle, &buffer, null, &draw, null, null, 0, null, 0));
+    try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_buffer_draw(handle, &buffer, null, draw, null, null, 0, null, 0));
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_session_dump_hit_grid(handle, &session));
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_buffer_fill_rect(handle, &buffer, 0, 0, 1, 1, &red));
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_scene_frame_draw_buffer(handle, &session, &frame, &buffer, 0, 0));
     core.mutating = false;
     try std.testing.expectEqual(c.OT_OK, ot_scene_frame_cancel(handle, &session, frame.frame_id));
     try std.testing.expectEqual(c.OT_STALE_FRAME, ot_scene_frame_draw_buffer(handle, &session, &frame, &buffer, 0, 0));
-    try std.testing.expectEqual(c.OT_STALE_FRAME, ot_buffer_draw(handle, &session, &frame, &draw, null, null, 0, null, 0));
+    try std.testing.expectEqual(c.OT_STALE_FRAME, ot_buffer_draw(handle, &session, &frame, draw, null, null, 0, null, 0));
 }
 
 test "Context editor transport commands preserve provider unset and reject reentry" {

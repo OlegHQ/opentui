@@ -9,6 +9,7 @@ import { TextBufferView } from "../text-buffer-view.js"
 import { createTestRenderer } from "../testing/test-renderer.js"
 import { getLinkId } from "../utils.js"
 import { NativeStatus, resolveRenderLib } from "../zig.js"
+import { CliRenderEvents, type CliRendererErrorEvent } from "../renderer.js"
 
 const resources: { destroy(): void }[] = []
 const foreground = RGBA.fromIndex(2, "#00ff00")
@@ -241,3 +242,53 @@ test("Session hooks compose and edit raw planes in the same frame without exposi
     await renderer.closed
   }
 })
+
+test.each(["checked", "raw", "throw"] as const)(
+  "Session %s paint acquires leases only for raw access and releases on exit",
+  async (mode) => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: 4, height: 1 })
+    const lib = resolveRenderLib()
+    const acquire = spyOn(lib, "sceneFrameAcquireBufferLease")
+    const release = spyOn(lib, "contextReleaseBufferLease")
+    const errors: Error[] = []
+    const failure = new Error("raw paint failure")
+    let saved: { char: Uint32Array } | undefined
+    renderer.on(CliRenderEvents.RENDER_ERROR, ({ error }: CliRendererErrorEvent) => errors.push(error))
+    try {
+      renderer.root.add(
+        new BoxRenderable(renderer, {
+          width: 4,
+          height: 1,
+          renderAfter(target) {
+            target.fillRect(0, 0, 4, 1, background)
+            target.drawText("ABCD", 0, 0, foreground)
+            assert.equal(acquire.mock.calls.length, 0)
+            if (mode === "checked") return
+            saved = target.buffers
+            saved.char[0] = 88
+            assert.equal(target.buffers.char, saved.char)
+            assert.equal(acquire.mock.calls.length, 1)
+            if (mode === "throw") throw failure
+          },
+        }),
+      )
+      await renderOnce()
+      assert.deepEqual(errors, mode === "throw" ? [failure] : [])
+      assert.equal(acquire.mock.calls.length, mode === "checked" ? 0 : 1)
+      assert.equal(release.mock.calls.length, mode === "checked" ? 0 : 1)
+      if (mode !== "checked") {
+        const [context, handle] = release.mock.calls[0]
+        assert.throws(() => lib.contextValidateBufferLease(context, handle), {
+          status: NativeStatus.StaleHandle,
+        })
+        assert.throws(() => saved!.char, /scope has ended/)
+      }
+      if (mode !== "throw") assert.equal(captureCharFrame(), mode === "checked" ? "ABCD\n" : "XBCD\n")
+    } finally {
+      acquire.mockRestore()
+      release.mockRestore()
+      renderer.destroy()
+      await renderer.closed
+    }
+  },
+)

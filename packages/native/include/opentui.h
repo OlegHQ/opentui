@@ -1612,29 +1612,83 @@ typedef struct ot_buffer_text_options {
 #define OT_BUFFER_STACK_POP_OPACITY UINT32_C(5)
 #define OT_BUFFER_STACK_CLEAR_OPACITY UINT32_C(6)
 
-typedef struct ot_buffer_draw_options {
+/* Pass the header of the record matching operation to ot_buffer_draw.
+ * struct_size is sizeof(the complete record), not sizeof(this header).
+ * CLEAR/FILL/TEXT/BOX/COMPOSE use their named records below; CELL, CELL_BLEND,
+ * and CHAR share ot_buffer_draw_cell; RESPECT_ALPHA uses ot_buffer_draw_alpha.
+ * flags is zero except for TEXT (HAS_BACKGROUND) and COMPOSE
+ * (HAS_SOURCE_WIDTH and HAS_SOURCE_HEIGHT). Without HAS_BACKGROUND, text
+ * uses the background at each glyph or tab start. Omitted source extents use
+ * the remaining source dimensions; an explicit zero extent draws nothing.
+ * All records and byte spans are borrowed only for the call. */
+typedef struct ot_buffer_draw_header {
     uint32_t struct_size;
     uint32_t abi_version;
     uint32_t operation;
     uint32_t flags;
+} ot_buffer_draw_header;
+
+typedef struct ot_buffer_draw_clear {
+    ot_buffer_draw_header header;
+    uint16_t background[4];
+} ot_buffer_draw_clear;
+
+typedef struct ot_buffer_draw_fill {
+    ot_buffer_draw_header header;
     int32_t x;
     int32_t y;
     uint32_t width;
     uint32_t height;
+    uint16_t background[4];
+} ot_buffer_draw_fill;
+
+typedef struct ot_buffer_draw_text_record {
+    ot_buffer_draw_header header;
+    int32_t x;
+    int32_t y;
+    uint32_t attributes;
+    uint16_t foreground[4];
+    uint16_t background[4];
+} ot_buffer_draw_text_record;
+
+typedef struct ot_buffer_draw_cell {
+    ot_buffer_draw_header header;
+    int32_t x;
+    int32_t y;
     uint32_t character;
     uint32_t attributes;
+    uint16_t foreground[4];
+    uint16_t background[4];
+} ot_buffer_draw_cell;
+
+typedef struct ot_buffer_draw_box {
+    ot_buffer_draw_header header;
+    int32_t x;
+    int32_t y;
+    uint32_t width;
+    uint32_t height;
     uint32_t packed_options;
-    uint32_t reserved;
     uint16_t foreground[4];
     uint16_t background[4];
     uint16_t title_color[4];
     uint32_t border_chars[11];
+} ot_buffer_draw_box;
+
+typedef struct ot_buffer_draw_compose {
+    ot_buffer_draw_header header;
+    int32_t x;
+    int32_t y;
     uint32_t source_x;
     uint32_t source_y;
     uint32_t source_width;
     uint32_t source_height;
-    uint32_t reserved2;
-} ot_buffer_draw_options;
+} ot_buffer_draw_compose;
+
+typedef struct ot_buffer_draw_alpha {
+    ot_buffer_draw_header header;
+    /* Zero or one. Valid only for an owned-buffer target. */
+    uint32_t enabled;
+} ot_buffer_draw_alpha;
 
 #define OT_BUFFER_GRID_INNER UINT32_C(1)
 #define OT_BUFFER_GRID_OUTER UINT32_C(2)
@@ -1986,13 +2040,16 @@ ot_status ot_buffer_draw_text(
     uint32_t byte_count);
 
 /* Draw into an owned buffer, or a Session's next buffer with the exact active
- * prefix/painted ticket. source is a same-Context buffer for COMPOSE only.
+ * prefix/painted ticket. frame must be NULL for an owned buffer and non-NULL
+ * for a Session. source is a same-Context buffer for COMPOSE only.
+ * text is used only for TEXT or the BOX top title; bottom_title is BOX-only.
+ * Other operations require zero byte counts for unused spans.
  * Text/title byte counts are bounded by OT_BUFFER_TEXT_BYTES_MAX. Raw resource
  * IDs are rejected. Any Box title drawing failure may partially modify the
  * destination; callers must cancel the frame or discard the offscreen draft.
  * No native framebuffer pointer is accepted. */
 ot_status ot_buffer_draw(ot_context *context, const ot_handle *target,
-    const ot_scene_frame_request *frame, const ot_buffer_draw_options *options,
+    const ot_scene_frame_request *frame, const ot_buffer_draw_header *options,
     const ot_handle *source, const uint8_t *text, uint32_t text_len,
     const uint8_t *bottom_title, uint32_t bottom_title_len);
 

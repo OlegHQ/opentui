@@ -1015,7 +1015,7 @@ pub const Context = struct {
     pub fn drawBufferUnicode(self: *Context, handle: Handle, frame: ?scene.FrameRequest, source_handle: Handle, index: u32, x: i32, y: i32, foreground: buf.RGBA, background: buf.RGBA, attributes: u32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         const source = try self.getUnicode(source_handle);
         if (index >= source.chars.len) return error.InvalidOptions;
         try buf.validateColor(foreground);
@@ -1112,7 +1112,7 @@ pub const Context = struct {
     pub fn embeddedTerminalCompose(self: *Context, source_handle: Handle, handle: Handle, frame: ?scene.FrameRequest, x: i32, y: i32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         const source = try self.getEmbeddedTerminal(source_handle);
         // Session drafts are cleared between frames; only retained buffers keep clean rows.
         if (frame != null) source.invalidate();
@@ -1233,7 +1233,7 @@ pub const Context = struct {
     pub fn drawBufferImage(self: *Context, handle: Handle, frame: ?scene.FrameRequest, source_handle: Handle, options: ImageDraw) !bool {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         const source = try self.getImage(source_handle);
         try target.checkImageResources();
         if (options.source_x > source.width() or options.source_y > source.height()) return error.InvalidOptions;
@@ -1346,7 +1346,7 @@ pub const Context = struct {
     pub fn drawBuffer(self: *Context, handle: Handle, frame: ?scene.FrameRequest, options: BufferDraw, text: []const u8, bottom_title: []const u8) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         const background = options.background orelse ansi.rgbColor(0, 0, 0, 0);
         for ([_]buf.RGBA{ options.foreground, background, options.title_color }) |color| try buf.validateColor(color);
         if (options.attributes & ~ansi.TextAttributes.ATTRIBUTE_BASE_MASK != 0) return error.InvalidOptions;
@@ -1403,7 +1403,7 @@ pub const Context = struct {
     pub fn bufferStack(self: *Context, handle: Handle, frame: ?scene.FrameRequest, options: BufferStack) !f32 {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         // Each paint request starts with exactly one scene-owned clip and opacity.
         const floor: usize = if (frame) |ticket| @intFromBool(ticket.kind != 0) else 0;
         std.debug.assert(target.scissor_stack.items.len >= floor);
@@ -1437,7 +1437,7 @@ pub const Context = struct {
     pub fn drawGrid(self: *Context, handle: Handle, frame: ?scene.FrameRequest, options: BufferGrid, columns: []const i32, rows: []const i32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         try target.checkImageResources();
         try buf.validateColor(options.foreground);
         try buf.validateColor(options.background);
@@ -1458,14 +1458,14 @@ pub const Context = struct {
     pub fn drawPackedBuffer(self: *Context, handle: Handle, frame: ?scene.FrameRequest, data: []const u8, x: u32, y: u32, width: u32, height: u32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         try target.drawPackedBufferChecked(data, x, y, width, height);
     }
 
     pub fn drawSuperSampleBuffer(self: *Context, handle: Handle, frame: ?scene.FrameRequest, data: []const u8, x: u32, y: u32, format: u32, stride: u32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         if (format > 1) return error.InvalidOptions;
         try target.drawSuperSampleBufferChecked(x, y, data, @intCast(format), stride);
     }
@@ -1473,14 +1473,14 @@ pub const Context = struct {
     pub fn drawGrayscaleBuffer(self: *Context, handle: Handle, frame: ?scene.FrameRequest, data: []align(1) const f32, x: i32, y: i32, width: u32, height: u32, foreground: ?buf.RGBA, background: ?buf.RGBA, supersampled: bool) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         try target.drawGrayscaleBufferChecked(x, y, data, width, height, foreground, background, supersampled);
     }
 
     pub fn colorMatrixBuffer(self: *Context, handle: Handle, frame: ?scene.FrameRequest, matrix: []align(1) const f32, mask: ?[]align(1) const f32, strength: f32, channel: u32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         if (matrix.len != 16 or !std.math.isFinite(strength) or channel < 1 or channel > 3) return error.InvalidOptions;
         for (matrix) |value| if (!std.math.isFinite(value)) return error.InvalidOptions;
         if (mask) |cells| {
@@ -1507,7 +1507,7 @@ pub const Context = struct {
     pub fn drawTextBufferView(self: *Context, handle: Handle, frame: ?scene.FrameRequest, view_handle: Handle, x: i32, y: i32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         const view = try self.getTextBufferView(view_handle);
         if (x >= target.width or y >= target.height) return;
         try view.prepareView();
@@ -1517,7 +1517,7 @@ pub const Context = struct {
     pub fn drawEditorView(self: *Context, handle: Handle, frame: ?scene.FrameRequest, view_handle: Handle, x: i32, y: i32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         const editor = try self.getEditorView(view_handle);
         if (x >= target.width or y >= target.height) return;
         try target.drawEditorViewChecked(editor.view, x, y);
@@ -1526,7 +1526,7 @@ pub const Context = struct {
     pub fn drawSceneText(self: *Context, handle: Handle, frame: ?scene.FrameRequest, node_handle: Handle, x: i32, y: i32) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        const target = if (frame) |ticket| try self.frameDrawTarget(handle, ticket) else try self.getBuffer(handle);
+        const target = try self.bufferDrawTarget(handle, frame);
         const node = try self.sceneNode(node_handle);
         const text = node.scene_node.?.text orelse return error.WrongKind;
         if (x >= target.width or y >= target.height) return;
@@ -2566,6 +2566,11 @@ pub const Context = struct {
         const target = try self.frameDrawTarget(session_handle, frame);
         const source = try self.getBuffer(source_handle);
         try drawContextBuffer(target, source, x, y, .{});
+    }
+
+    fn bufferDrawTarget(self: *Context, handle: Handle, frame: ?scene.FrameRequest) !*buf.OptimizedBuffer {
+        std.debug.assert(self.mutating);
+        return if (frame) |ticket| self.frameDrawTarget(handle, ticket) else self.getBuffer(handle);
     }
 
     fn frameDrawTarget(self: *Context, session_handle: Handle, frame: scene.FrameRequest) !*buf.OptimizedBuffer {

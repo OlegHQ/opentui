@@ -1,7 +1,7 @@
 // Generated from packages/native/include/opentui.h and scripts/native-abi-pointers.ts.
 // Run `bun run generate:abi` in packages/core. Do not edit.
 // Inspect audit input: bun scripts/native-abi.ts --audit
-// ABI audit SHA-256: 2f114863dc73d82166f85ae2da9691ce8dd7c506e8f852a191cdfade2d5a59fc
+// ABI audit SHA-256: ae4855b9be91281622ee7105dc64c969c2514b16c22a7480c2dd68020c3df8c7
 
 export const nativeSymbols = {
   ot_scene_set_hooks: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
@@ -949,31 +949,96 @@ export const nativeLayouts = {
       flags: { offset: 36, size: 4, alignment: 4, type: "u32" },
     },
   },
-  ot_buffer_draw_options: {
-    size: 136,
+  ot_buffer_draw_header: {
+    size: 16,
     alignment: 4,
     fields: {
       struct_size: { offset: 0, size: 4, alignment: 4, type: "u32" },
       abi_version: { offset: 4, size: 4, alignment: 4, type: "u32" },
       operation: { offset: 8, size: 4, alignment: 4, type: "u32" },
       flags: { offset: 12, size: 4, alignment: 4, type: "u32" },
+    },
+  },
+  ot_buffer_draw_clear: {
+    size: 24,
+    alignment: 4,
+    fields: {
+      header: { offset: 0, size: 16, alignment: 4, type: "ot_buffer_draw_header" },
+      background: { offset: 16, size: 8, alignment: 2, type: "[4]u16" },
+    },
+  },
+  ot_buffer_draw_fill: {
+    size: 40,
+    alignment: 4,
+    fields: {
+      header: { offset: 0, size: 16, alignment: 4, type: "ot_buffer_draw_header" },
       x: { offset: 16, size: 4, alignment: 4, type: "i32" },
       y: { offset: 20, size: 4, alignment: 4, type: "i32" },
       width: { offset: 24, size: 4, alignment: 4, type: "u32" },
       height: { offset: 28, size: 4, alignment: 4, type: "u32" },
-      character: { offset: 32, size: 4, alignment: 4, type: "u32" },
-      attributes: { offset: 36, size: 4, alignment: 4, type: "u32" },
-      packed_options: { offset: 40, size: 4, alignment: 4, type: "u32" },
-      reserved: { offset: 44, size: 4, alignment: 4, type: "u32" },
-      foreground: { offset: 48, size: 8, alignment: 2, type: "[4]u16" },
-      background: { offset: 56, size: 8, alignment: 2, type: "[4]u16" },
-      title_color: { offset: 64, size: 8, alignment: 2, type: "[4]u16" },
-      border_chars: { offset: 72, size: 44, alignment: 4, type: "[11]u32" },
-      source_x: { offset: 116, size: 4, alignment: 4, type: "u32" },
-      source_y: { offset: 120, size: 4, alignment: 4, type: "u32" },
-      source_width: { offset: 124, size: 4, alignment: 4, type: "u32" },
-      source_height: { offset: 128, size: 4, alignment: 4, type: "u32" },
-      reserved2: { offset: 132, size: 4, alignment: 4, type: "u32" },
+      background: { offset: 32, size: 8, alignment: 2, type: "[4]u16" },
+    },
+  },
+  ot_buffer_draw_text_record: {
+    size: 44,
+    alignment: 4,
+    fields: {
+      header: { offset: 0, size: 16, alignment: 4, type: "ot_buffer_draw_header" },
+      x: { offset: 16, size: 4, alignment: 4, type: "i32" },
+      y: { offset: 20, size: 4, alignment: 4, type: "i32" },
+      attributes: { offset: 24, size: 4, alignment: 4, type: "u32" },
+      foreground: { offset: 28, size: 8, alignment: 2, type: "[4]u16" },
+      background: { offset: 36, size: 8, alignment: 2, type: "[4]u16" },
+    },
+  },
+  ot_buffer_draw_cell: {
+    size: 48,
+    alignment: 4,
+    fields: {
+      header: { offset: 0, size: 16, alignment: 4, type: "ot_buffer_draw_header" },
+      x: { offset: 16, size: 4, alignment: 4, type: "i32" },
+      y: { offset: 20, size: 4, alignment: 4, type: "i32" },
+      character: { offset: 24, size: 4, alignment: 4, type: "u32" },
+      attributes: { offset: 28, size: 4, alignment: 4, type: "u32" },
+      foreground: { offset: 32, size: 8, alignment: 2, type: "[4]u16" },
+      background: { offset: 40, size: 8, alignment: 2, type: "[4]u16" },
+    },
+  },
+  ot_buffer_draw_box: {
+    size: 104,
+    alignment: 4,
+    fields: {
+      header: { offset: 0, size: 16, alignment: 4, type: "ot_buffer_draw_header" },
+      x: { offset: 16, size: 4, alignment: 4, type: "i32" },
+      y: { offset: 20, size: 4, alignment: 4, type: "i32" },
+      width: { offset: 24, size: 4, alignment: 4, type: "u32" },
+      height: { offset: 28, size: 4, alignment: 4, type: "u32" },
+      packed_options: { offset: 32, size: 4, alignment: 4, type: "u32" },
+      foreground: { offset: 36, size: 8, alignment: 2, type: "[4]u16" },
+      background: { offset: 44, size: 8, alignment: 2, type: "[4]u16" },
+      title_color: { offset: 52, size: 8, alignment: 2, type: "[4]u16" },
+      border_chars: { offset: 60, size: 44, alignment: 4, type: "[11]u32" },
+    },
+  },
+  ot_buffer_draw_compose: {
+    size: 40,
+    alignment: 4,
+    fields: {
+      header: { offset: 0, size: 16, alignment: 4, type: "ot_buffer_draw_header" },
+      x: { offset: 16, size: 4, alignment: 4, type: "i32" },
+      y: { offset: 20, size: 4, alignment: 4, type: "i32" },
+      source_x: { offset: 24, size: 4, alignment: 4, type: "u32" },
+      source_y: { offset: 28, size: 4, alignment: 4, type: "u32" },
+      source_width: { offset: 32, size: 4, alignment: 4, type: "u32" },
+      source_height: { offset: 36, size: 4, alignment: 4, type: "u32" },
+    },
+  },
+  ot_buffer_draw_alpha: {
+    size: 20,
+    alignment: 4,
+    fields: {
+      header: { offset: 0, size: 16, alignment: 4, type: "ot_buffer_draw_header" },
+      enabled: { offset: 16, size: 4, alignment: 4, type: "u32" },
     },
   },
   ot_buffer_grid_options: {

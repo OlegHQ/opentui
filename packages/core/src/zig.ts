@@ -427,27 +427,39 @@ export interface NativeBufferStack {
   opacity?: number
 }
 
-export interface NativeBufferDraw {
-  operation: "clear" | "fill" | "text" | "cell" | "cellBlend" | "char" | "box" | "compose" | "respectAlpha"
-  x?: number
-  y?: number
-  width?: number
-  height?: number
-  char?: number
-  attributes?: number
-  foreground?: RGBA
-  background?: RGBA
-  titleColor?: RGBA
-  packedOptions?: number
-  borderChars?: Uint32Array
-  source?: ContextBufferHandle
-  sourceX?: number
-  sourceY?: number
-  sourceWidth?: number
-  sourceHeight?: number
-  text?: string
-  bottomTitle?: string
-}
+export type NativeDrawingTarget =
+  | { readonly context: NativeContextHandle; readonly target: ContextBufferHandle; readonly frame: null }
+  | { readonly context: NativeContextHandle; readonly target: SessionHandle; readonly frame: NativeSceneFrameRequest }
+
+type BufferDrawPosition = { x?: number; y?: number }
+type BufferDrawColors = { foreground?: RGBA; background?: RGBA }
+
+export type NativeBufferDraw =
+  | { operation: "clear"; background?: RGBA }
+  | (BufferDrawPosition & { operation: "fill"; width?: number; height?: number; background?: RGBA })
+  | (BufferDrawPosition & BufferDrawColors & { operation: "text"; text?: string; attributes?: number })
+  | (BufferDrawPosition &
+      BufferDrawColors & { operation: "cell" | "cellBlend" | "char"; char?: number; attributes?: number })
+  | (BufferDrawPosition &
+      BufferDrawColors & {
+        operation: "box"
+        width?: number
+        height?: number
+        titleColor?: RGBA
+        packedOptions?: number
+        borderChars?: Uint32Array
+        text?: string
+        bottomTitle?: string
+      })
+  | (BufferDrawPosition & {
+      operation: "compose"
+      source: ContextBufferHandle
+      sourceX?: number
+      sourceY?: number
+      sourceWidth?: number
+      sourceHeight?: number
+    })
+  | { operation: "respectAlpha"; enabled: boolean }
 
 export interface NativeContextImageDraw {
   x?: number
@@ -832,6 +844,17 @@ const BUFFER_DRAW_OPERATIONS = [
   "compose",
   "respectAlpha",
 ] as const
+const BUFFER_DRAW_LAYOUTS = [
+  nativeLayouts.ot_buffer_draw_clear,
+  nativeLayouts.ot_buffer_draw_fill,
+  nativeLayouts.ot_buffer_draw_text_record,
+  nativeLayouts.ot_buffer_draw_cell,
+  nativeLayouts.ot_buffer_draw_cell,
+  nativeLayouts.ot_buffer_draw_cell,
+  nativeLayouts.ot_buffer_draw_box,
+  nativeLayouts.ot_buffer_draw_compose,
+  nativeLayouts.ot_buffer_draw_alpha,
+] as const
 const BUFFER_STACK_OPERATIONS = [
   "getOpacity",
   "pushScissor",
@@ -1007,15 +1030,35 @@ function createSceneFrameRecord() {
 }
 
 function createBufferDrawRecord() {
-  const record = createContextRecord(nativeLayouts.ot_buffer_draw_options)
+  const buffer = new ArrayBuffer(nativeLayouts.ot_buffer_draw_box.size)
   return {
-    record,
-    signed: new Int32Array(record.buffer),
-    colors: new Uint16Array(record.buffer),
+    records: BUFFER_DRAW_LAYOUTS.map((layout) => new Uint32Array(buffer, 0, layout.size / 4)),
+    signed: new Int32Array(buffer),
+    colors: new Uint16Array(buffer),
     handle: createContextHandleRecord(),
     source: createContextHandleRecord(),
     frame: createSceneFrameRecord(),
   }
+}
+
+function encodeDrawPosition(
+  signed: Int32Array,
+  fields: { x: { offset: number }; y: { offset: number } },
+  options: BufferDrawPosition,
+): void {
+  signed[fields.x.offset / 4] = embeddedTerminalI32(options.x ?? 0, "Buffer x")
+  signed[fields.y.offset / 4] = embeddedTerminalI32(options.y ?? 0, "Buffer y")
+}
+
+function encodeDrawColors(
+  colors: Uint16Array,
+  fields: { foreground: { offset: number }; background: { offset: number } },
+  options: BufferDrawColors,
+): boolean {
+  const { foreground, background } = options
+  if (foreground !== undefined) contextBufferColor(foreground, colors, fields.foreground.offset / 2)
+  if (background !== undefined) contextBufferColor(background, colors, fields.background.offset / 2)
+  return background !== undefined
 }
 
 function createSceneLayoutRecord() {
@@ -2811,9 +2854,7 @@ export class FFIRenderLib {
   }
 
   public contextBufferDrawUnicode(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     unicode: ContextUnicodeHandle,
     index: number,
     x: number,
@@ -2989,10 +3030,8 @@ export class FFIRenderLib {
   }
 
   public contextEmbeddedTerminalCompose(
-    context: NativeContextHandle,
+    { context, target, frame }: NativeDrawingTarget,
     terminal: ContextEmbeddedTerminalHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
     x: number,
     y: number,
   ): void {
@@ -3736,9 +3775,7 @@ export class FFIRenderLib {
   }
 
   public contextDrawTextBufferView(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     view: ContextTextBufferViewHandle,
     x: number,
     y: number,
@@ -3758,9 +3795,7 @@ export class FFIRenderLib {
   }
 
   public contextDrawEditorView(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     view: ContextEditorViewHandle,
     x: number,
     y: number,
@@ -3779,9 +3814,7 @@ export class FFIRenderLib {
   }
 
   public contextDrawSceneText(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     node: SceneNodeHandle,
     x: number,
     y: number,
@@ -4688,9 +4721,7 @@ export class FFIRenderLib {
   }
 
   public contextDrawImage(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     image: ContextImageHandle,
     options: NativeContextImageDraw,
   ): boolean {
@@ -4894,73 +4925,105 @@ export class FFIRenderLib {
     nativeResult("ot_buffer_resize", this.opentui.symbols.ot_buffer_resize(pointer, handle, columns, rows))
   }
 
-  public contextDrawBuffer(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
-    options: NativeBufferDraw,
-  ): void {
-    const layout = nativeLayouts.ot_buffer_draw_options
+  public contextDrawBuffer(drawing: NativeDrawingTarget, options: NativeBufferDraw): void {
     this.getYogaHost().assertMutable()
     const scratch = this.bufferDrawRecord ?? createBufferDrawRecord()
     this.bufferDrawRecord = undefined
     try {
+      const { context, target, frame } = drawing
       const handle = encodeContextHandle(context, target, scratch.handle.record, scratch.handle.words)
       const ticket = frame === null ? null : encodeSceneFrameRequest(context, frame, scratch.frame)
-      const source =
-        options.source === undefined
-          ? null
-          : encodeContextHandle(context, options.source, scratch.source.record, scratch.source.words)
-      const { record, signed, colors } = scratch
+      const { operation } = options
+      const operationId = BUFFER_DRAW_OPERATIONS.indexOf(operation)
+      if (operationId < 0) throw new TypeError("Invalid checked buffer drawing operation")
+      const record = scratch.records[operationId]
+      const { signed, colors } = scratch
+      const header = nativeLayouts.ot_buffer_draw_header.fields
       record.fill(0)
-      record[layout.fields.struct_size.offset / 4] = record.byteLength
-      record[layout.fields.abi_version.offset / 4] = nativeConstants.OT_CONTEXT_ABI_VERSION
-      const operation = BUFFER_DRAW_OPERATIONS.indexOf(options.operation)
-      if (operation < 0) throw new TypeError("Invalid checked buffer drawing operation")
-      record[layout.fields.operation.offset / 4] = operation
-      for (const [field, coordinate] of [
-        ["x", options.x ?? 0],
-        ["y", options.y ?? 0],
-      ] as const) {
-        if (!Number.isInteger(coordinate) || coordinate < -0x80000000 || coordinate > 0x7fffffff) {
-          throw new RangeError("Buffer coordinates must be signed 32-bit integers")
+      record[header.struct_size.offset / 4] = record.byteLength
+      record[header.abi_version.offset / 4] = nativeConstants.OT_CONTEXT_ABI_VERSION
+      record[header.operation.offset / 4] = operationId
+      let source: BigUint64Array | null = null
+      let textValue = ""
+      let bottomValue = ""
+      switch (operation) {
+        case "clear": {
+          const { background } = options
+          if (background !== undefined)
+            contextBufferColor(background, colors, nativeLayouts.ot_buffer_draw_clear.fields.background.offset / 2)
+          break
         }
-        signed[layout.fields[field].offset / 4] = coordinate
+        case "fill": {
+          const fields = nativeLayouts.ot_buffer_draw_fill.fields
+          encodeDrawPosition(signed, fields, options)
+          record[fields.width.offset / 4] = toSafeFFIU32Length(options.width ?? 0, "Buffer width")
+          record[fields.height.offset / 4] = toSafeFFIU32Length(options.height ?? 0, "Buffer height")
+          const { background } = options
+          if (background !== undefined) contextBufferColor(background, colors, fields.background.offset / 2)
+          break
+        }
+        case "text": {
+          const fields = nativeLayouts.ot_buffer_draw_text_record.fields
+          encodeDrawPosition(signed, fields, options)
+          record[fields.attributes.offset / 4] = toSafeFFIU32Length(options.attributes ?? 0, "Buffer attributes")
+          if (encodeDrawColors(colors, fields, options))
+            record[header.flags.offset / 4] = nativeConstants.OT_BUFFER_DRAW_HAS_BACKGROUND
+          textValue = options.text ?? ""
+          break
+        }
+        case "cell":
+        case "cellBlend":
+        case "char": {
+          const fields = nativeLayouts.ot_buffer_draw_cell.fields
+          encodeDrawPosition(signed, fields, options)
+          record[fields.character.offset / 4] = toSafeFFIU32Length(options.char ?? 32, "Buffer character")
+          record[fields.attributes.offset / 4] = toSafeFFIU32Length(options.attributes ?? 0, "Buffer attributes")
+          encodeDrawColors(colors, fields, options)
+          break
+        }
+        case "box": {
+          const fields = nativeLayouts.ot_buffer_draw_box.fields
+          encodeDrawPosition(signed, fields, options)
+          record[fields.width.offset / 4] = toSafeFFIU32Length(options.width ?? 0, "Buffer width")
+          record[fields.height.offset / 4] = toSafeFFIU32Length(options.height ?? 0, "Buffer height")
+          record[fields.packed_options.offset / 4] = toSafeFFIU32Length(
+            options.packedOptions ?? 0,
+            "Buffer box options",
+          )
+          encodeDrawColors(colors, fields, options)
+          const { titleColor, borderChars } = options
+          if (titleColor !== undefined) contextBufferColor(titleColor, colors, fields.title_color.offset / 2)
+          if (borderChars !== undefined) {
+            if (borderChars.length !== 11) throw new RangeError("Border characters must contain 11 Unicode scalars")
+            record.set(borderChars, fields.border_chars.offset / 4)
+          }
+          textValue = options.text ?? ""
+          bottomValue = options.bottomTitle ?? ""
+          break
+        }
+        case "compose": {
+          const fields = nativeLayouts.ot_buffer_draw_compose.fields
+          const sourceHandle = options.source
+          source = encodeContextHandle(context, sourceHandle, scratch.source.record, scratch.source.words)
+          encodeDrawPosition(signed, fields, options)
+          const { sourceX, sourceY, sourceWidth, sourceHeight } = options
+          record[fields.source_x.offset / 4] = toSafeFFIU32Length(sourceX ?? 0, "Buffer source x")
+          record[fields.source_y.offset / 4] = toSafeFFIU32Length(sourceY ?? 0, "Buffer source y")
+          record[fields.source_width.offset / 4] = toSafeFFIU32Length(sourceWidth ?? 0, "Buffer source width")
+          record[fields.source_height.offset / 4] = toSafeFFIU32Length(sourceHeight ?? 0, "Buffer source height")
+          record[header.flags.offset / 4] =
+            (sourceWidth === undefined ? 0 : nativeConstants.OT_BUFFER_DRAW_HAS_SOURCE_WIDTH) |
+            (sourceHeight === undefined ? 0 : nativeConstants.OT_BUFFER_DRAW_HAS_SOURCE_HEIGHT)
+          break
+        }
+        case "respectAlpha":
+          record[nativeLayouts.ot_buffer_draw_alpha.fields.enabled.offset / 4] = toFFIBool(
+            options.enabled,
+            "Buffer respect alpha",
+          )
+          break
       }
-      for (const [field, value] of [
-        ["width", options.width ?? 0],
-        ["height", options.height ?? 0],
-        ["character", options.char ?? 32],
-        ["attributes", options.attributes ?? 0],
-        ["packed_options", options.packedOptions ?? 0],
-      ] as const) {
-        record[layout.fields[field].offset / 4] = toSafeFFIU32Length(value, "Buffer drawing option")
-      }
-      if (options.foreground !== undefined)
-        contextBufferColor(options.foreground, colors, layout.fields.foreground.offset / 2)
-      if (options.background !== undefined) {
-        contextBufferColor(options.background, colors, layout.fields.background.offset / 2)
-        record[layout.fields.flags.offset / 4] |= 1
-      }
-      if (options.titleColor !== undefined)
-        contextBufferColor(options.titleColor, colors, layout.fields.title_color.offset / 2)
-      if (options.borderChars !== undefined) {
-        if (options.borderChars.length !== 11) throw new RangeError("Border characters must contain 11 Unicode scalars")
-        record.set(options.borderChars, layout.fields.border_chars.offset / 4)
-      }
-      for (const [field, value] of [
-        ["source_x", options.sourceX ?? 0],
-        ["source_y", options.sourceY ?? 0],
-        ["source_width", options.sourceWidth ?? 0],
-        ["source_height", options.sourceHeight ?? 0],
-      ] as const) {
-        record[layout.fields[field].offset / 4] = toSafeFFIU32Length(value, "Buffer source rectangle")
-      }
-      if (options.sourceWidth !== undefined) record[layout.fields.flags.offset / 4] |= 2
-      if (options.sourceHeight !== undefined) record[layout.fields.flags.offset / 4] |= 4
-      const textValue = options.text ?? ""
       const text = textValue === "" ? this.emptyBytes : this.encoder.encode(textValue)
-      const bottomValue = options.bottomTitle ?? ""
       const bottom = bottomValue === "" ? this.emptyBytes : this.encoder.encode(bottomValue)
       if (text.byteLength > NATIVE_BUFFER_TEXT_BYTES_MAX || bottom.byteLength > NATIVE_BUFFER_TEXT_BYTES_MAX) {
         throw new RangeError("Buffer text exceeds the native byte limit")
@@ -4985,12 +5048,7 @@ export class FFIRenderLib {
     }
   }
 
-  public contextBufferStack(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
-    options: NativeBufferStack,
-  ): number {
+  public contextBufferStack({ context, target, frame }: NativeDrawingTarget, options: NativeBufferStack): number {
     this.getYogaHost().assertMutable()
     const handle = encodeContextHandle(context, target)
     const ticket = frame === null ? null : encodeSceneFrameRequest(context, frame)
@@ -5017,12 +5075,7 @@ export class FFIRenderLib {
     return output[0]
   }
 
-  public contextDrawGrid(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
-    options: NativeBufferGrid,
-  ): void {
+  public contextDrawGrid({ context, target, frame }: NativeDrawingTarget, options: NativeBufferGrid): void {
     const layout = nativeLayouts.ot_buffer_grid_options
     this.getYogaHost().assertMutable()
     const handle = encodeContextHandle(context, target)
@@ -5054,9 +5107,7 @@ export class FFIRenderLib {
   }
 
   public contextDrawPackedBuffer(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     data: Uint8Array | PointerInput,
     byteLength: number,
     x: number,
@@ -5078,9 +5129,7 @@ export class FFIRenderLib {
   }
 
   public contextDrawSuperSampleBuffer(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     data: Uint8Array | PointerInput,
     byteLength: number,
     x: number,
@@ -5105,9 +5154,7 @@ export class FFIRenderLib {
   }
 
   public contextDrawGrayscaleBuffer(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     data: Float32Array,
     x: number,
     y: number,
@@ -5158,9 +5205,7 @@ export class FFIRenderLib {
   }
 
   public contextColorMatrixBuffer(
-    context: NativeContextHandle,
-    target: ContextBufferHandle | SessionHandle,
-    frame: NativeSceneFrameRequest | null,
+    { context, target, frame }: NativeDrawingTarget,
     matrix: Float32Array,
     mask: Float32Array | null,
     strength: number,

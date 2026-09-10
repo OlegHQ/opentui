@@ -282,7 +282,7 @@ export class EmbeddedTerminalRenderable extends Renderable {
       this.lib.contextEmbeddedTerminalInvalidate(this.handle.context, this.handle)
     }
     const target = buffer._getSceneDrawTarget(this._ctx.nativeScene)
-    this.lib.contextEmbeddedTerminalCompose(target.context, this.handle, target.target, target.frame, 0, 0)
+    this.lib.contextEmbeddedTerminalCompose(target, this.handle, 0, 0)
     this._onScreenChange?.()
     if (!this.focused) return
     const cursor = this.lib.contextEmbeddedTerminalCursor(this.handle.context, this.handle)

@@ -13,10 +13,13 @@ test("Context image import outlives its compatibility source and rejects stale h
     const image = lib.importContextImage(context, source)
     lib.imageDestroy(source)
     const target = lib.createContextBuffer(context, { width: 2, height: 1 })
-    assert.equal(lib.contextDrawImage(context, target, null, image, { width: 2, height: 1, protocol: "blocks" }), true)
-    assert.equal(lib.contextDrawImage(context, target, null, image, { x: 2, width: 2, height: 1 }), false)
+    assert.equal(
+      lib.contextDrawImage({ context, target, frame: null }, image, { width: 2, height: 1, protocol: "blocks" }),
+      true,
+    )
+    assert.equal(lib.contextDrawImage({ context, target, frame: null }, image, { x: 2, width: 2, height: 1 }), false)
     lib.destroyContextImage(context, image)
-    assert.throws(() => lib.contextDrawImage(context, target, null, image, { width: 2, height: 1 }), {
+    assert.throws(() => lib.contextDrawImage({ context, target, frame: null }, image, { width: 2, height: 1 }), {
       status: NativeStatus.StaleHandle,
     })
     assert.throws(() => lib.importContextImage(context, source), { status: NativeStatus.StaleHandle })
@@ -53,27 +56,42 @@ test("Context image transport checks owners kinds optional backing storage and d
     })
     assert.throws(() => lib.destroyContextImage(context, target as never), { status: NativeStatus.WrongKind })
     assert.throws(() => lib.destroyContextImage(other, image), { status: NativeStatus.WrongContext })
-    assert.throws(() => lib.contextDrawImage(context, target, null, target as never, { width: 2, height: 1 }), {
-      status: NativeStatus.WrongKind,
-    })
-    assert.throws(() => lib.contextDrawImage(other, foreign, null, image, { width: 2, height: 1 }), {
-      status: NativeStatus.WrongContext,
-    })
+    assert.throws(
+      () => lib.contextDrawImage({ context, target, frame: null }, target as never, { width: 2, height: 1 }),
+      {
+        status: NativeStatus.WrongKind,
+      },
+    )
+    assert.throws(
+      () => lib.contextDrawImage({ context: other, target: foreign, frame: null }, image, { width: 2, height: 1 }),
+      {
+        status: NativeStatus.WrongContext,
+      },
+    )
     for (const width of [-1, 0.5, Number.NaN, 0x1_0000_0000]) {
-      assert.throws(() => lib.contextDrawImage(context, target, null, image, { width, height: 1 }), RangeError)
+      assert.throws(
+        () => lib.contextDrawImage({ context, target, frame: null }, image, { width, height: 1 }),
+        RangeError,
+      )
     }
     assert.throws(
-      () => lib.contextDrawImage(context, target, null, image, { width: 2, height: 1, x: 0x80000000 }),
+      () => lib.contextDrawImage({ context, target, frame: null }, image, { width: 2, height: 1, x: 0x80000000 }),
       RangeError,
     )
     assert.throws(
       () =>
-        lib.contextDrawImage(context, target, null, image, { width: 2, height: 1, protocol: "constructor" as never }),
+        lib.contextDrawImage({ context, target, frame: null }, image, {
+          width: 2,
+          height: 1,
+          protocol: "constructor" as never,
+        }),
       TypeError,
     )
     assert.throws(() => lib.sceneSetImage(context, node, image, "bad" as never, "auto", null), TypeError)
     const draw = { width: 2, height: 1, protocol: "blocks" as const }
-    assert.throws(() => lib.contextDrawImage(context, session, null, image, draw), { status: NativeStatus.WrongKind })
+    assert.throws(() => lib.contextDrawImage({ context, target: session, frame: null } as never, image, draw), {
+      status: NativeStatus.WrongKind,
+    })
     const frame = lib.sceneFrameStep(context, session, null, {
       background: RGBA.fromInts(0, 0, 0),
       useMouse: false,
@@ -81,15 +99,22 @@ test("Context image transport checks owners kinds optional backing storage and d
       maxLayoutRounds: 8,
       maxHostRequests: 64,
     })
-    assert.equal(lib.contextDrawImage(context, session, frame, image, draw), true)
+    assert.equal(lib.contextDrawImage({ context, target: session, frame }, image, draw), true)
     assert.throws(
-      () => lib.contextDrawImage(context, session, { ...frame, frameId: frame.frameId + 1n }, image, draw),
+      () =>
+        lib.contextDrawImage(
+          { context, target: session, frame: { ...frame, frameId: frame.frameId + 1n } },
+          image,
+          draw,
+        ),
       {
         status: NativeStatus.StaleFrame,
       },
     )
     lib.sceneFrameCancel(context, session, frame.frameId)
-    assert.throws(() => lib.contextDrawImage(context, session, frame, image, draw), { status: NativeStatus.StaleFrame })
+    assert.throws(() => lib.contextDrawImage({ context, target: session, frame }, image, draw), {
+      status: NativeStatus.StaleFrame,
+    })
     lib.destroyContextImage(context, image)
     lib.sceneSetImage(context, node, null, "fill", "auto", null)
     lib.sceneDestroyNode(context, node)
@@ -112,12 +137,15 @@ test("Context image transport resolves native ownership after draw option getter
     const target = lib.createContextBuffer(context, { width: 2, height: 1 })
     let reads = 0
     assert.equal(
-      lib.contextDrawImage(context, target, null, image, {
+      lib.contextDrawImage({ context, target, frame: null }, image, {
         width: 2,
         height: 1,
         get sourceWidth() {
           reads++
-          assert.equal(lib.contextDrawImage(context, target, null, image, { width: 2, height: 1, x: 2 }), false)
+          assert.equal(
+            lib.contextDrawImage({ context, target, frame: null }, image, { width: 2, height: 1, x: 2 }),
+            false,
+          )
           return 1
         },
       }),
@@ -126,7 +154,7 @@ test("Context image transport resolves native ownership after draw option getter
     assert.equal(reads, 1)
     assert.throws(
       () =>
-        lib.contextDrawImage(context, target, null, image, {
+        lib.contextDrawImage({ context, target, frame: null }, image, {
           get width() {
             lib.destroyContext(context)
             destroyed = true
