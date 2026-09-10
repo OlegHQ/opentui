@@ -1,7 +1,28 @@
-import { expect, test } from "bun:test"
-import { NativeImage, NativeImagePool } from "../image.js"
+import { expect, spyOn, test } from "bun:test"
+import { NativeImage, NativeImagePool, imageInfo } from "../image.js"
 import { OptimizedBuffer, ResourceContext } from "../buffer.js"
 import { NativeError, NativeStatus, resolveRenderLib } from "../zig.js"
+
+test.each([
+  ["RGBA", () => NativeImage.fromRgba(Uint8Array.of(1, 2, 3, 255), 1, 1)],
+  ["pixels", () => NativeImage.fromPixels(Uint8Array.of(1, 2, 3, 255), 1, 1)],
+  ["decode", () => NativeImage.decode(Uint8Array.of(1))],
+  ["inspect", () => imageInfo(Uint8Array.of(1))],
+] as const)("image %s rejects Yoga callbacks before allocating an automatic Context", (_, create) => {
+  const lib = resolveRenderLib()
+  const allocate = spyOn(lib, "createContext")
+  try {
+    lib.getYogaHost().invokeCallback(() => {
+      expect(create).toThrow("Cannot mutate Yoga during a callback")
+    })
+    lib.getYogaHost().throwCallbackError()
+    expect(allocate.mock.calls).toHaveLength(0)
+  } finally {
+    allocate.mockRestore()
+    const retry = NativeImage.fromRgba(Uint8Array.of(1, 2, 3, 255), 1, 1)
+    retry.dispose()
+  }
+})
 
 test("checked image creation shares a Context and retains scene-independent pixels", () => {
   const owner = new ResourceContext({ objectCapacity: 8, renderCellsMax: 1 })

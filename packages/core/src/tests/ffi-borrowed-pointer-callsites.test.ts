@@ -536,19 +536,26 @@ describe("borrowed pointer call sites", () => {
       lib.imageTransform(handle, 0)
       lib.imageComposite(handle, handle, 0, 0, 0, 255)
 
-      expect(calls.get("ot_image_inspect")![1]).toBe(data)
+      for (const [input, source] of [
+        [calls.get("ot_image_inspect")![1], data],
+        [calls.get("ot_image_decode")![1], data],
+        [calls.get("ot_image_create_pixels")![1], pixels],
+        [calls.get("ot_image_copy_pixels")![2], destination],
+        [calls.get("ot_image_extend")![6], background],
+      ]) {
+        expect(input).toBeInstanceOf(Uint8Array)
+        expect(input.buffer).toBe(source.buffer)
+        expect(input.byteOffset).toBe(source.byteOffset)
+        expect(input.byteLength).toBe(source.byteLength)
+      }
       expect(calls.get("ot_image_inspect")![3]).toBeInstanceOf(Uint32Array)
-      expect(calls.get("ot_image_decode")![1]).toBe(data)
       expect(calls.get("ot_image_decode")![3]).toBeInstanceOf(BigUint64Array)
-      expect(calls.get("ot_image_create_pixels")![1]).toBe(pixels)
       expect(calls.get("ot_image_create_pixels")![8]).toBeInstanceOf(BigUint64Array)
       expect(calls.get("ot_image_get_info")![2]).toBeInstanceOf(Uint32Array)
       expect(calls.get("ot_image_retain")![2]).toBeInstanceOf(BigUint64Array)
       expect(calls.get("ot_image_clone")![3]).toBeInstanceOf(BigUint64Array)
-      expect(calls.get("ot_image_copy_pixels")![2]).toBe(destination)
       expect(calls.get("ot_image_resize")![5]).toBeInstanceOf(BigUint64Array)
       expect(calls.get("ot_image_extract")![6]).toBeInstanceOf(BigUint64Array)
-      expect(calls.get("ot_image_extend")![6]).toBe(background)
       expect(calls.get("ot_image_extend")![7]).toBeInstanceOf(BigUint64Array)
       expect(calls.get("ot_image_transform")![3]).toBeInstanceOf(BigUint64Array)
       expect(calls.get("ot_image_composite")![7]).toBeInstanceOf(BigUint64Array)
@@ -590,10 +597,16 @@ describe("borrowed pointer call sites", () => {
           lib.imageCreateFromRgba(context, empty, 0, 0, 0)
           lib.imageCopyPixels(image, empty, 0, false)
 
-          expect(calls.ot_image_inspect[0]![1]).toBe(empty)
-          expect(calls.ot_image_decode[0]![1]).toBe(empty)
-          expect(calls.ot_image_create_pixels[0]![1]).toBe(empty)
-          expect(calls.ot_image_copy_pixels[0]![2]).toBe(empty)
+          for (const input of [
+            calls.ot_image_inspect[0]![1],
+            calls.ot_image_decode[0]![1],
+            calls.ot_image_create_pixels[0]![1],
+            calls.ot_image_copy_pixels[0]![2],
+          ]) {
+            expect(input).toBeInstanceOf(Uint8Array)
+            expect(input.buffer).toBe(empty.buffer)
+            expect(input.byteLength).toBe(0)
+          }
         },
       )
     } finally {
