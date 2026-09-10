@@ -53,6 +53,41 @@ was `5260c407e269c26716a3164cd704d19b1b474164f1e800384b504ff9d1ee1bbb`.
 Changing a golden requires separate evidence of the intended rendering change, not a fresh
 capture accepted only because the current implementation produced it.
 
+### Unprepared log geometry correction
+
+The log goldens include the numeric-style fallback introduced by `b4d69edb7`. Before a node
+has published layout, its `width` and `height` getters use the current numeric styles, or zero
+for `auto` and percentages. After layout, they report the observed dimensions until another
+layout completes. This keeps pre-layout sizing available without retaining constructor-time
+geometry copies. `render-traversal-geometry.test.ts` checks both sides of that boundary.
+
+The original reference retained a zero constructor-time width for the hidden horizontal
+scrollbar's two arrows. Their constructors subsequently set width to one, but their hidden
+ancestor prevents layout publication. The accepted fallback therefore changes only
+`geometry[10][2]` and `geometry[12][2]` from zero to one. For example, the prepared frame's
+two records change from `[0, 44, 0, 1]` to `[0, 44, 1, 1]`.
+
+An isolated rebuild of `b1618ec4b45e5fa2f999fb605ec408d5d1c04db8` reproduced all 40 original
+log digests, including legacy/native parity. An isolated `74ee43632` build reproduced the
+mismatch. Comparing the complete snapshots proved that these two width substitutions account
+for all 37 changed log-frame digests. All UTF-8 bytes, byte lengths, continuation markers,
+foreground/background planes, attributes, other geometry, hits, and changed-cell counts match.
+The three cleanup frames match without substitutions. Box and grayscale references also match.
+
+To derive the corrected references, capture `snapshotScene()` before hashing in each revision.
+In each original log snapshot except cleanup, set `geometry[10][2]` and `geometry[12][2]` to `1`,
+then hash `JSON.stringify(snapshot)` with SHA-256. Each result equals the corresponding
+`74ee43632` digest. In particular, the prepared digest changes from
+`055f1cf15db5270bff93e7162e4a8dc9e93784ba812cd0eb53a340955d6d265e` to
+`1e756373d99d482e487c7daad46012723479ee9409c8733ffd409faf81c95d6d`, with `cellsUpdated: 0`.
+
+The verification used Linux x64, Bun 1.4.0, and Zig 0.16.0 ReleaseFast builds. Each worktree
+loaded its own `packages/core/node_modules/@opentui/core-linux-x64/libopentui.so`. The rebuilt
+reference library SHA-256 was `31ee64ca78a568a00cf584fe76d6e519a59d0e158c818105940e6a1f77823672`;
+the `74ee43632` library SHA-256 was `a5ccd4aecec434797f1c8f53c463f16590823b2cbc26727f3c2a4107b66863e9`.
+
+### Other retained workloads
+
 `bench:layout` retains the full-render mutation workloads and validates changed geometry or text line info.
 It now settles requested frames with `TestRenderer.flush()` instead of reading Yoga dirty flags or collecting
 JavaScript render commands. Its `settle-frames` results are not the old layout-only measurements.
