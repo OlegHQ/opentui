@@ -2,10 +2,14 @@ import assert from "node:assert/strict"
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
+import { Worker, isMainThread } from "node:worker_threads"
+import { setImmediate } from "node:timers/promises"
 import { resolveNativeLibraryPath } from "#opentui/runtime-assets"
+import { NativeSession } from "../NativeSession.js"
 import {
   FFIRenderLib,
   NativeError,
+  NativeSessionRenderStatus,
   NativeSessionState,
   NativeStatus,
   type NativeContextHandle,
@@ -17,6 +21,107 @@ const contextOptions = { objectCapacity: 2, renderCellsMax: 16 }
 const sessionOptions = { chunkSize: 4, spanCapacity: 2, maxBytes: 8n }
 
 switch (process.argv[2]) {
+  case "stdout-fallback":
+  case "stdout-overlapped": {
+    const driver = new NativeSession(process.stdout)
+    const lib = driver.renderLib
+    const originalDrain = lib.sessionDrainStdout
+    let calls = 0
+    try {
+      if (process.argv[2] === "stdout-fallback") {
+        lib.sessionDrainStdout = () => {
+          calls++
+          throw new NativeError("ot_session_drain_stdout", NativeStatus.UnsupportedResource)
+        }
+      } else {
+        assert.throws(() => lib.sessionDrainStdout(driver.context, driver.session), {
+          status: NativeStatus.UnsupportedResource,
+        })
+      }
+      driver.write(Buffer.from("fallback|"))
+      await driver.idle()
+      driver.write(Buffer.from("after|"))
+      await driver.close()
+      if (process.argv[2] === "stdout-fallback") assert.equal(calls, 1)
+    } finally {
+      lib.sessionDrainStdout = originalDrain
+      driver.dispose()
+    }
+    break
+  }
+  case "stdout-worker": {
+    if (!isMainThread) {
+      process.stdout.write("js|")
+      const driver = new NativeSession(process.stdout)
+      driver.write(Buffer.from("native|"))
+      await driver.close()
+      process.exit(0)
+    }
+    const worker = new Worker(new URL(import.meta.url), { argv: ["stdout-worker"], stdout: true })
+    let captured = ""
+    worker.stdout.setEncoding("utf8")
+    worker.stdout.on("data", (bytes) => (captured += bytes))
+    await new Promise<void>((resolve, reject) => {
+      worker.on("error", reject)
+      worker.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`worker exit ${code}`))))
+    })
+    assert.equal(captured, "js|native|")
+    break
+  }
+  case "stdout-corked": {
+    process.stdout.cork()
+    process.stdout.write("before|")
+    const driver = new NativeSession(process.stdout)
+    const originalRead = driver.renderLib.sessionReadOutput
+    try {
+      driver.renderLib.sessionReadOutput = () => {
+        throw new Error("corking introduced a payload copy")
+      }
+      driver.write(Buffer.from("native|"))
+      const idle = driver.idle()
+      await setImmediate()
+      process.stdout.uncork()
+      await idle
+      await driver.close()
+    } finally {
+      process.stdout.uncork()
+      driver.renderLib.sessionReadOutput = originalRead
+      driver.dispose()
+    }
+    break
+  }
+  case "stdout": {
+    const originalWrite = process.stdout.write
+    const driver = new NativeSession(process.stdout, {
+      context: { objectCapacity: 8, renderCellsMax: 16 },
+      output: { chunkSize: 4096, spanCapacity: 8, maxBytes: 32768n, controlCapacity: 4096 },
+      outputBufferSize: 4,
+    })
+    const lib = driver.renderLib
+    const originalRead = lib.sessionReadOutput
+    try {
+      process.stdout.write = () => {
+        throw new Error("stdout went through JavaScript")
+      }
+      lib.sessionReadOutput = () => {
+        throw new Error("stdout copied into JavaScript")
+      }
+      driver.attachRenderer({ width: 2, height: 1, remote: true, environment: {} })
+      assert.equal(driver.write(Buffer.from("A".repeat(4095) + "中😀")), true)
+      await driver.setupTerminal()
+      assert.equal(driver.render(true), NativeSessionRenderStatus.Pending)
+      await driver.whenPresented()
+      assert.equal(lib.sessionGetRendererState(driver.context, driver.session).framePending, false)
+      assert.equal(driver.write(Buffer.from("native tail")), true)
+      await driver.close()
+      assert.equal(driver.error, null)
+    } finally {
+      process.stdout.write = originalWrite
+      lib.sessionReadOutput = originalRead
+      driver.dispose()
+    }
+    break
+  }
   case "contexts": {
     const owner = new FFIRenderLib()
     let other: FFIRenderLib | undefined

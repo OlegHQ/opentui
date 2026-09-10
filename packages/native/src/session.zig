@@ -13,6 +13,59 @@ test {
     _ = @import("tests/session-split_test.zig");
 }
 
+test "Session console output rejects an incomplete scalar when its queue cannot accept more bytes" {
+    const Writer = struct {
+        calls: u32 = 0,
+        pub fn write(self: *@This(), bytes: []const u8) !usize {
+            try std.testing.expectEqualStrings("😀", bytes);
+            self.calls += 1;
+            return bytes.len;
+        }
+    };
+    for ([_]u32{ 2, 4 }) |capacity| {
+        const owner = try Context.init(std.testing.allocator, std.Io.failing, .{});
+        defer owner.deinit() catch unreachable;
+        const id = try owner.createSession(.{ .chunk_size = 1, .chunk_count = capacity, .span_capacity = capacity });
+        defer owner.cancelSession(id) catch unreachable;
+        const value = try owner.raw().getSession(id);
+        var writer: Writer = .{};
+        try owner.writeSession(id, "\xf0\x9f");
+        if (capacity == 2) {
+            try std.testing.expectError(error.IncompatibleOutput, value.drainConsoleOutput(&writer, 4));
+            try std.testing.expectEqual(@as(u64, 0), value.completed_bytes);
+            var copy: [1]u8 = undefined;
+            const ticket = (try owner.readOutput(id, &copy)).?;
+            try std.testing.expectEqual(@as(u8, 0xf0), copy[0]);
+            try owner.completeOutput(id, ticket, .written);
+        } else {
+            try std.testing.expectEqual(@as(u32, 0), try value.drainConsoleOutput(&writer, 4));
+            try owner.writeSession(id, "\x98\x80");
+            try std.testing.expectEqual(@as(u32, 4), try value.drainConsoleOutput(&writer, 4));
+            try std.testing.expectEqual(@as(u32, 1), writer.calls);
+            try std.testing.expect(value.isDrained());
+        }
+    }
+}
+
+test "Session console output rejects incomplete input once terminal setup stops raw admission" {
+    const owner = try Context.init(std.testing.allocator, std.testing.io, .{});
+    defer owner.deinit() catch unreachable;
+    const id = try owner.createSession(.{ .chunk_size = 4096, .chunk_count = 4, .span_capacity = 4, .control_capacity = 4096 });
+    defer owner.cancelSession(id) catch unreachable;
+    try owner.attachSessionRenderer(id, 2, 1, .{ .forwarded_env = &.{} });
+    try owner.writeSession(id, "\xf0\x9f");
+    try owner.setupSessionTerminal(id, .{});
+    try std.testing.expectError(error.Busy, owner.writeSession(id, "\x98\x80"));
+    const Writer = struct {
+        pub fn write(_: @This(), _: []const u8) error{WriteFailed}!usize {
+            return error.WriteFailed;
+        }
+    };
+    const value = try owner.raw().getSession(id);
+    try std.testing.expectError(error.IncompatibleOutput, value.drainConsoleOutput(Writer{}, 4));
+    try std.testing.expectEqual(@as(u64, 0), value.completed_bytes);
+}
+
 pub const Error = feed.StreamError || error{
     SessionClosed,
     SessionFailed,
@@ -28,6 +81,7 @@ pub const Error = feed.StreamError || error{
     PresentationPending,
     PresentationFailed,
     IncompatibleOutput,
+    UnsupportedResource,
     SplitRenderPending,
     InvalidOptions,
     InvalidTerminalState,
@@ -219,12 +273,16 @@ pub const Session = struct {
 
     /// Copies a complete write or rejects it without publishing any bytes.
     pub fn write(self: *Session, bytes: []const u8) Error!void {
+        try self.checkWriting();
+        try self.output.writeAtomic(bytes);
+    }
+
+    fn checkWriting(self: *const Session) Error!void {
         try self.checkOpen();
         switch (self.lifecycle.phase) {
             .uninitialized, .active, .suspended => {},
             else => return error.Busy,
         }
-        try self.output.writeAtomic(bytes);
     }
 
     pub fn checkOpen(self: *const Session) Error!void {
@@ -1006,31 +1064,116 @@ pub const Session = struct {
     /// Only out[0..ticket.len] is written. Empty reads consume no bytes or IDs.
     /// One copy may await completion; the whole span stays charged until completed.
     pub fn readOutput(self: *Session, out: []u8) Error!?OutputTicket {
-        switch (self.state) {
-            .open, .closing => {},
-            .closed => return null,
-            .failed => return error.SessionFailed,
-            .cancelled => return error.SessionCancelled,
-        }
+        if (!try self.checkOutput()) return null;
         if (out.len == 0) return null;
         if (self.pending != null) return error.Busy;
         if (self.span == null and !self.output.hasPendingSpans()) return null;
         const request_id = std.math.add(u64, self.last_request_id, 1) catch
             return error.RequestLimit;
+        const bytes = self.nextOutput().?;
+        const len: u32 = @intCast(@min(out.len, bytes.len));
+        @memcpy(out[0..len], bytes[0..len]);
+        const ticket: OutputTicket = .{ .session = self.handle, .request_id = request_id, .len = len };
+        self.pending = ticket;
+        self.last_request_id = request_id;
+        return ticket;
+    }
+
+    /// Borrows the next span for one writer.write call, capped by max_bytes.
+    /// The writer returns a delivered prefix length; zero or WouldBlock retains
+    /// the suffix for retry. Other errors permanently stop output without replay.
+    /// The writer must not retain the slice or acknowledge buffered-but-unwritten bytes.
+    pub fn drainOutput(self: *Session, writer: anytype, max_bytes: u32) Error!u32 {
+        if (max_bytes == 0) return error.InvalidBudget;
+        if (!try self.checkOutput()) return 0;
+        if (self.pending != null) return error.Busy;
+        const bytes = self.nextOutput() orelse return 0;
+        const offered = bytes[0..@min(bytes.len, max_bytes)];
+        const count = try self.deliverOutput(writer, offered);
+        if (count != 0) self.completeOutputBytes(count);
+        return count;
+    }
+
+    fn deliverOutput(self: *Session, writer: anytype, offered: []const u8) Error!u32 {
+        const count = writer.write(offered) catch |err| switch (@as(anyerror, err)) {
+            error.WouldBlock => return 0,
+            else => {
+                self.failOutput();
+                return error.SessionFailed;
+            },
+        };
+        if (count > offered.len) {
+            self.failOutput();
+            return error.SessionFailed;
+        }
+        return @intCast(count);
+    }
+
+    pub fn drainStdout(self: *Session, io: std.Io, max_bytes: u32) Error!u32 {
+        if (max_bytes < 4) return error.InvalidBudget;
+        if (!try self.checkOutput()) return 0;
+        if (self.pending != null) return error.Busy;
+        var stdout = renderer.StdoutOutput.initWithIo(io);
+        if (!stdout.supportsDirectWrite()) return error.UnsupportedResource;
+        const Writer = struct {
+            output: *renderer.StdoutOutput,
+            pub fn write(writer: @This(), bytes: []const u8) !usize {
+                return writer.output.writeSome(bytes);
+            }
+        };
+        const writer: Writer = .{ .output = &stdout };
+        if (builtin.os.tag != .windows or !stdout.windowsConsole) {
+            return self.drainOutput(writer, max_bytes);
+        }
+        return self.drainConsoleOutput(writer, max_bytes);
+    }
+
+    fn drainConsoleOutput(self: *Session, writer: anytype, max_bytes: u32) Error!u32 {
+        std.debug.assert(max_bytes >= 4);
+        if (!try self.checkOutput()) return 0;
+        if (self.pending != null) return error.Busy;
+        const bytes = self.nextOutput() orelse return 0;
+        const sequence_len = std.unicode.utf8ByteSequenceLength(bytes[0]) catch 1;
+        if (bytes.len >= sequence_len) return self.drainOutput(writer, max_bytes);
+        // A UTF-8 scalar can straddle up to four one-byte queue chunks. Keep its
+        // bytes charged until WriteConsoleW succeeds; no decoder owns a hidden tail.
+        var scalar: [4]u8 = undefined;
+        @memcpy(scalar[0..bytes.len], bytes);
+        const copied = self.output.copyQueuedPrefix(scalar[bytes.len..sequence_len]);
+        if (copied != sequence_len - bytes.len) {
+            self.checkWriting() catch return error.IncompatibleOutput;
+            if (!self.output.hasAtomicCapacity()) return error.IncompatibleOutput;
+            return 0;
+        }
+        const written = try self.deliverOutput(writer, scalar[0..sequence_len]);
+        var remaining = written;
+        while (remaining != 0) {
+            const count: u32 = @intCast(@min(remaining, self.nextOutput().?.len));
+            self.completeOutputBytes(count);
+            remaining -= count;
+        }
+        return written;
+    }
+
+    fn checkOutput(self: *const Session) Error!bool {
+        switch (self.state) {
+            .open, .closing => return true,
+            .closed => return false,
+            .failed => return error.SessionFailed,
+            .cancelled => return error.SessionCancelled,
+        }
+    }
+
+    fn nextOutput(self: *Session) ?[]const u8 {
+        std.debug.assert(self.pending == null);
+        if (self.span == null and !self.output.hasPendingSpans()) return null;
         if (self.span == null) {
             var spans: [1]feed.SpanInfo = undefined;
             const count = self.output.drainSpans(&spans);
             std.debug.assert(count == 1 and self.span_offset == 0);
             self.span = spans[0];
         }
-        const bytes = self.span.?.slice()[self.span_offset..];
-        const len: u32 = @intCast(@min(out.len, bytes.len));
-        std.debug.assert(len > 0);
-        @memcpy(out[0..len], bytes[0..len]);
-        const ticket: OutputTicket = .{ .session = self.handle, .request_id = request_id, .len = len };
-        self.pending = ticket;
-        self.last_request_id = request_id;
-        return ticket;
+        return self.span.?.slice()[self.span_offset..];
     }
 
     /// An invalid ticket changes nothing. A valid failed result consumes the
@@ -1045,20 +1188,28 @@ pub const Session = struct {
         std.debug.assert(self.state == .open or self.state == .closing);
         self.pending = null;
         if (result == .failed) {
-            self.cancelSceneFrame();
-            self.state = .failed;
-            self.lifecycle.phase = .failed;
-            self.lifecycle.deadline_ns = null;
-            self.finishPresentation(.failed);
+            self.failOutput();
             return;
         }
+        self.completeOutputBytes(ticket.len);
+    }
+
+    fn failOutput(self: *Session) void {
+        self.cancelSceneFrame();
+        self.state = .failed;
+        self.lifecycle.phase = .failed;
+        self.lifecycle.deadline_ns = null;
+        self.finishPresentation(.failed);
+    }
+
+    fn completeOutputBytes(self: *Session, count: u32) void {
         const span = self.span.?;
-        std.debug.assert(ticket.len <= span.len - self.span_offset);
+        std.debug.assert(count > 0 and count <= span.len - self.span_offset);
         const published_bytes = self.output.getStats().bytes_written;
         std.debug.assert(self.completed_bytes <= published_bytes);
-        std.debug.assert(ticket.len <= published_bytes - self.completed_bytes);
-        self.completed_bytes += ticket.len;
-        self.span_offset += ticket.len;
+        std.debug.assert(count <= published_bytes - self.completed_bytes);
+        self.completed_bytes += count;
+        self.span_offset += count;
         if (self.span_offset == span.len) {
             self.output.releaseSpan(span.slot_index, span.release_id) catch unreachable;
             self.span = null;

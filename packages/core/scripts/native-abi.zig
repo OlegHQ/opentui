@@ -61,6 +61,7 @@ fn callback(comptime T: type) type {
 }
 
 fn name(comptime T: type) []const u8 {
+    if (T == anyopaque) return "void";
     return switch (@typeInfo(T)) {
         .void => "void",
         .int => |info| switch (info.bits) {

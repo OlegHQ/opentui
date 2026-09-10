@@ -1240,6 +1240,53 @@ pub fn ot_session_read_output(
     return c.OT_OK;
 }
 
+const OutputWriter = struct {
+    user_data: ?*anyopaque,
+    callback: *const fn (?*anyopaque, [*]const u8, u32) callconv(.c) i64,
+
+    pub fn write(self: OutputWriter, bytes: []const u8) error{WriteFailed}!usize {
+        const count = self.callback(self.user_data, bytes.ptr, @intCast(bytes.len));
+        if (count < 0 or count > bytes.len) return error.WriteFailed;
+        return @intCast(count);
+    }
+};
+
+pub fn ot_session_drain_output(
+    context: ?*ContextHandle,
+    session_ptr: ?*const c.ot_handle,
+    max_bytes: u32,
+    out_written_ptr: ?*u32,
+    user_data: ?*anyopaque,
+    writer: c.ot_output_write_callback,
+) callconv(.c) c.ot_status {
+    const status = sessionContextStatus(context);
+    if (status != c.OT_OK) return status;
+    const owner = context.?;
+    const id = session_ptr orelse return sessionError(owner, error.InvalidOptions);
+    const out = out_written_ptr orelse return sessionError(owner, error.InvalidOptions);
+    const callback = writer orelse return sessionError(owner, error.InvalidOptions);
+    out.* = owner.core.drainOutput(handleFromC(id.*), OutputWriter{
+        .user_data = user_data,
+        .callback = callback,
+    }, max_bytes) catch |err| return sessionError(owner, err);
+    return c.OT_OK;
+}
+
+pub fn ot_session_drain_stdout(
+    context: ?*ContextHandle,
+    session_ptr: ?*const c.ot_handle,
+    max_bytes: u32,
+    out_written_ptr: ?*u32,
+) callconv(.c) c.ot_status {
+    const status = sessionContextStatus(context);
+    if (status != c.OT_OK) return status;
+    const owner = context.?;
+    const id = session_ptr orelse return sessionError(owner, error.InvalidOptions);
+    const out = out_written_ptr orelse return sessionError(owner, error.InvalidOptions);
+    out.* = owner.core.drainStdout(handleFromC(id.*), max_bytes) catch |err| return sessionError(owner, err);
+    return c.OT_OK;
+}
+
 pub fn ot_session_setup_terminal(
     context: ?*ContextHandle,
     session_ptr: ?*const c.ot_handle,
@@ -4347,6 +4394,52 @@ test "Context ABI diagnostics copy bounded records and preserve failed drains" {
     try std.testing.expectEqualSlices(u8, "1", batch[0].message[0..batch[0].message_len]);
     try std.testing.expectEqualSlices(u8, "62", batch[61].message[0..batch[61].message_len]);
     try std.testing.expectEqual(99, batch[62].reserved);
+}
+
+test "Session native output ABI validates admission before writing and rejects callback reentry" {
+    const handle = try createTestContext(.{ .object_capacity = 2, .render_cells_max = 16 });
+    defer std.testing.expectEqual(c.OT_OK, ot_context_destroy(handle)) catch unreachable;
+    const native_id = try handle.core.createSession(.{ .chunk_size = 4, .chunk_count = 2, .span_capacity = 2 });
+    defer handle.core.cancelSession(native_id) catch unreachable;
+    const id = handleToC(native_id);
+    const Writer = struct {
+        owner: *ContextHandle,
+        calls: u32 = 0,
+        result: i64 = 2,
+        fn write(data: ?*anyopaque, bytes: [*c]const u8, len: u32) callconv(.c) i64 {
+            const self: *@This() = @ptrCast(@alignCast(data.?));
+            self.calls += 1;
+            std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_context_destroy(self.owner)) catch unreachable;
+            std.testing.expectEqualSlices(u8, "safe"[if (self.calls == 1) @as(usize, 0) else 2..], bytes[0..len]) catch unreachable;
+            return self.result;
+        }
+    };
+    var writer: Writer = .{ .owner = handle };
+    var written: u32 = 99;
+    try handle.core.writeSession(native_id, "safe");
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_drain_output(handle, &id, 4, &written, &writer, null));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_drain_output(handle, &id, 0, &written, &writer, Writer.write));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_drain_stdout(handle, &id, 3, &written));
+    var foreign = id;
+    foreign.context_id += 1;
+    try std.testing.expectEqual(c.OT_WRONG_CONTEXT, ot_session_drain_output(handle, &foreign, 4, &written, &writer, Writer.write));
+    try std.testing.expectEqual(c.OT_WRONG_CONTEXT, ot_session_drain_stdout(handle, &foreign, 4, &written));
+    handle.owner_thread += 1;
+    const wrong_thread = ot_session_drain_stdout(handle, &id, 4, &written);
+    handle.owner_thread -= 1;
+    try std.testing.expectEqual(c.OT_WRONG_THREAD, wrong_thread);
+    try std.testing.expectEqual(@as(u32, 99), written);
+    try std.testing.expectEqual(@as(u32, 0), writer.calls);
+    try std.testing.expectEqual(c.OT_OK, ot_session_drain_output(handle, &id, 4, &written, &writer, Writer.write));
+    try std.testing.expectEqual(@as(u32, 2), written);
+    writer.result = 0;
+    try std.testing.expectEqual(c.OT_OK, ot_session_drain_output(handle, &id, 4, &written, &writer, Writer.write));
+    try std.testing.expectEqual(@as(u32, 0), written);
+    writer.result = -1;
+    written = 99;
+    try std.testing.expectEqual(c.OT_OUTPUT_FAILED, ot_session_drain_output(handle, &id, 4, &written, &writer, Writer.write));
+    try std.testing.expectEqual(@as(u32, 99), written);
+    try std.testing.expectEqual(@as(u64, 2), (try handle.core.raw().getSession(native_id)).completed_bytes);
 }
 
 test "Session exit pump ABI validates ownership and preserves rejected outputs" {

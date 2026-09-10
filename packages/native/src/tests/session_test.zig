@@ -5,6 +5,142 @@ const session = @import("../session.zig");
 
 const small: session.Options = .{ .chunk_size = 4, .chunk_count = 3, .span_capacity = 3 };
 
+test "Session native output borrows queued storage and completes only written prefixes" {
+    const owner = try context.Context.init(testing.allocator, std.Io.failing, .{});
+    defer owner.deinit() catch unreachable;
+    const id = try owner.createSession(small);
+    defer owner.cancelSession(id) catch unreachable;
+    const value = try owner.raw().getSession(id);
+    const Writer = struct {
+        owner: *context.Context,
+        value: *session.Session,
+        limit: usize = 2,
+        calls: u32 = 0,
+        bytes: [16]u8 = undefined,
+        len: usize = 0,
+
+        pub fn write(self: *@This(), bytes: []const u8) !usize {
+            self.calls += 1;
+            try testing.expectEqual(self.value.span.?.slice().ptr + self.value.span_offset, bytes.ptr);
+            try testing.expectError(error.ContextBusy, self.owner.cancelSession(self.value.handle));
+            const count = @min(bytes.len, self.limit);
+            @memcpy(self.bytes[self.len..][0..count], bytes[0..count]);
+            self.len += count;
+            return count;
+        }
+    };
+    var writer: Writer = .{ .owner = owner, .value = value };
+    try owner.writeSession(id, "abcdef");
+    try owner.writeSession(id, "Z");
+    try testing.expectError(error.InvalidBudget, owner.drainOutput(id, &writer, 0));
+    try testing.expectEqual(@as(u32, 0), writer.calls);
+    try testing.expectEqual(@as(u32, 2), try owner.drainOutput(id, &writer, 4));
+    try testing.expectEqual(@as(u64, 2), value.completed_bytes);
+    try testing.expectEqual(@as(u64, 7), value.getStats().outstanding_bytes);
+    writer.limit = 0;
+    try testing.expectEqual(@as(u32, 0), try owner.drainOutput(id, &writer, 4));
+    try testing.expectEqual(@as(u64, 2), value.completed_bytes);
+    var copy: [1]u8 = undefined;
+    const ticket = (try owner.readOutput(id, &copy)).?;
+    try testing.expectEqualStrings("c", &copy);
+    try testing.expectError(error.Busy, owner.drainOutput(id, &writer, 4));
+    try owner.completeOutput(id, ticket, .written);
+    writer.limit = 4;
+    try testing.expectEqual(@as(u32, 1), try owner.drainOutput(id, &writer, 4));
+    try testing.expectEqual(@as(u64, 3), value.getStats().outstanding_bytes);
+    try testing.expectEqual(@as(u32, 1), try owner.drainOutput(id, &writer, 1));
+    try owner.beginSessionClose(id);
+    try testing.expectEqual(@as(u32, 1), try owner.drainOutput(id, &writer, 4));
+    try testing.expectEqual(@as(u32, 1), try owner.drainOutput(id, &writer, 4));
+    try testing.expectEqualStrings("abdefZ", writer.bytes[0..writer.len]);
+    try testing.expectEqual(.closed, value.state);
+    try testing.expect(value.isDrained());
+    const calls = writer.calls;
+    try testing.expectEqual(@as(u32, 0), try owner.drainOutput(id, &writer, 4));
+    try testing.expectEqual(calls, writer.calls);
+}
+
+test "Session native output pressure and failure never replay accepted bytes" {
+    const Writer = struct {
+        result: enum { blocked, failed, invalid } = .blocked,
+        pub fn write(self: *@This(), bytes: []const u8) !usize {
+            return switch (self.result) {
+                .blocked => error.WouldBlock,
+                .failed => error.WriteFailed,
+                .invalid => bytes.len + 1,
+            };
+        }
+    };
+    for ([_]bool{ false, true }) |invalid| {
+        const owner = try context.Context.init(testing.allocator, std.Io.failing, .{});
+        defer owner.deinit() catch unreachable;
+        const id = try owner.createSession(small);
+        defer owner.cancelSession(id) catch unreachable;
+        const value = try owner.raw().getSession(id);
+        try owner.writeSession(id, "safe");
+        var writer: Writer = .{};
+        try testing.expectEqual(@as(u32, 0), try owner.drainOutput(id, &writer, 4));
+        try testing.expectEqual(@as(u64, 0), value.completed_bytes);
+        try testing.expectEqual(.open, value.state);
+        writer.result = if (invalid) .invalid else .failed;
+        try testing.expectError(error.SessionFailed, owner.drainOutput(id, &writer, 4));
+        try testing.expectEqual(.failed, value.state);
+        try testing.expectEqual(@as(u64, 0), value.completed_bytes);
+        try testing.expectError(error.SessionFailed, owner.drainOutput(id, &writer, 4));
+        var copy: [4]u8 = undefined;
+        try testing.expectError(error.SessionFailed, owner.readOutput(id, &copy));
+    }
+}
+
+test "Session native stdout uses Context IO and retains bytes on nonblocking pressure" {
+    if (@import("../renderer.zig").StdoutOutput.initWithIo(testing.io).windowsConsole) return error.SkipZigTest;
+    const OutputIo = struct {
+        limit: usize = 2,
+        failure: bool = false,
+        value: ?*session.Session = null,
+        calls: u32 = 0,
+
+        const vtable: std.Io.VTable = blk: {
+            var table = std.Io.failing.vtable.*;
+            table.operate = operate;
+            break :blk table;
+        };
+
+        fn operate(data: ?*anyopaque, operation: std.Io.Operation) std.Io.Cancelable!std.Io.Operation.Result {
+            const self: *@This() = @ptrCast(@alignCast(data.?));
+            const write = operation.file_write_streaming;
+            self.calls += 1;
+            std.debug.assert(write.file.handle == std.Io.File.stdout().handle);
+            std.debug.assert(write.header.len == 0 and write.data.len == 1 and write.splat == 1);
+            const value = self.value.?;
+            std.debug.assert(write.data[0].ptr == value.span.?.slice().ptr + value.span_offset);
+            if (self.failure) return .{ .file_write_streaming = error.InputOutput };
+            if (self.limit == 0) return .{ .file_write_streaming = error.WouldBlock };
+            return .{ .file_write_streaming = @min(write.data[0].len, self.limit) };
+        }
+    };
+    var output: OutputIo = .{};
+    const owner = try context.Context.init(testing.allocator, .{ .userdata = &output, .vtable = &OutputIo.vtable }, .{});
+    defer owner.deinit() catch unreachable;
+    const id = try owner.createSession(small);
+    defer owner.cancelSession(id) catch unreachable;
+    const value = try owner.raw().getSession(id);
+    output.value = value;
+    try owner.writeSession(id, "safe");
+    try testing.expectEqual(@as(u32, 2), try owner.drainStdout(id, 4));
+    try testing.expectEqual(@as(u32, 1), output.calls);
+    output.limit = 0;
+    try testing.expectEqual(@as(u32, 0), try owner.drainStdout(id, 4));
+    try testing.expectEqual(@as(u32, 2), output.calls);
+    try testing.expectEqual(@as(u64, 2), value.completed_bytes);
+    try testing.expectEqual(.open, value.state);
+    output.failure = true;
+    try testing.expectError(error.SessionFailed, owner.drainStdout(id, 4));
+    try testing.expectEqual(@as(u32, 3), output.calls);
+    try testing.expectEqual(@as(u64, 2), value.completed_bytes);
+    try testing.expectEqual(.failed, value.state);
+}
+
 test "Session output copies input and advances only completed prefixes in byte order" {
     const owner = try context.Context.init(testing.allocator, std.Io.failing, .{});
     defer owner.deinit() catch unreachable;

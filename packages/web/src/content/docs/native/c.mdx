@@ -165,6 +165,9 @@ The [host-drawing extension](#add-host-drawing) below uses frame steps when the 
 
 ### Deliver the queued bytes
 
+You can deliver output directly with `ot_session_drain_stdout` or a native writer passed to `ot_session_drain_output`.
+These operations record completion without a host byte buffer.
+The example below uses the copy route, which also works with asynchronous host streams.
 Reading output copies bytes into your buffer and returns an output _ticket_ identifying that copy.
 Report success only after its bytes reach the destination.
 Here, `fwrite` and `fflush` deliver them to a file. A terminal or network writer would take their place.

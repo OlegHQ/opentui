@@ -2457,6 +2457,41 @@ ot_status ot_session_read_output(
     uint32_t capacity,
     ot_output_ticket *out_ticket);
 
+/* Borrow the next queued span for one synchronous writer call, at most max_bytes
+ * (which must be positive). The callback returns the delivered prefix length,
+ * zero for backpressure, or -1 for failure. It must not retain bytes, report
+ * buffered-but-unwritten bytes as delivered, or reenter mutating Context calls.
+ * No callback or user_data is retained. A pending copy ticket returns OT_OUTPUT_BUSY.
+ * Partial writes keep the remaining bytes queued. Failure or an invalid count
+ * stops transport with OT_OUTPUT_FAILED; bytes are never replayed. Successful
+ * writes publish frame presentation at the same endpoint as complete_output.
+ * out_written is zero for an empty/closed queue or backpressure, and is unchanged
+ * on error. A nonempty writer call can block only as long as its writer does. */
+typedef int64_t (*ot_output_write_callback)(void *user_data, const uint8_t *bytes, uint32_t byte_count);
+ot_status ot_session_drain_output(
+    ot_context *context,
+    const ot_handle *session,
+    uint32_t max_bytes,
+    uint32_t *out_written,
+    void *user_data,
+    ot_output_write_callback writer);
+
+/* Deliver directly to process stdout through Context I/O, without a host byte
+ * buffer or completion ticket. Same completion/failure rules as drain_output.
+ * max_bytes must be at least four for a complete UTF-8 scalar on Windows consoles;
+ * console writes preserve the code page and may span queue chunk boundaries.
+ * An overlapped or unrecognized Windows byte handle returns OT_UNSUPPORTED_RESOURCE
+ * before consuming output; use the host writer for that handle. An incomplete
+ * console scalar with no room for more input, or while new writes are disabled, returns
+ * OT_INVALID_ARGUMENT with its bytes retained for another delivery method.
+ * Nonblocking stdout pressure returns zero; retry on a later turn. A blocking
+ * stdout can block this call. This operation neither closes nor reconfigures stdout. */
+ot_status ot_session_drain_stdout(
+    ot_context *context,
+    const ot_handle *session,
+    uint32_t max_bytes,
+    uint32_t *out_written);
+
 /* success must be 0 or 1. Failure stops the transport without replaying bytes.
  * Wrong-session, stale, altered, and repeated tickets do not consume output. */
 ot_status ot_session_complete_output(

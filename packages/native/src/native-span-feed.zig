@@ -702,6 +702,21 @@ pub const Stream = struct {
         self.allocator.destroy(self);
     }
 
+    /// Observes a bounded prefix without borrowing or consuming queued spans.
+    pub fn copyQueuedPrefix(self: *const Stream, out: []u8) usize {
+        var index = self.span_ring.head;
+        var copied: usize = 0;
+        while (index != SpanRing.none and copied < out.len) {
+            const entry = &self.span_ring.buffer[index];
+            std.debug.assert(entry.state == .queued and entry.span.len != 0);
+            const count = @min(out.len - copied, entry.span.len);
+            @memcpy(out[copied..][0..count], entry.span.slice()[0..count]);
+            copied += count;
+            index = entry.next;
+        }
+        return copied;
+    }
+
     pub fn drainSpans(self: *Stream, out: []SpanInfo) u32 {
         if (out.len == 0) return 0;
         return self.span_ring.popMany(out);

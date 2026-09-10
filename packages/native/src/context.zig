@@ -943,6 +943,20 @@ pub const Context = struct {
         return (try self.getSession(handle)).readOutput(out);
     }
 
+    /// The writer and its borrowed bytes live only for this checked call.
+    /// Use an unbuffered writer that reports bytes delivered to its transport.
+    pub fn drainOutput(self: *Context, handle: Handle, writer: anytype, max_bytes: u32) Error!u32 {
+        try self.beginMutation();
+        defer self.mutating = false;
+        return (try self.getSession(handle)).drainOutput(writer, max_bytes);
+    }
+
+    pub fn drainStdout(self: *Context, handle: Handle, max_bytes: u32) Error!u32 {
+        try self.beginMutation();
+        defer self.mutating = false;
+        return (try self.getSession(handle)).drainStdout(self.io, max_bytes);
+    }
+
     pub fn completeOutput(
         self: *Context,
         handle: Handle,

@@ -7,7 +7,7 @@ description: Understand painting, host drawing, and output delivery as separate 
 
 A _frame_ is one rendered view of the interface.
 To produce it, the native library paints terminal cells and encodes them as output bytes.
-Your program, the _host_, delivers those bytes to the output destination.
+Your program, the _host_, chooses native delivery or forwards those bytes through its own stream.
 
 Drawing and delivery do not necessarily finish together. The cells can be ready while a slow connection is still sending earlier output.
 The frame API keeps these stages separate. It also lets the host draw at specific positions or give other work a turn before painting continues.
@@ -18,9 +18,9 @@ Start with a frame that needs only native drawing:
 
 1. `ot_scene_paint` calculates layout, paints cells in memory, and returns a retained `DONE` draft.
 2. `ot_scene_frame_commit` consumes that draft, encodes its cells, and queues output.
-3. The host reads output, writes it to its transport, and reports delivery with `ot_session_complete_output`.
+3. `ot_session_drain_stdout` writes queued bytes directly and records delivery. For a host-owned stream, read output, write it, and report delivery with `ot_session_complete_output`.
 
-A finished cell grid is not yet a presented frame. The host must report delivery of the frame's output.
+A finished cell grid is not yet a presented frame. Native code publishes the frame only after delivery completes.
 
 `ot_scene_paint` completes that painting in one call.
 To draw part of a frame yourself, use the step-and-resume path below. It uses the same scene and drawing engine.
@@ -128,7 +128,17 @@ A consumed draft is stale even while earlier output remains pending.
 A ticketless submission can report earlier pending output without accepting new work.
 Draft consumption and transport completion are separate events.
 
-The output ticket from `ot_session_read_output` has a different job from the frame ticket:
+Choose how to deliver the Session queue:
+
+- `ot_session_drain_stdout` writes directly from native storage to stdout and records completion.
+- `ot_session_drain_output` passes native storage to a synchronous writer callback and records the delivered prefix.
+- `ot_session_read_output` copies bytes into your buffer. Complete its ticket after your stream finishes writing.
+
+Core uses native delivery for ordinary stdout and copied tickets for custom streams, worker stdout, and overlapped Windows stdout.
+All three operations preserve output order and the frame's presentation endpoint.
+See [Output without a host copy](/docs/native/host-io-time#output-without-a-host-copy) for limits and writer rules.
+
+When you use copied output, its ticket has a different job from the frame ticket:
 
 ```text
 ┌─ Session output queue ──────────────┐

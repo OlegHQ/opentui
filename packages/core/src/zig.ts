@@ -5942,6 +5942,18 @@ export class FFIRenderLib {
         }
   }
 
+  public sessionDrainStdout(context: NativeContextHandle, session: SessionHandle, maxBytes = 65_536): number {
+    const handle = encodeContextHandle(context, session)
+    const limit = toSafeFFIU32Length(maxBytes, "Stdout byte limit")
+    const output = new Uint32Array(1)
+    const pointer = this.nativeContextPointer(context, "ot_session_drain_stdout")
+    nativeResult(
+      "ot_session_drain_stdout",
+      this.opentui.symbols.ot_session_drain_stdout(pointer, handle, limit, output),
+    )
+    return output[0]
+  }
+
   public sessionCompleteOutput(
     context: NativeContextHandle,
     session: SessionHandle,

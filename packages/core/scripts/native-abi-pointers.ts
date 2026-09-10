@@ -41,6 +41,10 @@ const observer = {
 // `retention` describes borrowing the pointer itself, not copying/retaining handles.
 // Changes to C ownership comments require review here: C pointer types cannot prove lifetimes.
 export const nativePointerPolicies = {
+  ot_output_write_callback: {
+    0: { ...optional, source: "native-address" },
+    1: { ...context, source: "native-address" },
+  },
   ot_context_create: { 0: buffer, 1: { ...buffer, result: { nullable: "on-error", release: "ot_context_destroy" } } },
   ot_context_destroy: { 0: context },
   ot_context_get_last_error: { 0: context, 1: buffer },
@@ -211,6 +215,14 @@ export const nativePointerPolicies = {
   ot_session_get_write_limit: { 0: context, 1: buffer, 2: buffer },
   ot_session_write: { 0: context, 1: buffer, 2: empty },
   ot_session_read_output: { 0: context, 1: buffer, 2: empty, 4: buffer },
+  ot_session_drain_output: {
+    0: context,
+    1: buffer,
+    3: buffer,
+    4: { ...optional, source: "view-or-native-address" },
+    5: { ffi: "ptr", nullable: "never", retention: "call", source: "callback" },
+  },
+  ot_session_drain_stdout: { 0: context, 1: buffer, 3: buffer },
   ot_session_complete_output: { 0: context, 1: buffer, 2: buffer },
   ot_session_close: { 0: context, 1: buffer },
   ot_session_cancel: { 0: context, 1: buffer },

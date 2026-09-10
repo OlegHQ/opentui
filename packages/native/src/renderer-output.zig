@@ -168,7 +168,6 @@ fn isWindowsConsole(file: std.Io.File) bool {
 pub const StdoutOutput = struct {
     io: std.Io,
     stdout: std.Io.File,
-    stdoutBuffer: [4096]u8 = undefined,
     utf16Buffer: [UTF16_BUFFER_SIZE]u16 = undefined,
     windowsConsole: bool,
     failed: std.atomic.Value(bool) = .init(false),
@@ -197,43 +196,60 @@ pub const StdoutOutput = struct {
         };
     }
 
-    fn write(ctx: *anyopaque, data: []const u8) void {
-        if (data.len == 0) return;
-
-        const self: *StdoutOutput = @ptrCast(@alignCast(ctx));
-        if (builtin.os.tag == .windows) {
-            if (self.windowsConsole) {
-                self.writeWindowsConsole(data);
-                return;
-            }
+    /// One direct byte write, or one bounded UTF-16 console chunk. An incomplete
+    /// UTF-8 suffix stays with the caller.
+    pub fn writeSome(self: *StdoutOutput, data: []const u8) !usize {
+        errdefer |err| {
+            if (err != error.WouldBlock) self.failed.store(true, .release);
         }
-
-        self.writeBytes(data);
+        if (data.len == 0) return 0;
+        if (builtin.os.tag == .windows and self.windowsConsole) {
+            const prefix = completeUtf8Prefix(data[0..@min(data.len, UTF16_BUFFER_SIZE)]);
+            if (prefix.len == 0) return 0;
+            const chunk = try utf8ToUtf16Chunk(&self.utf16Buffer, prefix);
+            if (!self.writeWindowsConsoleUtf16(self.utf16Buffer[0..chunk.output_len])) {
+                return error.WriteFailed;
+            }
+            return chunk.input_len;
+        }
+        const count = try self.stdout.writeStreaming(self.io, &.{}, &.{data}, 1);
+        if (count == 0) return error.WriteFailed;
+        return count;
     }
 
-    fn writeBytes(self: *StdoutOutput, data: []const u8) void {
-        var stdoutWriter = self.stdout.writerStreaming(self.io, &self.stdoutBuffer);
-        const w = &stdoutWriter.interface;
-        w.writeAll(data) catch {
-            self.failed.store(true, .release);
-            return;
-        };
-        w.flush() catch {
-            self.failed.store(true, .release);
-        };
+    /// Zig's standard stdout handle assumes synchronous Windows I/O. Overlapped
+    /// handles can also belong to the host's completion port; leave those with
+    /// their host writer instead of issuing a synchronous or APC-based write.
+    pub fn supportsDirectWrite(self: *const StdoutOutput) bool {
+        if (builtin.os.tag != .windows or self.windowsConsole) return true;
+        const windows = std.os.windows;
+        var status: windows.IO_STATUS_BLOCK = undefined;
+        var mode: windows.FILE.MODE.INFORMATION = undefined;
+        if (windows.ntdll.NtQueryInformationFile(
+            self.stdout.handle,
+            &status,
+            &mode,
+            @sizeOf(@TypeOf(mode)),
+            .Mode,
+        ) != .SUCCESS) return false;
+        return mode.Mode.IO == .SYNCHRONOUS_ALERT or mode.Mode.IO == .SYNCHRONOUS_NONALERT;
     }
 
-    fn writeWindowsConsole(self: *StdoutOutput, data: []const u8) void {
-        // Frames and control writes are complete UTF-8 units. Drop malformed
-        // input rather than partially emitting an ANSI sequence to the console.
-        if (!std.unicode.utf8ValidateSlice(data)) return;
-
+    fn write(ctx: *anyopaque, data: []const u8) void {
+        const self: *StdoutOutput = @ptrCast(@alignCast(ctx));
+        if (builtin.os.tag == .windows and self.windowsConsole) {
+            // Frames and control writes are complete UTF-8 units. Drop malformed
+            // input rather than partially emitting an ANSI sequence to the console.
+            if (!std.unicode.utf8ValidateSlice(data)) return;
+        }
         var input = data;
         while (input.len > 0) {
-            const chunk = utf8ToUtf16Chunk(&self.utf16Buffer, input) catch unreachable;
-            std.debug.assert(chunk.input_len > 0);
-            if (!self.writeWindowsConsoleUtf16(self.utf16Buffer[0..chunk.output_len])) return;
-            input = input[chunk.input_len..];
+            const count = self.writeSome(input) catch {
+                self.failed.store(true, .release);
+                return;
+            };
+            std.debug.assert(count > 0 and count <= input.len);
+            input = input[count..];
         }
     }
 
@@ -253,6 +269,23 @@ pub const StdoutOutput = struct {
         return true;
     }
 };
+
+fn completeUtf8Prefix(data: []const u8) []const u8 {
+    if (data.len == 0) return data;
+    var start = data.len - 1;
+    while (start > 0 and data.len - start < 4 and data[start] & 0xc0 == 0x80) start -= 1;
+    const length = std.unicode.utf8ByteSequenceLength(data[start]) catch return data;
+    return if (length > data.len - start) data[0..start] else data;
+}
+
+test "stdout UTF-8 prefixes preserve split scalars without consuming a tail" {
+    const text = "Aé東😀";
+    const lengths = [_]usize{ 0, 1, 1, 3, 3, 3, 6, 6, 6, 6, 10 };
+    for (lengths, 0..) |length, end| {
+        try std.testing.expectEqual(length, completeUtf8Prefix(text[0..end]).len);
+    }
+    try std.testing.expectEqualStrings("\xff", completeUtf8Prefix("\xff"));
+}
 
 test "StdoutOutput leaves the Windows console output code page unchanged" {
     if (builtin.os.tag != .windows) return error.SkipZigTest;

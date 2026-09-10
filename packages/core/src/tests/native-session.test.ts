@@ -1,6 +1,6 @@
 import { spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { NativeStatus, resolveRenderLib } from "../zig.js"
 
@@ -161,3 +161,62 @@ test.each(["contexts", "libraries"])("native ownership rejects foreign and expir
   assert.equal(child.status, 0, child.stderr || child.error?.message)
   assert.equal(child.stdout.trim(), "Native session lifecycle passed")
 })
+
+test("normal stdout delivers native bytes and closes without a JavaScript copy or write", () => {
+  const extension = import.meta.url.endsWith(".ts") ? "ts" : "js"
+  const runtimeArgs = "bun" in process.versions ? [] : process.execArgv.filter((arg) => !arg.startsWith("--test"))
+  const child = spawnSync(
+    process.execPath,
+    [...runtimeArgs, fileURLToPath(new URL(`native-session-child.${extension}`, import.meta.url)), "stdout"],
+    { encoding: "utf8", timeout: 30_000 },
+  )
+  assert.equal(child.status, 0, child.stderr || child.error?.message)
+  assert.ok(child.stdout.startsWith("A".repeat(4095) + "中😀"))
+  assert.ok(child.stdout.includes("native tail"))
+  assert.ok(child.stdout.indexOf("native tail") < child.stdout.indexOf("\x1b[?1049l"))
+  assert.ok(child.stdout.endsWith("Native session lifecycle passed\n"))
+})
+
+test.each(["stdout-corked", "stdout-fallback", ...("bun" in process.versions ? [] : ["stdout-worker"])])(
+  "stdout respects runtime routing and queued writes: %s",
+  (scenario) => {
+    const extension = import.meta.url.endsWith(".ts") ? "ts" : "js"
+    const runtimeArgs = "bun" in process.versions ? [] : process.execArgv.filter((arg) => !arg.startsWith("--test"))
+    const child = spawnSync(
+      process.execPath,
+      [...runtimeArgs, fileURLToPath(new URL(`native-session-child.${extension}`, import.meta.url)), scenario],
+      { encoding: "utf8", timeout: 30_000 },
+    )
+    assert.equal(child.status, 0, child.stderr || child.error?.message)
+    const prefix =
+      scenario === "stdout-corked" ? "before|native|" : scenario === "stdout-fallback" ? "fallback|after|" : ""
+    assert.equal(child.stdout, prefix + "Native session lifecycle passed\n")
+  },
+)
+
+;(process.platform === "win32" && !process.versions.bun ? test : test.skip)(
+  "Windows overlapped stdout stays with the runtime writer",
+  async () => {
+    const extension = import.meta.url.endsWith(".ts") ? "ts" : "js"
+    const runtimeArgs = process.execArgv.filter((arg) => !arg.startsWith("--test"))
+    const child = spawn(
+      process.execPath,
+      [
+        ...runtimeArgs,
+        fileURLToPath(new URL(`native-session-child.${extension}`, import.meta.url)),
+        "stdout-overlapped",
+      ],
+      { stdio: ["ignore", "overlapped", "pipe"], timeout: 30_000 },
+    )
+    let stdout = ""
+    let stderr = ""
+    child.stdout!.setEncoding("utf8").on("data", (bytes) => (stdout += bytes))
+    child.stderr!.setEncoding("utf8").on("data", (bytes) => (stderr += bytes))
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.on("error", reject)
+      child.on("close", resolve)
+    })
+    assert.equal(code, 0, stderr)
+    assert.equal(stdout, "fallback|after|Native session lifecycle passed\n")
+  },
+)

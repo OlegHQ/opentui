@@ -1,5 +1,4 @@
 import { Writable } from "node:stream"
-import { writeSync } from "node:fs"
 import { ResourceContext } from "./buffer.js"
 import {
   NativeError,
@@ -34,6 +33,7 @@ export interface NativeSessionScheduler {
 export interface NativeSessionDriverOptions {
   context?: NativeContextOptions
   output?: NativeSessionOptions
+  /** Copy-buffer size for custom Writable destinations. Native stdout needs no buffer. */
   outputBufferSize?: number
   /** Cancel if graceful close has not completed within this finite interval. */
   closeTimeoutMs?: number
@@ -51,6 +51,8 @@ const scheduler: NativeSessionScheduler = {
     return () => clearTimeout(handle)
   },
 }
+
+const emptyOutput = new Uint8Array(0)
 
 type ReadyTask = {
   callback: () => void
@@ -209,7 +211,8 @@ export class NativeSession {
   private attachmentCleanup?: () => void
   readonly resourceContext: ResourceContext
   private readonly nativeSession: Readonly<SessionHandle>
-  private readonly buffer: Uint8Array
+  private buffer: Uint8Array | null
+  private readonly outputBufferSize: number
   private readonly sinkWrite: Writable["write"]
   /** @internal Shared later-turn scheduler; frame and output cancellations remain independent. */
   readonly scheduler: NativeSessionScheduler
@@ -225,7 +228,7 @@ export class NativeSession {
   private presentationWait: ReturnType<typeof completion> | null = null
   private transition: { kind: "setup" | "suspend" | "resume"; wait: ReturnType<typeof completion> } | null = null
   private scheduled: { deadlineNs: bigint | null; cancel: () => void } | null = null
-  private output: { ticket: NativeOutputTicket; completed: boolean; failed: boolean } | null = null
+  private output: { ticket: NativeOutputTicket | null; completed: boolean; failed: boolean } | null = null
   private blocked = false
   private sinkErrorSeen = false
   private detached = false
@@ -264,7 +267,9 @@ export class NativeSession {
     }
     if (!sink.writable || sink.destroyed || sink.writableEnded) throw new Error("NativeSession sink is not writable")
     this.sinkWrite = sink.write
-    this.buffer = new Uint8Array(size)
+    this.outputBufferSize = size
+    // Node workers route stdout through a Writable and do not expose fd 1.
+    this.buffer = sink === process.stdout && process.stdout.fd === 1 ? null : new Uint8Array(size)
     this.scheduler = sessionScheduler(options.scheduler ?? scheduler, (error) => {
       if (this.stopped) {
         if (this.canDetach()) this.detach()
@@ -557,6 +562,9 @@ export class NativeSession {
     try {
       if (
         this.sink !== process.stdout ||
+        process.stdout.fd !== 1 ||
+        this.sink.writableLength !== 0 ||
+        this.sink.writableCorked !== 0 ||
         this._error ||
         this.sink.destroyed ||
         this.sink.errored ||
@@ -566,7 +574,7 @@ export class NativeSession {
         return false
       if (this.output) {
         if (!this.output.completed || this.output.failed) return false
-        this.lib.sessionCompleteOutput(this.context, this.session, this.output.ticket, true)
+        if (this.output.ticket) this.lib.sessionCompleteOutput(this.context, this.session, this.output.ticket, true)
         this.output = null
       }
       // The first pump stops admission. Only the bounded retained queue and native
@@ -576,15 +584,7 @@ export class NativeSession {
         if (status === NativeSessionPumpStatus.Closed) return true
         if (status === NativeSessionPumpStatus.Again) continue
         if (status !== NativeSessionPumpStatus.OutputPending) throw new Error("Unexpected native exit pump status")
-        const ticket = this.lib.sessionReadOutput(this.context, this.session, this.buffer)
-        if (!ticket) throw new Error("NativeSession exit output pending without bytes")
-        let offset = 0
-        while (offset < ticket.byteCount) {
-          const count = writeSync(process.stdout.fd, this.buffer, offset, ticket.byteCount - offset)
-          if (count === 0) throw new Error("NativeSession exit output made no progress")
-          offset += count
-        }
-        this.lib.sessionCompleteOutput(this.context, this.session, ticket, true)
+        if (this.lib.sessionDrainStdout(this.context, this.session) === 0) return false
       }
     } catch (error) {
       this._error ??= asError(error)
@@ -690,12 +690,9 @@ export class NativeSession {
         throw new Error("NativeSession graceful close timed out; output cancelled without restoration")
       }
       if (this.output?.completed) {
-        this.lib.sessionCompleteOutput(this.context, this.session, this.output.ticket, true)
+        if (this.output.ticket) this.lib.sessionCompleteOutput(this.context, this.session, this.output.ticket, true)
         this.output = null
-        if (this.presentationWait && !this.lib.sessionGetRendererState(this.context, this.session).framePending) {
-          this.presentationWait.resolve()
-          this.presentationWait = null
-        }
+        this.completePresentation()
       }
       if (this.output) return
       const result = this.lib.sessionPump(this.context, this.session, now, 1)
@@ -741,30 +738,52 @@ export class NativeSession {
   }
 
   private writeOutput(): void {
+    if (this.buffer === null) {
+      if (this.sink.writableLength > 0 || this.sink.writableCorked > 0) {
+        // An empty write waits behind earlier Writable work without copying payload bytes.
+        this.writeSink(emptyOutput, null)
+        return
+      }
+      try {
+        const written = this.lib.sessionDrainStdout(this.context, this.session)
+        this.completePresentation()
+        this.schedule(written === 0 ? this.scheduler.now() + 1_000_000n : null)
+        return
+      } catch (error) {
+        if (!(error instanceof NativeError) || error.status !== NativeStatus.UnsupportedResource) throw error
+        this.buffer = new Uint8Array(this.outputBufferSize)
+      }
+    }
     const ticket = this.lib.sessionReadOutput(this.context, this.session, this.buffer)
     if (!ticket) throw new Error("NativeSession output pending without bytes")
+    this.writeSink(this.buffer.subarray(0, ticket.byteCount), ticket)
+  }
+
+  private writeSink(bytes: Uint8Array, ticket: NativeOutputTicket | null): void {
     const output = { ticket, completed: false, failed: false }
     this.output = output
     // Set the gate before calling user code so even an inline drain is not lost.
     this.blocked = true
     try {
-      const ready = this.sinkWrite.call(
-        this.sink,
-        this.buffer.subarray(0, ticket.byteCount),
-        "utf8",
-        (error?: Error | null) => {
-          if (this.output !== output || output.completed) return
-          output.completed = true
-          output.failed = error != null
-          if (error && !this.stopped) this._error ??= asError(error)
-          this.schedule()
-        },
-      )
+      const ready = this.sinkWrite.call(this.sink, bytes, "utf8", (error?: Error | null) => {
+        if (this.output !== output || output.completed) return
+        output.completed = true
+        output.failed = error != null
+        if (error && !this.stopped) this._error ??= asError(error)
+        this.schedule()
+      })
       if (!this.stopped && ready) this.blocked = false
     } catch (error) {
       this.output = null
       if (this.stopped) this.detach()
       throw error
+    }
+  }
+
+  private completePresentation(): void {
+    if (this.presentationWait && !this.lib.sessionGetRendererState(this.context, this.session).framePending) {
+      this.presentationWait.resolve()
+      this.presentationWait = null
     }
   }
 

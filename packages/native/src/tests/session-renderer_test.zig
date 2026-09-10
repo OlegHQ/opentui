@@ -22,6 +22,48 @@ fn drain(owner: *context.Context, id: context.Handle, out: []u8) ![]const u8 {
     return out[0..len];
 }
 
+test "Session native output publishes a frame only after its endpoint and preserves it on later failure" {
+    const owner = try context.Context.init(testing.allocator, testing.io, .{});
+    defer owner.deinit() catch unreachable;
+    const id = try owner.createSession(transport);
+    defer owner.cancelSession(id) catch unreachable;
+    try owner.attachSessionRenderer(id, 4, 2, .{ .forwarded_env = &.{} });
+    const cli = try owner.raw().getSessionRenderer(id);
+    const value = try owner.raw().getSession(id);
+    const Writer = struct {
+        failed: bool = false,
+        pub fn write(self: *@This(), bytes: []const u8) error{WriteFailed}!usize {
+            if (self.failed) return error.WriteFailed;
+            return bytes.len;
+        }
+    };
+    var writer: Writer = .{};
+    for ([_]u32{ 11, 22 }) |hit| {
+        try owner.writeSession(id, "before");
+        try paint(cli, "new", hit);
+        try testing.expectEqual(.pending, try owner.renderSession(id, true));
+        const end = value.frame_end_offset.?;
+        try owner.writeSession(id, "after");
+        while (value.completed_bytes < end - 1) {
+            _ = try owner.drainOutput(id, &writer, @intCast(@min(64, end - 1 - value.completed_bytes)));
+            try testing.expectEqual(@as(u32, if (hit == 11) 0 else 11), cli.checkHit(0, 0));
+        }
+        if (hit == 22) {
+            writer.failed = true;
+            try testing.expectError(error.SessionFailed, owner.drainOutput(id, &writer, 64));
+            try testing.expectEqual(@as(u32, 11), cli.checkHit(0, 0));
+            try testing.expectEqual(@as(u64, 1), cli.getRenderStats().frameCount);
+            try testing.expect(value.frame_end_offset == null);
+        } else {
+            try testing.expectEqual(@as(u32, 1), try owner.drainOutput(id, &writer, 1));
+            try testing.expectEqual(hit, cli.checkHit(0, 0));
+            try testing.expect(value.frame_end_offset == null);
+            try testing.expect(!value.isDrained());
+            try testing.expectEqual(@as(u32, 5), try owner.drainOutput(id, &writer, 64));
+        }
+    }
+}
+
 test "Session renderer completes its byte endpoint between raw writes" {
     var environment = std.process.Environ.Map.init(testing.allocator);
     defer environment.deinit();
