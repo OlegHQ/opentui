@@ -324,6 +324,8 @@ export interface NativeScenePaint {
   focusedBorderColor: RGBA
 }
 
+export type NativeScenePaintUpdate = Partial<NativeScenePaint> & { resetBorderCharacters?: true }
+
 export const NATIVE_SCENE_MUTATIONS_MAX = nativeConstants.OT_SCENE_MUTATIONS_MAX
 
 export interface NativeSceneLayout {
@@ -1189,6 +1191,7 @@ function createScenePaintRecord() {
   return {
     record,
     handle: createContextHandleRecord(),
+    payload: new Uint32Array(record.buffer, 8, 16),
     background: new Uint16Array(record.buffer, nativeLayouts.ot_scene_paint_options.fields.background.offset, 4),
     floats: new Float32Array(record.buffer),
     doubles: new Float64Array(record.buffer),
@@ -1196,38 +1199,86 @@ function createScenePaintRecord() {
   }
 }
 
-function encodeScenePaint(paint: NativeScenePaint, scratch: ReturnType<typeof createScenePaintRecord>): void {
+function encodeScenePaint(paint: NativeScenePaintUpdate, scratch: ReturnType<typeof createScenePaintRecord>): number {
   const layout = nativeLayouts.ot_scene_paint_options
   const { record, floats, doubles, colors } = scratch
   const zIndex = paint.zIndex
-  if (!Number.isInteger(zIndex) || zIndex < -0x8000_0000 || zIndex > 0x7fff_ffff) {
-    throw new RangeError("Scene zIndex must be a signed 32-bit integer")
+  let fields = 0
+  if (zIndex !== undefined) {
+    if (!Number.isInteger(zIndex) || zIndex < -0x8000_0000 || zIndex > 0x7fff_ffff) {
+      throw new RangeError("Scene zIndex must be a signed 32-bit integer")
+    }
+    record[layout.fields.z_index.offset / 4] = zIndex
+    fields |= nativeConstants.OT_SCENE_PROPERTY_Z_INDEX
   }
-  record[layout.fields.struct_size.offset / 4] = layout.size
-  record[layout.fields.abi_version.offset / 4] = nativeConstants.OT_CONTEXT_ABI_VERSION
-  record[layout.fields.z_index.offset / 4] = zIndex
   // Mirror scene.zig setPaint's range rules so staged paint cannot fail only at flush time.
-  const opacity = toFFIF32(paint.opacity, "Scene opacity")
-  if (opacity < 0 || opacity > 1) throw new RangeError("Scene opacity must be within 0..1")
-  floats[layout.fields.opacity.offset / 4] = opacity
+  const requestedOpacity = paint.opacity
+  if (requestedOpacity !== undefined) {
+    const opacity = toFFIF32(requestedOpacity, "Scene opacity")
+    if (opacity < 0 || opacity > 1) throw new RangeError("Scene opacity must be within 0..1")
+    floats[layout.fields.opacity.offset / 4] = opacity
+    fields |= nativeConstants.OT_SCENE_PROPERTY_OPACITY
+  }
   const translateX = paint.translateX
   const translateY = paint.translateY
-  if (!Number.isFinite(translateX) || !Number.isFinite(translateY)) {
-    throw new RangeError("Scene translations must be finite numbers")
+  if (translateX !== undefined) {
+    if (!Number.isFinite(translateX)) {
+      throw new RangeError("Scene translations must be finite numbers")
+    }
+    doubles[layout.fields.translate_x.offset / 8] = translateX
+    fields |= nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_X
   }
-  doubles[layout.fields.translate_x.offset / 8] = translateX
-  doubles[layout.fields.translate_y.offset / 8] = translateY
-  const borderSides = toSafeFFIU32Length(paint.border, "Scene border")
-  if (borderSides > 15) throw new RangeError("Scene border sides must use four edge bits")
-  record[layout.fields.border_sides.offset / 4] = borderSides
-  record[layout.fields.should_fill.offset / 4] = toFFIBool(paint.shouldFill, "Scene shouldFill")
-  contextBufferColor(paint.backgroundColor, colors, layout.fields.background.offset / 2)
-  contextBufferColor(paint.borderColor, colors, layout.fields.border_color.offset / 2)
-  const borderStyle = SCENE_BORDER_STYLES.indexOf(paint.borderStyle)
-  if (borderStyle < 0) throw new TypeError("Unknown scene border style")
-  record[layout.fields.border_style.offset / 4] = borderStyle
-  record[layout.fields.focusable.offset / 4] = toFFIBool(paint.focusable, "Scene focusable")
-  contextBufferColor(paint.focusedBorderColor, colors, layout.fields.focused_border_color.offset / 2)
+  if (translateY !== undefined) {
+    if (!Number.isFinite(translateY)) throw new RangeError("Scene translations must be finite numbers")
+    doubles[layout.fields.translate_y.offset / 8] = translateY
+    fields |= nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_Y
+  }
+  const requestedBorder = paint.border
+  if (requestedBorder !== undefined) {
+    const borderSides = toSafeFFIU32Length(requestedBorder, "Scene border")
+    if (borderSides > 15) throw new RangeError("Scene border sides must use four edge bits")
+    record[layout.fields.border_sides.offset / 4] = borderSides
+    fields |= nativeConstants.OT_SCENE_PROPERTY_BORDER
+  }
+  const shouldFill = paint.shouldFill
+  if (shouldFill !== undefined) {
+    record[layout.fields.should_fill.offset / 4] = toFFIBool(shouldFill, "Scene shouldFill")
+    fields |= nativeConstants.OT_SCENE_PROPERTY_SHOULD_FILL
+  }
+  const background = paint.backgroundColor
+  if (background !== undefined) {
+    contextBufferColor(background, colors, layout.fields.background.offset / 2)
+    fields |= nativeConstants.OT_SCENE_PROPERTY_BACKGROUND
+  }
+  const borderColor = paint.borderColor
+  if (borderColor !== undefined) {
+    contextBufferColor(borderColor, colors, layout.fields.border_color.offset / 2)
+    fields |= nativeConstants.OT_SCENE_PROPERTY_BORDER_COLOR
+  }
+  const requestedStyle = paint.borderStyle
+  if (requestedStyle !== undefined) {
+    const borderStyle = SCENE_BORDER_STYLES.indexOf(requestedStyle)
+    if (borderStyle < 0) throw new TypeError("Unknown scene border style")
+    record[layout.fields.border_style.offset / 4] = borderStyle
+    fields |= nativeConstants.OT_SCENE_PROPERTY_BORDER_STYLE
+  }
+  const focusable = paint.focusable
+  if (focusable !== undefined) {
+    record[layout.fields.focusable.offset / 4] = toFFIBool(focusable, "Scene focusable")
+    fields |= nativeConstants.OT_SCENE_PROPERTY_FOCUSABLE
+  }
+  const focusedBorderColor = paint.focusedBorderColor
+  if (focusedBorderColor !== undefined) {
+    contextBufferColor(focusedBorderColor, colors, layout.fields.focused_border_color.offset / 2)
+    fields |= nativeConstants.OT_SCENE_PROPERTY_FOCUSED_BORDER_COLOR
+  }
+  const resetBorderCharacters = paint.resetBorderCharacters
+  if (resetBorderCharacters !== undefined) {
+    if (resetBorderCharacters !== true || requestedStyle === undefined)
+      throw new TypeError("Border character reset requires a border style")
+    fields |= nativeConstants.OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS
+  }
+  return fields
 }
 
 function validateSceneStyle(group: number, kind: number, edge: number, unit: number, value: number, flags: number) {
@@ -1275,58 +1326,56 @@ function validateSceneStyle(group: number, kind: number, edge: number, unit: num
   if (!valid) throw new NativeError("ot_scene_set_style", NativeStatus.InvalidArgument)
 }
 
-type StagedStream = {
-  words: Uint32Array
-  floats: Float32Array
-  colors: Uint16Array
-  count: number
-}
+const scenePropertyFields = [
+  "z_index",
+  "opacity",
+  "translate_x",
+  "translate_y",
+  "border_sides",
+  "should_fill",
+  "background",
+  "border_color",
+  "border_style",
+  "focusable",
+  "focused_border_color",
+] as const
+const scenePropertyWords = scenePropertyFields.map((name) => {
+  const field = nativeLayouts.ot_scene_paint_options.fields[name]
+  return { offset: field.offset / 4, length: field.size / 4 }
+})
+const propertyHeaderWords = nativeLayouts.ot_scene_property_update.size / 4
+const propertySlotWords = nativeConstants.OT_SCENE_PROPERTY_RECORD_MAX / 4
+const propertyStyle = nativeConstants.OT_SCENE_PROPERTY_STYLE
 
-function createStagedStream(entryBytes: number, capacity: number): StagedStream {
-  const buffer = new ArrayBuffer(entryBytes * capacity)
-  return {
-    words: new Uint32Array(buffer),
-    floats: new Float32Array(buffer),
-    colors: new Uint16Array(buffer),
-    count: 0,
+function propertyWordLength(fields: number): number {
+  if (fields === propertyStyle) return 10
+  let words = propertyHeaderWords
+  for (let index = 0; index < scenePropertyWords.length; index++) {
+    if (fields & (1 << index)) words += scenePropertyWords[index].length
   }
+  return (words + 1) & ~1
 }
 
-function growStagedStream(stream: StagedStream, entryBytes: number, limit: number): void {
-  const capacity = stream.words.byteLength / entryBytes
-  if (stream.count < capacity) return
-  if (capacity >= limit) throw new NativeError("ot_scene_flush", NativeStatus.ObjectLimit)
-  const next = createStagedStream(entryBytes, Math.min(limit, capacity * 2))
-  next.words.set(stream.words)
-  stream.words = next.words
-  stream.floats = next.floats
-  stream.colors = next.colors
-}
-
-/** Staged scene style and paint writes, encoded directly into flush-ready wire
- * records for one scene. Native applies styles, then backgrounds, then paints.
- * Style entries are append-only: Yoga applies the last write for a key. A node
- * keeps at most one live background or paint entry per flush; a later full paint
- * marks an earlier background skipped, and a later background patches a staged
- * paint in place. Inputs are validated and read into scratch before any stream
- * changes, so caller getters that reenter cannot leave a half-written entry.
- * Streams double up to OT_SCENE_MUTATIONS_MAX; the owner flushes before a stream
- * would exceed it. */
+/** One ordered property stream. Visual writes coalesce at the node's first-touch
+ * position; last write wins per field. Layout writes stay ordered because Yoga
+ * shorthand/edge and dimension/flex-shrink operations can overlap. There are no
+ * reads or callbacks between records. A successful flush ends coalescing.
+ *
+ * Slots reserve room for any visual mask so coalescing is O(1), without shifting
+ * later records. Borrowing compacts selected fields in place; only a failed flush
+ * expands its suffix for retry. No second wire buffer or skip records are needed.
+ * Scratch snapshots caller getters before publication, including under reentry. */
 export class SceneStaging {
   static readonly limit = nativeConstants.OT_SCENE_MUTATIONS_MAX
-  private static readonly styleBytes = nativeLayouts.ot_scene_style_update.size
-  private static readonly backgroundBytes = nativeLayouts.ot_scene_background_update.size
-  private static readonly paintBytes = nativeLayouts.ot_scene_paint_update.size
-
-  private readonly styles: StagedStream
-  private readonly backgrounds: StagedStream
-  private readonly paints: StagedStream
-  private readonly backgroundBySlot = new Map<number, number>()
+  private words: Uint32Array
+  private floats: Float32Array
   private readonly paintBySlot = new Map<number, number>()
   private context?: NativeContextHandle
   private readonly contextId = new BigUint64Array(1)
   private readonly contextWords = new Uint32Array(this.contextId.buffer)
   private borrowed = false
+  private entryCount = 0
+  private encodedWords = 0
   private handleScratch: ReturnType<typeof createContextHandleRecord> | undefined = createContextHandleRecord()
   private paintScratch: ReturnType<typeof createScenePaintRecord> | undefined = createScenePaintRecord()
 
@@ -1334,58 +1383,23 @@ export class SceneStaging {
     if (!Number.isInteger(initialCapacity) || initialCapacity < 1 || initialCapacity > SceneStaging.limit) {
       throw new RangeError("Scene staging capacity must be within the native mutation limit")
     }
-    this.styles = createStagedStream(SceneStaging.styleBytes, initialCapacity)
-    this.backgrounds = createStagedStream(SceneStaging.backgroundBytes, initialCapacity)
-    this.paints = createStagedStream(SceneStaging.paintBytes, initialCapacity)
+    this.words = new Uint32Array(propertySlotWords * initialCapacity)
+    this.floats = new Float32Array(this.words.buffer)
   }
 
   get pending(): boolean {
-    return this.styles.count !== 0 || this.backgrounds.count !== 0 || this.paints.count !== 0
+    return this.entryCount !== 0
+  }
+  get count(): number {
+    return this.entryCount
+  }
+  get byteLength(): number {
+    return this.encodedWords * 4
+  }
+  get full(): boolean {
+    return this.entryCount === SceneStaging.limit
   }
 
-  get styleCount(): number {
-    return this.styles.count
-  }
-
-  get backgroundCount(): number {
-    return this.backgrounds.count
-  }
-
-  get paintCount(): number {
-    return this.paints.count
-  }
-
-  /** @internal Borrowed until consume() acknowledges the accepted prefix. */
-  _views(context: NativeContextHandle): {
-    styles: Uint32Array | null
-    backgrounds: Uint32Array | null
-    paints: Uint32Array | null
-  } {
-    this.assertWritable()
-    if (this.context !== context) throw new NativeError("ot_scene_flush", NativeStatus.WrongContext)
-    this.borrowed = true
-    return {
-      styles: this.styles.count === 0 ? null : this.styles.words,
-      backgrounds: this.backgrounds.count === 0 ? null : this.backgrounds.words,
-      paints: this.paints.count === 0 ? null : this.paints.words,
-    }
-  }
-
-  /** Whether one more entry of this kind would exceed the flush limit. */
-  get styleFull(): boolean {
-    return this.styles.count >= SceneStaging.limit
-  }
-
-  get backgroundFull(): boolean {
-    return this.backgrounds.count >= SceneStaging.limit
-  }
-
-  get paintFull(): boolean {
-    return this.paints.count >= SceneStaging.limit
-  }
-
-  /** Validates one style value the way `stageStyle` will, so callers staging several
-   * dependent entries can check them all before the first is written. */
   static checkStyleValue(group: number, value: number): number {
     return group === 0 ? toSafeFFIU32Length(value, "Scene enum value") : toFFIF32(value, "Scene style value", true)
   }
@@ -1396,35 +1410,41 @@ export class SceneStaging {
 
   private checkHandle(context: NativeContextHandle, handle: ReturnType<typeof createContextHandleRecord>): void {
     this.assertWritable()
-    const layout = nativeLayouts.ot_handle
-    const offset = layout.fields.context_id.offset / 4
     if (
       this.context !== undefined &&
-      (this.context !== context ||
-        this.contextWords[0] !== handle.words[offset] ||
-        this.contextWords[1] !== handle.words[offset + 1])
+      (this.context !== context || this.contextWords[0] !== handle.words[0] || this.contextWords[1] !== handle.words[1])
     ) {
       throw new NativeError("Context handle", NativeStatus.WrongContext)
     }
-  }
-
-  private checkGeneration(stream: StagedStream, index: number | undefined, stride: number, generation: number): void {
-    if (
-      index !== undefined &&
-      stream.words[(index * stride + nativeLayouts.ot_handle.fields.generation.offset) / 4] !== generation
-    ) {
+    const entry = this.paintBySlot.get(handle.words[2])
+    if (entry !== undefined && this.words[entry * propertySlotWords + 3] !== handle.words[3]) {
       throw new NativeError("Context handle", NativeStatus.StaleHandle)
     }
   }
 
-  /** True only for the first write after a flush, including a flush caused by a payload getter. */
   private bind(context: NativeContextHandle, handle: ReturnType<typeof createContextHandleRecord>): boolean {
     if (this.context !== undefined) return false
     this.context = context
-    const offset = nativeLayouts.ot_handle.fields.context_id.offset / 4
-    this.contextWords[0] = handle.words[offset]
-    this.contextWords[1] = handle.words[offset + 1]
+    this.contextWords[0] = handle.words[0]
+    this.contextWords[1] = handle.words[1]
     return true
+  }
+
+  private reserve(handle: ReturnType<typeof createContextHandleRecord>, fields: number): number {
+    if (this.full) throw new NativeError("ot_scene_flush", NativeStatus.ObjectLimit)
+    if (this.entryCount * propertySlotWords === this.words.length) {
+      const next = new Uint32Array(Math.min(SceneStaging.limit * propertySlotWords, this.words.length * 2))
+      next.set(this.words)
+      this.words = next
+      this.floats = new Float32Array(next.buffer)
+    }
+    const base = this.entryCount++ * propertySlotWords
+    const length = propertyWordLength(fields)
+    this.words.set(handle.words, base)
+    this.words[base + 4] = fields
+    this.words[base + 5] = length * 4
+    this.encodedWords += length
+    return base
   }
 
   stageStyle(
@@ -1438,66 +1458,25 @@ export class SceneStaging {
     flags: number,
   ): boolean {
     this.assertWritable()
-    const styleGroup = toSafeFFIU32Length(group, "Scene style group")
-    const styleKind = toSafeFFIU32Length(kind, "Scene style kind")
-    const styleEdge = toSafeFFIU32Length(edge, "Scene style edge")
-    const styleUnit = toSafeFFIU32Length(unit, "Scene style unit")
-    const styleValue = SceneStaging.checkStyleValue(styleGroup, value)
-    const styleFlags = toSafeFFIU32Length(flags, "Scene style flags")
-    validateSceneStyle(styleGroup, styleKind, styleEdge, styleUnit, styleValue, styleFlags)
-    const layout = nativeLayouts.ot_scene_style_update
-    // Construction writes many styles to the same node; reuse the previous handle encoding.
-    if (this.styles.count !== 0 && this.context === context && node.context === context) {
-      const prevHandle = ((this.styles.count - 1) * layout.size + layout.fields.node.offset) / 4
-      const previous = this.styles.words
-      const slotField = nativeLayouts.ot_handle.fields.slot.offset / 4
-      const generationField = nativeLayouts.ot_handle.fields.generation.offset / 4
-      if (
-        previous[prevHandle + slotField] === node.slot &&
-        previous[prevHandle + generationField] === node.generation
-      ) {
-        this.checkGeneration(
-          this.backgrounds,
-          this.backgroundBySlot.get(node.slot),
-          SceneStaging.backgroundBytes,
-          node.generation,
-        )
-        this.checkGeneration(this.paints, this.paintBySlot.get(node.slot), SceneStaging.paintBytes, node.generation)
-        growStagedStream(this.styles, SceneStaging.styleBytes, SceneStaging.limit)
-        const words = this.styles.words
-        const base = this.styles.count * layout.size
-        const dest = (base + layout.fields.node.offset) / 4
-        words.copyWithin(dest, prevHandle, prevHandle + nativeLayouts.ot_handle.size / 4)
-        words[(base + layout.fields.group.offset) / 4] = styleGroup
-        words[(base + layout.fields.kind.offset) / 4] = styleKind
-        words[(base + layout.fields.edge.offset) / 4] = styleEdge
-        words[(base + layout.fields.unit.offset) / 4] = styleUnit
-        this.styles.floats[(base + layout.fields.value.offset) / 4] = styleValue
-        words[(base + layout.fields.flags.offset) / 4] = styleFlags
-        this.styles.count++
-        return false
-      }
-    }
+    group = toSafeFFIU32Length(group, "Scene style group")
+    kind = toSafeFFIU32Length(kind, "Scene style kind")
+    edge = toSafeFFIU32Length(edge, "Scene style edge")
+    unit = toSafeFFIU32Length(unit, "Scene style unit")
+    value = SceneStaging.checkStyleValue(group, value)
+    flags = toSafeFFIU32Length(flags, "Scene style flags")
+    validateSceneStyle(group, kind, edge, unit, value, flags)
+    // Yoga ignores edges for dimensions; do not let unused u32 bits spill into the unit byte.
+    if (group === 2 && kind < 7) edge = 0
     const scratch = this.handleScratch ?? createContextHandleRecord()
     this.handleScratch = undefined
     try {
       encodeContextHandle(context, node, scratch.record, scratch.words)
       this.checkHandle(context, scratch)
-      const slot = scratch.words[nativeLayouts.ot_handle.fields.slot.offset / 4]
-      const generation = scratch.words[nativeLayouts.ot_handle.fields.generation.offset / 4]
-      this.checkGeneration(this.backgrounds, this.backgroundBySlot.get(slot), SceneStaging.backgroundBytes, generation)
-      this.checkGeneration(this.paints, this.paintBySlot.get(slot), SceneStaging.paintBytes, generation)
-      growStagedStream(this.styles, SceneStaging.styleBytes, SceneStaging.limit)
-      const base = this.styles.count * layout.size
-      const words = this.styles.words
-      words.set(scratch.words, (base + layout.fields.node.offset) / 4)
-      words[(base + layout.fields.group.offset) / 4] = styleGroup
-      words[(base + layout.fields.kind.offset) / 4] = styleKind
-      words[(base + layout.fields.edge.offset) / 4] = styleEdge
-      words[(base + layout.fields.unit.offset) / 4] = styleUnit
-      this.styles.floats[(base + layout.fields.value.offset) / 4] = styleValue
-      words[(base + layout.fields.flags.offset) / 4] = styleFlags
-      this.styles.count++
+      const base = this.reserve(scratch, propertyStyle)
+      this.words[base + 6] = group | (kind << 8) | (edge << 16) | (unit << 24)
+      this.words[base + 7] = flags
+      this.floats[base + 8] = value
+      this.words[base + 9] = 0
       return this.bind(context, scratch)
     } finally {
       this.handleScratch ??= scratch
@@ -1517,40 +1496,7 @@ export class SceneStaging {
       encodeContextHandle(context, node, scratch.handle.record, scratch.handle.words)
       contextBufferColor(color, scratch.background)
       owner?.assertMutable()
-      this.checkHandle(context, scratch.handle)
-      const slot = scratch.handle.words[nativeLayouts.ot_handle.fields.slot.offset / 4]
-      const generation = scratch.handle.words[nativeLayouts.ot_handle.fields.generation.offset / 4]
-      const paintEntry = this.paintBySlot.get(slot)
-      if (paintEntry !== undefined) {
-        this.checkGeneration(this.paints, paintEntry, SceneStaging.paintBytes, generation)
-        const paintLayout = nativeLayouts.ot_scene_paint_update
-        const offset =
-          (paintEntry * paintLayout.size +
-            paintLayout.fields.paint.offset +
-            nativeLayouts.ot_scene_paint_options.fields.background.offset) /
-          2
-        const colors = this.paints.colors
-        colors.set(scratch.background, offset)
-        return false
-      }
-      const layout = nativeLayouts.ot_scene_background_update
-      let entry = this.backgroundBySlot.get(slot)
-      this.checkGeneration(this.backgrounds, entry, SceneStaging.backgroundBytes, generation)
-      if (entry === undefined) {
-        growStagedStream(this.backgrounds, SceneStaging.backgroundBytes, SceneStaging.limit)
-        entry = this.backgrounds.count
-        const base = entry * layout.size
-        this.backgrounds.words.set(scratch.handle.words, (base + layout.fields.node.offset) / 4)
-        this.backgrounds.words[(base + layout.fields.fields.offset) / 4] = nativeConstants.OT_SCENE_UPDATE_APPLY
-        this.backgrounds.words[(base + layout.fields.reserved.offset) / 4] = 0
-        // Reserve only after every fallible write succeeded.
-        this.backgrounds.count++
-        this.backgroundBySlot.set(slot, entry)
-      }
-      const offset = (entry * layout.size + layout.fields.background.offset) / 2
-      const colors = this.backgrounds.colors
-      colors.set(scratch.background, offset)
-      return this.bind(context, scratch.handle)
+      return this.publishPaint(context, nativeConstants.OT_SCENE_PROPERTY_BACKGROUND, scratch)
     } finally {
       this.paintScratch ??= scratch
     }
@@ -1559,119 +1505,154 @@ export class SceneStaging {
   stagePaint(
     context: NativeContextHandle,
     node: SceneNodeHandle,
-    paint: NativeScenePaint,
+    paint: NativeScenePaintUpdate,
     owner?: { assertMutable(): void },
   ): boolean {
     this.assertWritable()
-    // Caller getters may reenter; only idle scratch storage can be reused.
     const scratch = this.paintScratch ?? createScenePaintRecord()
     this.paintScratch = undefined
     try {
       encodeContextHandle(context, node, scratch.handle.record, scratch.handle.words)
-      encodeScenePaint(paint, scratch)
+      const fields = encodeScenePaint(paint, scratch)
       owner?.assertMutable()
-      this.checkHandle(context, scratch.handle)
-      const slot = scratch.handle.words[nativeLayouts.ot_handle.fields.slot.offset / 4]
-      const generation = scratch.handle.words[nativeLayouts.ot_handle.fields.generation.offset / 4]
-      const layout = nativeLayouts.ot_scene_paint_update
-      let entry = this.paintBySlot.get(slot)
-      const background = this.backgroundBySlot.get(slot)
-      this.checkGeneration(this.paints, entry, SceneStaging.paintBytes, generation)
-      this.checkGeneration(this.backgrounds, background, SceneStaging.backgroundBytes, generation)
-      if (entry === undefined) {
-        growStagedStream(this.paints, SceneStaging.paintBytes, SceneStaging.limit)
-        entry = this.paints.count
-        this.paints.words.set(scratch.handle.words, (entry * layout.size + layout.fields.node.offset) / 4)
-        // Reserve only after every fallible write succeeded.
-        this.paints.count++
-        this.paintBySlot.set(slot, entry)
-      }
-      this.paints.words.set(scratch.record, (entry * layout.size + layout.fields.paint.offset) / 4)
-      if (background !== undefined) {
-        // The full paint carries the current background; the earlier entry is superseded.
-        const backgroundLayout = nativeLayouts.ot_scene_background_update
-        this.backgrounds.words[(background * backgroundLayout.size + backgroundLayout.fields.fields.offset) / 4] =
-          nativeConstants.OT_SCENE_UPDATE_SKIP
-        this.backgroundBySlot.delete(slot)
-      }
-      return this.bind(context, scratch.handle)
+      return this.publishPaint(context, fields, scratch)
     } finally {
       this.paintScratch ??= scratch
     }
   }
 
+  private publishPaint(
+    context: NativeContextHandle,
+    fields: number,
+    scratch: ReturnType<typeof createScenePaintRecord>,
+  ): boolean {
+    this.checkHandle(context, scratch.handle)
+    if (fields === 0) return false
+    const slot = scratch.handle.words[2]
+    const entry = this.paintBySlot.get(slot)
+    let base: number
+    if (entry === undefined) {
+      base = this.reserve(scratch.handle, fields)
+      this.paintBySlot.set(slot, base / propertySlotWords)
+    } else {
+      base = entry * propertySlotWords
+      const merged = this.words[base + 4] | fields
+      if (merged !== this.words[base + 4]) {
+        const size = propertyWordLength(merged) * 4
+        this.encodedWords += (size - this.words[base + 5]) / 4
+        this.words[base + 4] = merged
+        this.words[base + 5] = size
+      }
+    }
+    if ((fields & (propertyStyle - 1)) === propertyStyle - 1) {
+      this.words.set(scratch.payload, base + propertyHeaderWords)
+    } else {
+      for (let index = 0; index < scenePropertyWords.length; index++) {
+        if (!(fields & (1 << index))) continue
+        const field = scenePropertyWords[index]
+        for (let word = 0; word < field.length; word++)
+          this.words[base + 4 + field.offset + word] = scratch.record[field.offset + word]
+      }
+    }
+    return this.bind(context, scratch.handle)
+  }
+
+  /** @internal Compact and borrow until consume() acknowledges the native prefix. */
+  _views(context: NativeContextHandle): Uint32Array {
+    this.assertWritable()
+    if (this.context !== context) throw new NativeError("ot_scene_flush", NativeStatus.WrongContext)
+    let dest = 0
+    for (let index = 0; index < this.entryCount; index++) {
+      const source = index * propertySlotWords
+      const fields = this.words[source + 4]
+      const length = this.words[source + 5] / 4
+      if ((fields & (propertyStyle - 1)) === propertyStyle - 1 || fields === propertyStyle) {
+        if (dest !== source) this.words.copyWithin(dest, source, source + length)
+        dest += length
+        continue
+      }
+      this.words.copyWithin(dest, source, source + propertyHeaderWords)
+      let offset = dest + propertyHeaderWords
+      for (let bit = 0; bit < scenePropertyWords.length; bit++) {
+        if (!(fields & (1 << bit))) continue
+        const field = scenePropertyWords[bit]
+        this.words.copyWithin(offset, source + 4 + field.offset, source + 4 + field.offset + field.length)
+        offset += field.length
+      }
+      this.words.fill(0, offset, dest + length)
+      dest += length
+    }
+    this.borrowed = true
+    return this.words
+  }
+
   clear(): void {
     this.assertWritable()
-    this.styles.count = 0
-    this.backgrounds.count = 0
-    this.paints.count = 0
-    this.backgroundBySlot.clear()
+    this.entryCount = 0
+    this.encodedWords = 0
     this.paintBySlot.clear()
     this.context = undefined
   }
 
-  /** Retain rejected work for retry; never replay the prefix native already accepted. */
+  /** Never replay the accepted prefix. Expand only the rejected compact suffix. */
   consume(applied: number): void {
+    if (!Number.isInteger(applied) || applied < 0 || applied > this.entryCount)
+      throw new Error("Invalid scene flush prefix")
+    if (!this.borrowed) throw new Error("Scene flush inputs were not borrowed")
     this.borrowed = false
-    const total = this.styles.count + this.backgrounds.count + this.paints.count
-    if (!Number.isInteger(applied) || applied < 0 || applied > total) throw new Error("Invalid scene flush prefix")
-    if (applied === total) return this.clear()
-    if (applied === 0) return
-    for (const [stream, stride] of [
-      [this.styles, SceneStaging.styleBytes / 4],
-      [this.backgrounds, SceneStaging.backgroundBytes / 4],
-      [this.paints, SceneStaging.paintBytes / 4],
-    ] as const) {
-      const count = Math.min(applied, stream.count)
-      stream.words.copyWithin(0, count * stride, stream.count * stride)
-      stream.count -= count
-      applied -= count
+    if (applied === this.entryCount) return this.clear()
+    let source = 0
+    for (let index = 0; index < applied; index++) source += this.words[source + 5] / 4
+    this.words.copyWithin(0, source, this.encodedWords)
+    this.encodedWords -= source
+    this.entryCount -= applied
+    // Only rejection needs this bounded offset index; successful flushes allocate nothing.
+    const offsets: number[] = []
+    for (let offset = 0; offset < this.encodedWords; offset += this.words[offset + 5] / 4) offsets.push(offset)
+    for (let index = this.entryCount - 1; index >= 0; index--) {
+      source = offsets[index]
+      const dest = index * propertySlotWords
+      const fields = this.words[source + 4]
+      if (fields === propertyStyle) this.words.copyWithin(dest, source, source + 10)
+      else {
+        let offset = source + propertyHeaderWords
+        for (let bit = 0; bit < scenePropertyWords.length; bit++) {
+          if (fields & (1 << bit)) offset += scenePropertyWords[bit].length
+        }
+        for (let bit = scenePropertyWords.length - 1; bit >= 0; bit--) {
+          if (!(fields & (1 << bit))) continue
+          const field = scenePropertyWords[bit]
+          offset -= field.length
+          this.words.copyWithin(dest + 4 + field.offset, offset, offset + field.length)
+        }
+        this.words.copyWithin(dest, source, source + propertyHeaderWords)
+      }
     }
     this.reindex()
   }
 
-  /** Destruction may discard this node's rejected writes, never another node's suffix. */
   discard(node: SceneNodeHandle): void {
     this.assertWritable()
     if (!this.pending || node.context !== this.context || node.contextId !== this.contextId[0]) return
-    const handle = nativeLayouts.ot_handle.fields
-    for (const [stream, stride] of [
-      [this.styles, SceneStaging.styleBytes / 4],
-      [this.backgrounds, SceneStaging.backgroundBytes / 4],
-      [this.paints, SceneStaging.paintBytes / 4],
-    ] as const) {
-      let count = 0
-      for (let index = 0; index < stream.count; index++) {
-        const offset = index * stride
-        if (
-          stream.words[offset + handle.slot.offset / 4] === node.slot &&
-          stream.words[offset + handle.generation.offset / 4] === node.generation
-        )
-          continue
-        if (count !== index) stream.words.copyWithin(count * stride, offset, offset + stride)
-        count++
+    let count = 0
+    for (let index = 0; index < this.entryCount; index++) {
+      const base = index * propertySlotWords
+      if (this.words[base + 2] === node.slot && this.words[base + 3] === node.generation) {
+        this.encodedWords -= this.words[base + 5] / 4
+        continue
       }
-      stream.count = count
+      this.words.copyWithin(count++ * propertySlotWords, base, base + propertySlotWords)
     }
+    this.entryCount = count
     if (!this.pending) this.clear()
     else this.reindex()
   }
 
   private reindex(): void {
-    this.backgroundBySlot.clear()
     this.paintBySlot.clear()
-    const slotWord = nativeLayouts.ot_handle.fields.slot.offset / 4
-    const background = nativeLayouts.ot_scene_background_update
-    for (let index = 0; index < this.backgrounds.count; index++) {
-      const base = (index * background.size) / 4
-      if (
-        this.backgrounds.words[base + background.fields.fields.offset / 4] === nativeConstants.OT_SCENE_UPDATE_APPLY
-      ) {
-        this.backgroundBySlot.set(this.backgrounds.words[base + slotWord], index)
-      }
-    }
-    for (let index = 0; index < this.paints.count; index++) {
-      this.paintBySlot.set(this.paints.words[(index * SceneStaging.paintBytes) / 4 + slotWord], index)
+    for (let index = 0; index < this.entryCount; index++) {
+      const base = index * propertySlotWords
+      if (this.words[base + 4] !== propertyStyle) this.paintBySlot.set(this.words[base + 2], index)
     }
   }
 }
@@ -6233,10 +6214,8 @@ export class FFIRenderLib {
    * the suffix staged so a retry cannot lose writes or replay accepted entries. */
   public sceneFlush(context: NativeContextHandle, staging: SceneStaging): void {
     const operation = "ot_scene_flush"
-    const styleCount = staging.styleCount
-    const backgroundCount = staging.backgroundCount
-    const paintCount = staging.paintCount
-    if (styleCount === 0 && backgroundCount === 0 && paintCount === 0) return
+    const count = staging.count
+    if (count === 0) return
     const applied = this.sceneFlushApplied ?? new Uint32Array(1)
     // Keep the acknowledgement isolated through callbacks and reentrant error handling.
     this.getYogaHost().runMutation(() => {
@@ -6246,23 +6225,14 @@ export class FFIRenderLib {
       let status: NativeStatus
       try {
         const pointer = this.nativeContextPointer(context, operation)
-        status = this.opentui.symbols.ot_scene_flush(
-          pointer,
-          views.styles,
-          styleCount,
-          views.backgrounds,
-          backgroundCount,
-          views.paints,
-          paintCount,
-          applied,
-        )
+        status = this.opentui.symbols.ot_scene_flush(pointer, views, staging.byteLength, applied)
       } finally {
         this.sceneFlushApplied ??= applied
         staging.consume(applied[0])
       }
       if (status !== NativeStatus.Ok) {
         const error = new NativeError(operation, status)
-        error.message += ` after ${applied[0]} of ${styleCount + backgroundCount + paintCount} staged entries`
+        error.message += ` after ${applied[0]} of ${count} staged entries`
         throw error
       }
     })

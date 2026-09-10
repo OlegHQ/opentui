@@ -27,9 +27,16 @@ test("partial paint retains accepted fields and coalesces into a compact record"
     assert.equal(staging.count, 1)
     assert.equal(staging.byteLength, 32)
     lib.sceneFlush(context, staging)
+    // A sparse mask can still round up to 88 bytes; length alone does not mean full paint.
+    staging.stagePaint(context, node, { ...paint({ backgroundColor: RGBA.fromInts(90, 0, 0) }), zIndex: undefined })
+    assert.equal(staging.byteLength, 88)
+    lib.sceneFlush(context, staging)
     const frame = lib.sceneFrameStep(context, session, null, {
-      background: RGBA.fromInts(0, 0, 0), useMouse: false, excludedHitNum: 0,
-      maxLayoutRounds: 8, maxHostRequests: 64,
+      background: RGBA.fromInts(0, 0, 0),
+      useMouse: false,
+      excludedHitNum: 0,
+      maxLayoutRounds: 8,
+      maxHostRequests: 64,
     })
     const lease = lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
     try {
@@ -45,7 +52,7 @@ test("partial paint retains accepted fields and coalesces into a compact record"
 })
 
 test("mixed property prefix retry preserves first-touch order and coalesced suffix", () => {
-  const { context, node, root } = setup()
+  const { context, session, node, root } = setup()
   try {
     const staging = new SceneStaging(1)
     const stale = { ...node, generation: node.generation + 1 }
@@ -58,10 +65,25 @@ test("mixed property prefix retry preserves first-touch order and coalesced suff
     assert.equal(staging.count, 3)
     assert.notEqual(lib.sceneGetStyle(context, node, 4, 0, 0).value, 6)
     staging.discard(stale)
-    staging.stagePaint(context, node, { opacity: 0.75 })
+    staging.stagePaint(context, node, { opacity: 1 })
+    staging.stagePaint(context, root, { opacity: 1 })
     lib.sceneFlush(context, staging)
     assert.equal(lib.sceneGetStyle(context, node, 4, 0, 0).value, 6)
     assert.equal(staging.count, 0)
+    const frame = lib.sceneFrameStep(context, session, null, {
+      background: RGBA.fromInts(0, 0, 0),
+      useMouse: false,
+      excludedHitNum: 0,
+      maxLayoutRounds: 8,
+      maxHostRequests: 64,
+    })
+    const lease = lib.sceneFrameAcquireBufferLease(context, session, frame, "next")
+    try {
+      assert.deepEqual([...new Uint16Array(toArrayBuffer(lease.bg, 2 * 8, 8))], [3, 0, 0, 255])
+    } finally {
+      lib.contextReleaseBufferLease(context, lease.handle)
+      lib.sceneFrameCancel(context, session, frame.frameId)
+    }
   } finally {
     lib.destroyContext(context)
   }
@@ -127,9 +149,8 @@ test("staging encodes every entry kind and applies them in one native admission"
     staging.stageStyle(context, node, 4, 1, 0, 1, 2, 0)
     staging.stageStyle(context, node, 1, 0, 0, 0, 3, 0)
     staging.stagePaint(context, node, paint({ zIndex: 7 }))
-    assert.equal(staging.styleCount, 3)
-    assert.equal(staging.paintCount, 1)
-    assert.equal(staging.backgroundCount, 0)
+    assert.equal(staging.count, 4)
+    assert.equal(staging.byteLength, 3 * 40 + 88)
     assert.ok(staging.pending)
     lib.sceneFlush(context, staging)
     assert.ok(!staging.pending)
@@ -155,19 +176,17 @@ test("staging keeps one live background or paint entry per node", () => {
     // Repeated backgrounds coalesce into one entry.
     staging.stageBackground(context, node, RGBA.fromInts(10, 0, 0))
     staging.stageBackground(context, node, RGBA.fromInts(20, 0, 0))
-    assert.equal(staging.backgroundCount, 1)
-    // A later full paint supersedes the background entry, which is skipped, not removed.
+    assert.equal(staging.count, 3)
+    // A later full paint merges into the same first-touch record.
     staging.stagePaint(context, node, paint({ backgroundColor: RGBA.fromInts(30, 0, 0) }))
-    assert.equal(staging.backgroundCount, 1)
-    assert.equal(staging.paintCount, 1)
+    assert.equal(staging.count, 3)
     // A background after a staged paint patches that paint in place.
     staging.stageBackground(context, node, RGBA.fromInts(40, 0, 0))
-    assert.equal(staging.backgroundCount, 1)
-    assert.equal(staging.paintCount, 1)
+    assert.equal(staging.count, 3)
     // Other nodes stay independent.
     staging.stageBackground(context, root, RGBA.fromInts(50, 0, 0))
-    assert.equal(staging.backgroundCount, 2)
-    // Native accepts the skipped entry, the patched paint, and the root background together.
+    assert.equal(staging.count, 4)
+    // Native accepts layout, patched paint, and root background in stream order.
     lib.sceneFlush(context, staging)
     assert.ok(!staging.pending)
     const frame = lib.sceneFrameStep(context, session, null, {
@@ -195,7 +214,7 @@ test("staging validates inputs before touching any stream", () => {
   try {
     const staging = new SceneStaging()
     staging.stageStyle(context, node, 4, 0, 0, 1, 1, 0)
-    const before = staging.styleCount
+    const before = staging.count
     // Native admission rules are enforced synchronously, mirroring context.zig sceneSetStyle.
     for (const [group, kind, edge, unit, value, flags] of [
       [3, 0, 0, 1, 1, 0],
@@ -213,15 +232,15 @@ test("staging validates inputs before touching any stream", () => {
     }
     assert.throws(() => staging.stageStyle(context, node, 4, 0, 0, 1, Infinity, 0), RangeError)
     assert.throws(() => staging.stageStyle(context, node, 0, 0, 0, 0, 1.5, 0), RangeError)
-    assert.equal(staging.styleCount, before)
+    assert.equal(staging.count, before)
     const invalidColor = RGBA.fromInts(0, 0, 0)
     invalidColor.buffer[3] = 256
     assert.throws(() => staging.stageBackground(context, node, invalidColor), /RGBA channels|color intent/)
-    assert.equal(staging.backgroundCount, 0)
+    assert.equal(staging.count, before)
     assert.throws(() => staging.stagePaint(context, node, paint({ opacity: 2 })), RangeError)
     assert.throws(() => staging.stagePaint(context, node, paint({ border: 16 })), RangeError)
     assert.throws(() => staging.stagePaint(context, node, paint({ zIndex: 1.5 })), RangeError)
-    assert.equal(staging.paintCount, 0)
+    assert.equal(staging.count, before)
     // Handles from a different context are rejected before encoding.
     const other = lib.createContext({ objectCapacity: 2, renderCellsMax: 8 })
     try {
@@ -232,7 +251,7 @@ test("staging validates inputs before touching any stream", () => {
     } finally {
       lib.destroyContext(other)
     }
-    assert.equal(staging.styleCount, before)
+    assert.equal(staging.count, before)
     // The valid prefix still applies.
     lib.sceneFlush(context, staging)
     assert.equal(lib.sceneGetStyle(context, node, 4, 0, 0).value, 1)
@@ -258,10 +277,8 @@ test("staging reentry from caller getters cannot leave a half-written entry", ()
       },
     })
     staging.stagePaint(context, node, nested)
-    assert.equal(staging.paintCount, 2)
-    // The reentrant background for `node` landed before the outer paint reserved its entry, so the
-    // outer paint supersedes it: the entry stays in the stream, marked skipped.
-    assert.equal(staging.backgroundCount, 1)
+    // The outer paint merges into the background reserved by its getter.
+    assert.equal(staging.count, 2)
     lib.sceneFlush(context, staging)
     const failing = paint({ zIndex: 3 })
     Object.defineProperty(failing, "translateX", {
@@ -271,8 +288,7 @@ test("staging reentry from caller getters cannot leave a half-written entry", ()
       },
     })
     assert.throws(() => staging.stagePaint(context, node, failing), RangeError)
-    assert.equal(staging.paintCount, 0)
-    assert.equal(staging.styleCount, 1)
+    assert.equal(staging.count, 1)
     lib.sceneFlush(context, staging)
     assert.equal(lib.sceneGetStyle(context, node, 4, 0, 0).value, 4)
   } finally {
@@ -288,17 +304,16 @@ test("staging streams grow to the native limit and refuse to exceed it", () => {
     for (let index = 0; index < NATIVE_SCENE_MUTATIONS_MAX; index++) {
       staging.stageStyle(context, node, 4, 0, 0, 1, index + 1, 0)
     }
-    assert.ok(staging.styleFull)
-    assert.ok(!staging.paintFull)
+    assert.ok(staging.full)
     assert.throws(
       () => staging.stageStyle(context, node, 4, 0, 0, 1, 1, 0),
       (error: unknown) => error instanceof NativeError && error.status === NativeStatus.ObjectLimit,
     )
     lib.sceneFlush(context, staging)
     assert.equal(flush.mock.calls.length, 1)
-    assert.equal(flush.mock.calls[0][2], NATIVE_SCENE_MUTATIONS_MAX)
+    assert.equal(flush.mock.calls[0][2], NATIVE_SCENE_MUTATIONS_MAX * 40)
     assert.equal(lib.sceneGetStyle(context, node, 4, 0, 0).value, NATIVE_SCENE_MUTATIONS_MAX)
-    assert.ok(!staging.styleFull)
+    assert.ok(!staging.full)
     assert.throws(() => new SceneStaging(0), RangeError)
     assert.throws(() => new SceneStaging(NATIVE_SCENE_MUTATIONS_MAX + 1), RangeError)
   } finally {
@@ -323,10 +338,10 @@ test("flush retains rejected entries until retry or explicit disposal", () => {
         /after 1 of 3 staged entries/.test(error.message),
     )
     assert.ok(staging.pending)
-    assert.equal(staging.styleCount, 2)
+    assert.equal(staging.count, 2)
     assert.equal(lib.sceneGetStyle(context, node, 4, 0, 0).value, 6)
     staging.discard({ ...node, generation: node.generation + 1 })
-    assert.equal(staging.styleCount, 1)
+    assert.equal(staging.count, 1)
     // The remaining suffix still applies, followed by later writes.
     staging.stageStyle(context, node, 4, 0, 0, 1, 9, 0)
     lib.sceneFlush(context, staging)
@@ -374,6 +389,19 @@ test("staged style validation matches checked Yoga admission", () => {
         }
       }
     }
+  } finally {
+    lib.destroyContext(context)
+  }
+})
+
+test("dimension records canonicalize ignored edges before packing byte selectors", () => {
+  const { context, node } = setup()
+  try {
+    const staging = new SceneStaging()
+    // Checked Yoga ignores the edge selector for dimensions, including large u32 values.
+    staging.stageStyle(context, node, 2, 0, 0xffffffff, 1, 7, 0)
+    lib.sceneFlush(context, staging)
+    assert.deepEqual(lib.sceneGetStyle(context, node, 2, 0, 0), { unit: 1, value: 7 })
   } finally {
     lib.destroyContext(context)
   }

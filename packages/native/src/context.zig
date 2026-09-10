@@ -1933,16 +1933,7 @@ pub const Context = struct {
     }
 
     pub fn sceneSetBoxBorderStyle(self: *Context, handle: Handle, style: u32, sides: u32) !void {
-        try self.beginMutation();
-        defer self.mutating = false;
-        const value = try self.sceneMutableNode(handle);
-        const node = value.scene_node.?;
-        if (node.kind != 1) return error.WrongKind;
-        var paint = node.paint;
-        paint.borderStyle = style;
-        paint.borderSides = sides;
-        try node.owner.setPaint(value, paint);
-        if (node.control.box) |details| details.custom_border_chars = null;
+        return self.scenePatchPaint(handle, 16 | 256 | 4096, .{ .borderStyle = style, .borderSides = sides });
     }
 
     pub fn sceneSetEditorView(self: *Context, handle: Handle, view_handle: ?Handle) !void {
@@ -2120,19 +2111,33 @@ pub const Context = struct {
         try node.scene_node.?.owner.setPaint(node, paint);
     }
 
-    pub fn sceneSetBackground(self: *Context, handle: Handle, background: buf.RGBA) !void {
+    /// Unselected fields retain accepted native state; reset bit 12 requires border style.
+    pub fn scenePatchPaint(self: *Context, handle: Handle, fields: u32, paint: scene.Paint) !void {
         try self.beginMutation();
         defer self.mutating = false;
-        return self.sceneSetBackgroundLocked(handle, background);
+        return self.scenePatchPaintLocked(handle, fields, paint);
     }
 
-    /// Caller holds the mutation admission; used by ot_scene_flush to admit once per batch.
-    pub fn sceneSetBackgroundLocked(self: *Context, handle: Handle, background: buf.RGBA) !void {
+    pub fn scenePatchPaintLocked(self: *Context, handle: Handle, fields: u32, paint: scene.Paint) !void {
         std.debug.assert(self.mutating);
-        const node = try self.sceneMutableNode(handle);
-        var paint = node.scene_node.?.paint;
-        paint.background = background;
-        try node.scene_node.?.owner.setPaint(node, paint);
+        const value = try self.sceneMutableNode(handle);
+        const node = value.scene_node.?;
+        const reset = fields & 4096 != 0;
+        if (reset and node.kind != 1) return error.WrongKind;
+        if (reset and fields & 256 == 0) return error.InvalidOptions;
+        const paint_fields = fields & ~@as(u32, 4096);
+        if (paint_fields == scene.paint_fields_all) {
+            try node.owner.setPaint(value, paint);
+        } else {
+            try node.owner.setPaintPartial(value, paint_fields, paint);
+        }
+        if (reset) {
+            if (node.control.box) |details| details.custom_border_chars = null;
+        }
+    }
+
+    pub fn sceneSetBackground(self: *Context, handle: Handle, background: buf.RGBA) !void {
+        return self.scenePatchPaint(handle, 64, .{ .background = background });
     }
 
     pub fn sceneSetViewport(self: *Context, handle: Handle, viewport_handle: ?Handle) !void {

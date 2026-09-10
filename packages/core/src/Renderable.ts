@@ -311,7 +311,12 @@ export abstract class Renderable extends BaseRenderable {
   private _nativeSceneResize = false
   private _nativeSceneResizeCallbacks?: { onResize: unknown; onLayoutResize: unknown }
   private _nativeScenePaintBuffer?: { frameId: bigint; buffer: OptimizedBuffer }
-  private _nativeSceneHookLayout?: { revision: number; layout?: NativeSceneLayout; paintLayout?: NativeSceneLayout }
+  private _nativeSceneHookLayout?: {
+    revision: number
+    layout?: NativeSceneLayout
+    paintRevision?: number
+    paintLayout?: NativeSceneLayout
+  }
   private _nativeSceneMethods?: Partial<Record<(typeof nativeSceneMethodNames)[number], unknown>>
   private _nativeSceneMethodsPending = false
   private _mouseListener: ((event: MouseEvent) => void) | null = null
@@ -698,11 +703,24 @@ export abstract class Renderable extends BaseRenderable {
 
   // Host paint uses the prepared snapshot even after same-frame reparenting.
   protected get _screenX(): number {
-    return this._nativeSceneHookLayout?.paintLayout?.screenX ?? this.screenX
+    return this.getNativeScenePaintLayout()?.screenX ?? this.screenX
   }
 
   protected get _screenY(): number {
-    return this._nativeSceneHookLayout?.paintLayout?.screenY ?? this.screenY
+    return this.getNativeScenePaintLayout()?.screenY ?? this.screenY
+  }
+
+  private getNativeScenePaintLayout(): NativeSceneLayout | undefined {
+    const cached = this._nativeSceneHookLayout
+    if (!cached) return undefined
+    const scene = this._ctx.nativeScene
+    const revision = scene.currentGeometryRevision
+    if (!this._isDestroyed && cached.paintRevision !== revision) {
+      // Native preserves prepared membership while accepting explicit translations.
+      cached.paintLayout = scene.getLayout(this, "paint")
+      cached.paintRevision = revision
+    }
+    return cached.paintLayout
   }
 
   public get x(): number {
@@ -1779,8 +1797,8 @@ export abstract class Renderable extends BaseRenderable {
     }
   }
 
-  protected setNativeScenePaint(paint: Partial<NativeScenePaint> = {}): void {
-    this._ctx.nativeScene.setPaint(this, { ...this.getNativeScenePaint(), ...paint })
+  protected setNativeScenePaint(paint: Partial<NativeScenePaint> = this.getNativeScenePaint()): void {
+    this._ctx.nativeScene.setPaint(this, paint)
   }
 
   // Share accessor functions across nodes; retain handler identity per node.
@@ -2085,6 +2103,7 @@ export abstract class Renderable extends BaseRenderable {
       ) {
         this._nativeSceneHookLayout.paintLayout =
           (currentGeometry && request.paintLayout) || this._ctx.nativeScene.getLayout(this, "paint")
+        this._nativeSceneHookLayout.paintRevision = revision
       }
       // Text/editor bodies draw into the supplied destination before native composition.
       let renderBuffer =

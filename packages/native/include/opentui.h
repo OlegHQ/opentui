@@ -633,52 +633,64 @@ ot_status ot_scene_get_style(ot_context *, const ot_handle *node, uint32_t group
  * focusable is 0 or 1. New nodes default to 0 and focused color {0,170,255,255}.
  * Border layout widths and paint properties publish together on acceptance. */
 ot_status ot_scene_set_paint(ot_context *, const ot_handle *node, const ot_scene_paint_options *);
-/* --- Staged scene mutations ---
- * ot_scene_flush applies collected style, background, and paint updates under one
- * mutation admission. Entries apply in array order: all styles, then all backgrounds,
- * then all paints. Callers must not submit both a live background entry and a paint
- * entry for the same node in one flush; a background entry whose fields equal
- * OT_SCENE_UPDATE_SKIP is consumed without effect. The first rejected entry stops the
- * flush; out_applied is the exact count of consumed entries across the three arrays in
- * apply order, including skipped entries. No rollback occurs. Each array admits at most
- * OT_SCENE_MUTATIONS_MAX entries; an oversized count returns OT_OBJECT_LIMIT with zero
- * applied before inspecting entries. Style and background entries are plain value
- * records without size/version headers; the paint entry's embedded options carry their
- * own size/version. Arrays are borrowed only for this call and must not alias
- * out_applied. Background entries copy four color words and leave all other paint
- * properties unchanged, with the same color validation as ot_scene_set_paint.
- * A NULL array is valid only with a zero count. out_applied is required
- * and is initialized to zero even when Context admission fails. */
-#define OT_SCENE_UPDATE_SKIP UINT32_C(0)
-#define OT_SCENE_UPDATE_APPLY UINT32_C(1)
+/* --- Staged scene properties ---
+ * One borrowed byte stream, one mutation admission. Records apply in stream order;
+ * each record publishes atomically, including border appearance and Yoga widths.
+ * The first rejected record stops the call. out_applied counts complete accepted
+ * RECORDS, not bytes; the rejected record and suffix remain unapplied. No rollback.
+ * Admission/null/byte-limit failures consume zero. The record limit stops before
+ * record OT_SCENE_MUTATIONS_MAX + 1, preserving the accepted prefix.
+ *
+ * Each record starts with this 24-byte header. Values use native byte order and
+ * follow in increasing field-bit order, tightly packed, with zero padding to an
+ * 8-byte record size. Payload values may be unaligned. size_bytes must equal the
+ * size implied by fields. Unknown/empty masks and nonzero padding are rejected.
+ * Unselected visual fields retain accepted native values. RESET_BORDER_CHARACTERS
+ * carries no payload, requires BORDER_STYLE, and clears custom border characters
+ * after successful border-width publication.
+ *
+ * STYLE must be the sole bit and carries ot_scene_style_property (40 bytes total).
+ * Visual records are 32..88 bytes; a color/scalar costs 32 and all fields cost 88.
+ * NULL input requires zero bytes. out_applied is required, initialized even on
+ * failed Context admission, and must not alias input. Input is borrowed only for
+ * this call. The ABI requires matching headers and artifacts. */
+#define OT_SCENE_PROPERTY_Z_INDEX UINT32_C(1)
+#define OT_SCENE_PROPERTY_OPACITY UINT32_C(2)
+#define OT_SCENE_PROPERTY_TRANSLATE_X UINT32_C(4)
+#define OT_SCENE_PROPERTY_TRANSLATE_Y UINT32_C(8)
+#define OT_SCENE_PROPERTY_BORDER UINT32_C(16)
+#define OT_SCENE_PROPERTY_SHOULD_FILL UINT32_C(32)
+#define OT_SCENE_PROPERTY_BACKGROUND UINT32_C(64)
+#define OT_SCENE_PROPERTY_BORDER_COLOR UINT32_C(128)
+#define OT_SCENE_PROPERTY_BORDER_STYLE UINT32_C(256)
+#define OT_SCENE_PROPERTY_FOCUSABLE UINT32_C(512)
+#define OT_SCENE_PROPERTY_FOCUSED_BORDER_COLOR UINT32_C(1024)
+#define OT_SCENE_PROPERTY_STYLE UINT32_C(2048)
+#define OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS UINT32_C(4096)
+#define OT_SCENE_PROPERTY_RECORD_MAX UINT32_C(88)
+#define OT_SCENE_PROPERTY_BYTES_MAX (OT_SCENE_MUTATIONS_MAX * OT_SCENE_PROPERTY_RECORD_MAX)
 
-typedef struct ot_scene_style_update {
-    ot_handle node;
-    uint32_t group;
-    uint32_t kind;
-    uint32_t edge;
-    uint32_t unit;
-    float value;
-    uint32_t flags;
-} ot_scene_style_update;
-
-typedef struct ot_scene_background_update {
+/* Field types, in bit order: int32_t, float, double, double, uint32_t,
+ * uint32_t, uint16_t[4], uint16_t[4], uint32_t, uint32_t, uint16_t[4].
+ * Field value rules match ot_scene_set_paint. */
+typedef struct ot_scene_property_update {
     ot_handle node;
     uint32_t fields;
-    uint32_t reserved;
-    uint16_t background[4];
-} ot_scene_background_update;
+    uint32_t size_bytes;
+} ot_scene_property_update;
 
-typedef struct ot_scene_paint_update {
-    ot_handle node;
-    ot_scene_paint_options paint;
-} ot_scene_paint_update;
+typedef struct ot_scene_style_property {
+    uint8_t group;
+    uint8_t kind;
+    uint8_t edge;
+    uint8_t unit;
+    uint32_t flags;
+    float value;
+    uint32_t reserved;
+} ot_scene_style_property;
 
 ot_status ot_scene_flush(ot_context *,
-    const ot_scene_style_update *styles, uint32_t style_count,
-    const ot_scene_background_update *backgrounds, uint32_t background_count,
-    const ot_scene_paint_update *paints, uint32_t paint_count,
-    uint32_t *out_applied);
+    const uint8_t *updates, uint32_t byte_count, uint32_t *out_applied);
 /* Retains a Context-owned buffer for a surface node. NULL clears the binding.
  * Replacement retains the new buffer before releasing the previous binding. */
 ot_status ot_scene_set_surface(ot_context *, const ot_handle *node, const ot_handle *buffer);

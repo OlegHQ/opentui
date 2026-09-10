@@ -125,6 +125,10 @@ pub const Paint = struct {
     focusedBorderColor: ansi.RGBA = .{ 0, 170, 255, 255 },
 };
 
+// Field order is the partial-property wire order; bool occupies a u32 on the wire.
+pub const paint_fields = .{ "zIndex", "opacity", "translateX", "translateY", "borderSides", "shouldFill", "background", "borderColor", "borderStyle", "focusable", "focusedBorderColor" };
+pub const paint_fields_all: u32 = (1 << paint_fields.len) - 1;
+
 pub const FrameOptions = struct {
     background: ansi.RGBA,
     use_mouse: bool,
@@ -579,16 +583,31 @@ pub const Scene = struct {
     }
 
     pub fn setPaint(self: *Scene, value: *native.NativeRenderable, paint: Paint) !void {
-        try buffer.validateColor(paint.background);
-        try buffer.validateColor(paint.borderColor);
-        try buffer.validateColor(paint.focusedBorderColor);
-        if (!std.math.isFinite(paint.opacity) or paint.opacity < 0 or paint.opacity > 1 or
-            !std.math.isFinite(paint.translateX) or !std.math.isFinite(paint.translateY) or
-            paint.borderSides > 15 or paint.shouldFill > 1 or paint.borderStyle > 3)
+        return self.setPaintPartial(value, paint_fields_all, paint);
+    }
+
+    pub fn setPaintPartial(self: *Scene, value: *native.NativeRenderable, fields: u32, patch: Paint) !void {
+        if (fields == 0 or fields & ~paint_fields_all != 0) return error.InvalidOptions;
+        if (fields & 64 != 0) try buffer.validateColor(patch.background);
+        if (fields & 128 != 0) try buffer.validateColor(patch.borderColor);
+        if (fields & 1024 != 0) try buffer.validateColor(patch.focusedBorderColor);
+        if ((fields & 2 != 0 and (!std.math.isFinite(patch.opacity) or patch.opacity < 0 or patch.opacity > 1)) or
+            (fields & 4 != 0 and !std.math.isFinite(patch.translateX)) or
+            (fields & 8 != 0 and !std.math.isFinite(patch.translateY)) or
+            (fields & 16 != 0 and patch.borderSides > 15) or
+            (fields & 32 != 0 and patch.shouldFill > 1) or
+            (fields & 256 != 0 and patch.borderStyle > 3))
         {
             return error.InvalidOptions;
         }
         const node = value.scene_node.?;
+        var paint = patch;
+        if (fields != paint_fields_all) {
+            paint = node.paint;
+            inline for (paint_fields, 0..) |name, index| {
+                if (fields & (@as(u32, 1) << index) != 0) @field(paint, name) = @field(patch, name);
+            }
+        }
         if (node.kind != 1 and paint.borderSides != 0) return error.InvalidOptions;
         // Check even a paint-only change against a poisoned/active Yoga owner.
         try yoga.check(yoga.nodeTeardownStatus(value.yoga_node));

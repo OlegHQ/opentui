@@ -222,7 +222,7 @@ export const nativePointerPolicies = {
   ot_scene_set_viewport: { 0: context, 1: buffer, 2: optional },
   ot_scene_set_focus: { 0: context, 1: buffer },
   ot_scene_set_style: { 0: context, 1: buffer },
-  ot_scene_flush: { 0: context, 1: empty, 3: empty, 5: empty, 7: buffer },
+  ot_scene_flush: { 0: context, 1: empty, 3: buffer },
   ot_scene_set_measure: { 0: context, 1: buffer, 2: measure },
   ot_scene_has_measure: { 0: context, 1: buffer, 2: buffer },
   ot_scene_mark_dirty: { 0: context, 1: buffer },

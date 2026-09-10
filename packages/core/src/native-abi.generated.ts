@@ -1,7 +1,7 @@
 // Generated from packages/native/include/opentui.h and scripts/native-abi-pointers.ts.
 // Run `bun run generate:abi` in packages/core. Do not edit.
 // Inspect audit input: bun scripts/native-abi.ts --audit
-// ABI audit SHA-256: ca75083a2c7b5794a1fd02b6b0ec301a2b7f029658214e7b53396b92235073f1
+// ABI audit SHA-256: 421f66db35b3213bf1542c5c326d20d07e3f4432a023003536b54b29a38d75ba
 
 export const nativeSymbols = {
   ot_scene_set_hooks: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
@@ -19,7 +19,7 @@ export const nativeSymbols = {
   ot_scene_set_style: { args: ["ptr", "buffer", "u32", "u32", "u32", "u32", "f32", "u32"], returns: "i32" },
   ot_scene_get_style: { args: ["ptr", "buffer", "u32", "u32", "u32", "buffer"], returns: "i32" },
   ot_scene_set_paint: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
-  ot_scene_flush: { args: ["ptr", "ptr", "u32", "ptr", "u32", "ptr", "u32", "buffer"], returns: "i32" },
+  ot_scene_flush: { args: ["ptr", "ptr", "u32", "buffer"], returns: "i32" },
   ot_scene_set_surface: { args: ["ptr", "buffer", "ptr"], returns: "i32" },
   ot_scene_set_box_details: { args: ["ptr", "buffer", "buffer", "ptr", "u32", "ptr", "u32"], returns: "i32" },
   ot_scene_set_box_border_style: { args: ["ptr", "buffer", "u32", "u32"], returns: "i32" },
@@ -542,35 +542,26 @@ export const nativeLayouts = {
       public_layout: { offset: 64, size: 48, alignment: 8, type: "ot_scene_layout" },
     },
   },
-  ot_scene_style_update: {
-    size: 40,
-    alignment: 8,
-    fields: {
-      node: { offset: 0, size: 16, alignment: 8, type: "ot_handle" },
-      group: { offset: 16, size: 4, alignment: 4, type: "u32" },
-      kind: { offset: 20, size: 4, alignment: 4, type: "u32" },
-      edge: { offset: 24, size: 4, alignment: 4, type: "u32" },
-      unit: { offset: 28, size: 4, alignment: 4, type: "u32" },
-      value: { offset: 32, size: 4, alignment: 4, type: "f32" },
-      flags: { offset: 36, size: 4, alignment: 4, type: "u32" },
-    },
-  },
-  ot_scene_background_update: {
-    size: 32,
+  ot_scene_property_update: {
+    size: 24,
     alignment: 8,
     fields: {
       node: { offset: 0, size: 16, alignment: 8, type: "ot_handle" },
       fields: { offset: 16, size: 4, alignment: 4, type: "u32" },
-      reserved: { offset: 20, size: 4, alignment: 4, type: "u32" },
-      background: { offset: 24, size: 8, alignment: 2, type: "[4]u16" },
+      size_bytes: { offset: 20, size: 4, alignment: 4, type: "u32" },
     },
   },
-  ot_scene_paint_update: {
-    size: 96,
-    alignment: 8,
+  ot_scene_style_property: {
+    size: 16,
+    alignment: 4,
     fields: {
-      node: { offset: 0, size: 16, alignment: 8, type: "ot_handle" },
-      paint: { offset: 16, size: 80, alignment: 8, type: "ot_scene_paint_options" },
+      group: { offset: 0, size: 1, alignment: 1, type: "u8" },
+      kind: { offset: 1, size: 1, alignment: 1, type: "u8" },
+      edge: { offset: 2, size: 1, alignment: 1, type: "u8" },
+      unit: { offset: 3, size: 1, alignment: 1, type: "u8" },
+      flags: { offset: 4, size: 4, alignment: 4, type: "u32" },
+      value: { offset: 8, size: 4, alignment: 4, type: "f32" },
+      reserved: { offset: 12, size: 4, alignment: 4, type: "u32" },
     },
   },
   ot_session_options: {
@@ -1426,8 +1417,21 @@ export const nativeConstants = {
   OT_SCENE_FRAME_RENDER_SELF: 7,
   OT_SCENE_GEOMETRY_PAINT: 1,
   OT_SCENE_GEOMETRY_PUBLIC: 2,
-  OT_SCENE_UPDATE_SKIP: 0,
-  OT_SCENE_UPDATE_APPLY: 1,
+  OT_SCENE_PROPERTY_Z_INDEX: 1,
+  OT_SCENE_PROPERTY_OPACITY: 2,
+  OT_SCENE_PROPERTY_TRANSLATE_X: 4,
+  OT_SCENE_PROPERTY_TRANSLATE_Y: 8,
+  OT_SCENE_PROPERTY_BORDER: 16,
+  OT_SCENE_PROPERTY_SHOULD_FILL: 32,
+  OT_SCENE_PROPERTY_BACKGROUND: 64,
+  OT_SCENE_PROPERTY_BORDER_COLOR: 128,
+  OT_SCENE_PROPERTY_BORDER_STYLE: 256,
+  OT_SCENE_PROPERTY_FOCUSABLE: 512,
+  OT_SCENE_PROPERTY_FOCUSED_BORDER_COLOR: 1024,
+  OT_SCENE_PROPERTY_STYLE: 2048,
+  OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS: 4096,
+  OT_SCENE_PROPERTY_RECORD_MAX: 88,
+  OT_SCENE_PROPERTY_BYTES_MAX: 360448,
   OT_SESSION_OPEN: 0,
   OT_SESSION_CLOSING: 1,
   OT_SESSION_CLOSED_STATE: 2,

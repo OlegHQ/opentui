@@ -159,6 +159,7 @@ export class BoxRenderable extends Renderable {
     this.requestRender()
   }
 
+  /** Requested value, snapshotted when staging succeeds; native accepts it at the next boundary. */
   public get backgroundColor(): RGBA {
     return RGBA.clone(this._backgroundColor)
   }
@@ -200,6 +201,7 @@ export class BoxRenderable extends Renderable {
         )
         this._borderStyle = _value
         this._customBorderChars = undefined
+        this._customBorderCharsObj = undefined
         this.initializeBorder()
         this.requestRender()
       })

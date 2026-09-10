@@ -1728,12 +1728,8 @@ fn paintFromC(options: *const c.ot_scene_paint_options) scene.Paint {
 
 pub fn ot_scene_flush(
     context: ?*ContextHandle,
-    styles_ptr: ?[*]const c.ot_scene_style_update,
-    style_count: u32,
-    backgrounds_ptr: ?[*]const c.ot_scene_background_update,
-    background_count: u32,
-    paints_ptr: ?[*]const c.ot_scene_paint_update,
-    paint_count: u32,
+    updates_ptr: ?[*]const u8,
+    byte_count: u32,
     out_applied_ptr: ?*u32,
 ) callconv(.c) c.ot_status {
     if (out_applied_ptr) |out| out.* = 0;
@@ -1741,90 +1737,74 @@ pub fn ot_scene_flush(
     if (status != c.OT_OK) return status;
     const owner = context.?;
     const out = out_applied_ptr orelse return sessionError(owner, error.InvalidOptions);
-    const counts = [_]u32{ style_count, background_count, paint_count };
-    const pointers = [_]bool{ styles_ptr != null, backgrounds_ptr != null, paints_ptr != null };
-    for (counts) |count| {
-        if (count > c.OT_SCENE_MUTATIONS_MAX) return sessionError(owner, error.ObjectLimit);
-    }
-    for (counts, pointers) |count, present| {
-        if (count != 0 and !present) return sessionError(owner, error.InvalidOptions);
-    }
-    if (style_count == 0 and background_count == 0 and paint_count == 0) return c.OT_OK;
+    if (byte_count > c.OT_SCENE_PROPERTY_BYTES_MAX) return sessionError(owner, error.ObjectLimit);
+    if (byte_count != 0 and updates_ptr == null) return sessionError(owner, error.InvalidOptions);
+    if (byte_count == 0) return c.OT_OK;
     // One admission covers the whole batch; the Locked setters do not call user code.
     owner.core.beginMutation() catch |err| return sessionError(owner, err);
     defer owner.core.mutating = false;
-    const styles = if (styles_ptr) |ptr| ptr[0..style_count] else &.{};
-    const backgrounds = if (backgrounds_ptr) |ptr| ptr[0..background_count] else &.{};
-    const paints = if (paints_ptr) |ptr| ptr[0..paint_count] else &.{};
-    const style_status = flushStyles(owner, styles, out);
-    if (style_status != c.OT_OK) return style_status;
-    const background_status = flushBackgrounds(owner, backgrounds, out);
-    if (background_status != c.OT_OK) return background_status;
-    return flushPaints(owner, paints, out);
-}
-
-fn flushStyles(
-    owner: *ContextHandle,
-    styles: []const c.ot_scene_style_update,
-    out: *u32,
-) c.ot_status {
-    for (styles) |*entry| {
-        owner.core.sceneSetStyleLocked(
-            handleFromC(entry.node),
-            entry.group,
-            entry.kind,
-            entry.edge,
-            entry.unit,
-            entry.value,
-            entry.flags,
-        ) catch |err| return sessionError(owner, err);
+    const updates = updates_ptr.?[0..byte_count];
+    var offset: u32 = 0;
+    while (offset < byte_count) {
+        if (out.* == c.OT_SCENE_MUTATIONS_MAX) return sessionError(owner, error.ObjectLimit);
+        const remaining = updates[offset..];
+        if (remaining.len < @sizeOf(c.ot_scene_property_update)) return sessionError(owner, error.InvalidOptions);
+        const header = readProperty(c.ot_scene_property_update, remaining);
+        const size = propertySize(header.fields) catch |err| return sessionError(owner, err);
+        if (header.size_bytes != size or size > remaining.len) return sessionError(owner, error.InvalidOptions);
+        applyProperty(owner.core, header, remaining[@sizeOf(c.ot_scene_property_update)..size]) catch |err| return sessionError(owner, err);
         out.* += 1;
+        offset += size;
     }
     return c.OT_OK;
 }
 
-fn flushBackgrounds(
-    owner: *ContextHandle,
-    backgrounds: []const c.ot_scene_background_update,
-    out: *u32,
-) c.ot_status {
-    for (backgrounds) |*entry| {
-        if (entry.fields == c.OT_SCENE_UPDATE_SKIP) {
-            out.* += 1;
-            continue;
-        }
-        if (entry.fields != c.OT_SCENE_UPDATE_APPLY or entry.reserved != 0) {
-            return sessionError(owner, error.InvalidOptions);
-        }
-        owner.core.sceneSetBackgroundLocked(handleFromC(entry.node), entry.background) catch |err| {
-            return sessionError(owner, err);
-        };
-        out.* += 1;
-    }
-    return c.OT_OK;
+fn readProperty(comptime T: type, bytes: []const u8) T {
+    var result: T = undefined;
+    @memcpy(std.mem.asBytes(&result), bytes[0..@sizeOf(T)]);
+    return result;
 }
 
-fn flushPaints(
-    owner: *ContextHandle,
-    paints: []const c.ot_scene_paint_update,
-    out: *u32,
-) c.ot_status {
-    for (paints) |*entry| {
-        const options = &entry.paint;
-        if (options.struct_size != @sizeOf(c.ot_scene_paint_options) or options.reserved != 0 or
-            options.focusable > 1)
-        {
-            return sessionError(owner, error.InvalidOptions);
+fn propertySize(fields: u32) !u32 {
+    if (fields == c.OT_SCENE_PROPERTY_STYLE) return 40;
+    if (fields == 0 or fields & ~(scene.paint_fields_all | c.OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS) != 0) return error.InvalidOptions;
+    if (fields & c.OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS != 0 and fields & c.OT_SCENE_PROPERTY_BORDER_STYLE == 0) return error.InvalidOptions;
+    if (fields & scene.paint_fields_all == scene.paint_fields_all) return c.OT_SCENE_PROPERTY_RECORD_MAX;
+    var size: u32 = @sizeOf(c.ot_scene_property_update);
+    inline for (scene.paint_fields, 0..) |name, index| {
+        if (fields & (@as(u32, 1) << index) != 0) {
+            const T = @FieldType(scene.Paint, name);
+            size += if (T == bool) 4 else @sizeOf(T);
         }
-        if (options.abi_version != c.OT_CONTEXT_ABI_VERSION) {
-            return sessionError(owner, error.UnsupportedVersion);
-        }
-        owner.core.sceneSetPaintLocked(handleFromC(entry.node), paintFromC(options)) catch |err| {
-            return sessionError(owner, err);
-        };
-        out.* += 1;
     }
-    return c.OT_OK;
+    return std.mem.alignForward(u32, size, 8);
+}
+
+fn applyProperty(core: *Context, header: c.ot_scene_property_update, payload: []const u8) !void {
+    const handle = handleFromC(header.node);
+    if (header.fields == c.OT_SCENE_PROPERTY_STYLE) {
+        const style = readProperty(c.ot_scene_style_property, payload);
+        if (style.reserved != 0) return error.InvalidOptions;
+        return core.sceneSetStyleLocked(handle, style.group, style.kind, style.edge, style.unit, style.value, style.flags);
+    }
+    var paint: scene.Paint = .{};
+    var offset: usize = 0;
+    inline for (scene.paint_fields, 0..) |name, index| {
+        if (header.fields & (@as(u32, 1) << index) != 0) {
+            const T = @FieldType(scene.Paint, name);
+            if (T == bool) {
+                const value = readProperty(u32, payload[offset..]);
+                if (value > 1) return error.InvalidOptions;
+                @field(paint, name) = value == 1;
+                offset += 4;
+            } else {
+                @field(paint, name) = readProperty(T, payload[offset..]);
+                offset += @sizeOf(T);
+            }
+        }
+    }
+    for (payload[offset..]) |byte| if (byte != 0) return error.InvalidOptions;
+    return core.scenePatchPaintLocked(handle, header.fields, paint);
 }
 
 pub fn ot_scene_set_surface(context: ?*ContextHandle, node_ptr: ?*const c.ot_handle, buffer_ptr: ?*const c.ot_handle) callconv(.c) c.ot_status {
@@ -3136,11 +3116,11 @@ test "Scene flush ABI copies background and preserves paint on acceptance and re
     };
     try core.sceneSetPaint(box, accepted);
     const node = (try core.raw().getRenderable(box)).scene_node.?;
-    var input: [1]c.ot_scene_background_update = .{.{ .node = id, .background = undefined, .fields = c.OT_SCENE_UPDATE_APPLY, .reserved = 0 }};
+    var input: [1]TestBackgroundProperty = .{.{ .node = id, .background = undefined }};
     var applied: u32 = 0;
     for ([_]ansi.RGBA{ ansi.rgbColor(0, 200, 0, 128), ansi.indexedColor(255, 10, 20, 30), ansi.defaultColor(30, 20, 10, 255) }) |color| {
         input[0].background = color;
-        try std.testing.expectEqual(c.OT_OK, ot_scene_flush(&owner, null, 0, &input, 1, null, 0, &applied));
+        try std.testing.expectEqual(c.OT_OK, ot_scene_flush(&owner, std.mem.asBytes(&input), @sizeOf(@TypeOf(input)), &applied));
         try std.testing.expectEqual(@as(u32, 1), applied);
         @memset(&input[0].background, 0);
         accepted.background = color;
@@ -3152,10 +3132,10 @@ test "Scene flush ABI copies background and preserves paint on acceptance and re
     stale.generation += 1;
     const replacement = ansi.rgbColor(0, 0, 200, 255);
     input[0].background = replacement;
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_flush(null, null, 0, &input, 1, null, 0, &applied));
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_flush(null, std.mem.asBytes(&input), @sizeOf(@TypeOf(input)), &applied));
     for ([_]c.ot_handle{ wrong_kind, foreign, stale }, [_]c.ot_status{ c.OT_WRONG_KIND, c.OT_WRONG_CONTEXT, c.OT_STALE_HANDLE }) |invalid, expected| {
         input[0].node = invalid;
-        try std.testing.expectEqual(expected, ot_scene_flush(&owner, null, 0, &input, 1, null, 0, &applied));
+        try std.testing.expectEqual(expected, ot_scene_flush(&owner, std.mem.asBytes(&input), @sizeOf(@TypeOf(input)), &applied));
         try std.testing.expectEqual(@as(u32, 0), applied);
         try std.testing.expectEqualDeep(accepted, node.paint);
     }
@@ -3163,18 +3143,25 @@ test "Scene flush ABI copies background and preserves paint on acceptance and re
     for (0..4) |channel| {
         input[0].background = replacement;
         input[0].background[channel] |= 0x8000;
-        try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_flush(&owner, null, 0, &input, 1, null, 0, &applied));
+        try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_scene_flush(&owner, std.mem.asBytes(&input), @sizeOf(@TypeOf(input)), &applied));
         try std.testing.expectEqual(@as(u32, 0), applied);
         try std.testing.expectEqualDeep(accepted, node.paint);
     }
     input[0].background = replacement;
     try core.cancelSession(session);
-    try std.testing.expectEqual(c.OT_SESSION_CLOSED, ot_scene_flush(&owner, null, 0, &input, 1, null, 0, &applied));
+    try std.testing.expectEqual(c.OT_SESSION_CLOSED, ot_scene_flush(&owner, std.mem.asBytes(&input), @sizeOf(@TypeOf(input)), &applied));
     try std.testing.expectEqual(@as(u32, 0), applied);
     try std.testing.expectEqualDeep(accepted, node.paint);
     try core.sceneDestroyNode(box);
-    try std.testing.expectEqual(c.OT_STALE_HANDLE, ot_scene_flush(&owner, null, 0, &input, 1, null, 0, &applied));
+    try std.testing.expectEqual(c.OT_STALE_HANDLE, ot_scene_flush(&owner, std.mem.asBytes(&input), @sizeOf(@TypeOf(input)), &applied));
 }
+
+const TestBackgroundProperty = extern struct {
+    node: c.ot_handle,
+    fields: u32 = c.OT_SCENE_PROPERTY_BACKGROUND,
+    size_bytes: u32 = 32,
+    background: [4]u16,
+};
 
 test "Scene flush ABI paints live copied background during a host hook pause" {
     const ansi = @import("ansi.zig");
@@ -3198,9 +3185,9 @@ test "Scene flush ABI paints live copied background during a host hook pause" {
     try std.testing.expectEqual(box, before.node);
     const id = handleToC(box);
     const color = ansi.indexedColor(42, 0, 200, 0);
-    var input: [1]c.ot_scene_background_update = .{.{ .node = id, .background = color, .fields = c.OT_SCENE_UPDATE_APPLY, .reserved = 0 }};
+    var input: [1]TestBackgroundProperty = .{.{ .node = id, .background = color }};
     var applied: u32 = 0;
-    try std.testing.expectEqual(c.OT_OK, ot_scene_flush(&owner, null, 0, &input, 1, null, 0, &applied));
+    try std.testing.expectEqual(c.OT_OK, ot_scene_flush(&owner, std.mem.asBytes(&input), @sizeOf(@TypeOf(input)), &applied));
     try std.testing.expectEqual(@as(u32, 1), applied);
     @memset(&input[0].background, 0);
     const done = try core.sceneFrameStep(session, before, options);
@@ -3595,8 +3582,8 @@ test "Scene ABI custom measurement checks identity reentry and registration life
             layout.abi_version = c.OT_CONTEXT_ABI_VERSION;
             paint_layout_status = ot_scene_get_layout(owner, &expected, 2, &layout);
             write_status = ot_scene_set_style(owner, &expected, 4, 0, 0, 1, 99, 0);
-            const background: [1]c.ot_scene_background_update = .{.{ .node = expected, .background = .{ 200, 0, 0, 255 }, .fields = c.OT_SCENE_UPDATE_APPLY, .reserved = 0 }};
-            background_status = ot_scene_flush(owner, null, 0, &background, 1, null, 0, &applied);
+            const background: [1]TestBackgroundProperty = .{.{ .node = expected, .background = .{ 200, 0, 0, 255 } }};
+            background_status = ot_scene_flush(owner, std.mem.asBytes(&background), @sizeOf(@TypeOf(background)), &applied);
             paint_status = ot_scene_set_paint(owner, &expected, null);
             replace_status = ot_scene_set_measure(owner, &expected, null);
             destroy_status = ot_context_destroy(owner);

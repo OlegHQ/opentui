@@ -16,6 +16,7 @@ import {
   type NativeSceneFrameRequest,
   type NativeSceneLayout,
   type NativeScenePaint,
+  type NativeScenePaintUpdate,
   type NativeSceneBoxDetails,
   type NativeSceneTextOptions,
   type NativeSceneSliderOptions,
@@ -338,14 +339,15 @@ export class NativeScene {
   ): void {
     this.yogaHost.assertMutable()
     const handle = node._getSceneHandle(this)
-    if (this.staging.styleFull) this.flushStaged()
+    if (this.staging.full) this.flushStaged()
     if (this.staging.stageStyle(this.driver.context, handle, group, kind, edge, unit, value, flags)) {
       this.yogaHost.stageScene(this)
     }
     this.changeGeometry()
   }
 
-  /** @internal Reads observe every staged write first. */
+  /** @internal Accept this scene's staged prefix before reading native style.
+   * This boundary does not run layout; geometry remains the completed observation. */
   getStyle(
     node: { _getSceneHandle(owner: NativeScene): SceneNodeHandle },
     group: number,
@@ -395,11 +397,12 @@ export class NativeScene {
     }
   }
 
-  /** @internal Paint includes Yoga border widths so border changes commit together. */
-  setPaint(renderable: Renderable, paint: NativeScenePaint): void {
+  /** @internal Partial visual writes stage before requested wrapper state is published.
+   * Border appearance and Yoga widths are accepted atomically by native. */
+  setPaint(renderable: Renderable, paint: NativeScenePaintUpdate): void {
     this.yogaHost.assertMutable()
     const handle = renderable._getSceneHandle(this)
-    if (this.staging.paintFull) this.flushStaged()
+    if (this.staging.full) this.flushStaged()
     if (this.staging.stagePaint(this.driver.context, handle, paint, renderable)) this.yogaHost.stageScene(this)
     this.changeGeometry()
   }
@@ -407,7 +410,7 @@ export class NativeScene {
   setBackground(renderable: Renderable, color: RGBA): void {
     this.yogaHost.assertMutable()
     const handle = renderable._getSceneHandle(this)
-    if (this.staging.backgroundFull) this.flushStaged()
+    if (this.staging.full) this.flushStaged()
     if (this.staging.stageBackground(this.driver.context, handle, color, renderable)) this.yogaHost.stageScene(this)
   }
 
@@ -416,12 +419,9 @@ export class NativeScene {
     this.driver.renderLib.sceneSetBoxDetails(this.driver.context, renderable._getSceneHandle(this), details)
   }
 
-  /** Native read-modify-writes the node's paint, so staged paint must land first. */
+  /** Border style clears custom glyphs in the same staged record as border widths. */
   setBoxBorderStyle(renderable: Renderable, style: NativeScenePaint["borderStyle"], sides: number): void {
-    const handle = renderable._getSceneHandle(this)
-    this.flushStaged()
-    this.driver.renderLib.sceneSetBoxBorderStyle(this.driver.context, handle, style, sides)
-    this.changeGeometry()
+    this.setPaint(renderable, { borderStyle: style, border: sides, resetBorderCharacters: true })
   }
 
   /** @internal Native copies bytes and styles before the wrapper publishes caller identity. */
@@ -574,7 +574,8 @@ export class NativeScene {
     return this.driver.renderLib.sceneGetTextMetrics(this.driver.context, renderable._getSceneHandle(this))
   }
 
-  /** @internal Native owns callback-time geometry projections and composes accepted ancestor translations. */
+  /** @internal Accept staging, then read completed geometry without running layout.
+   * Native owns callback-time projections and composes accepted ancestor translations. */
   getLayout(
     node: { _getSceneHandle(owner: NativeScene): SceneNodeHandle },
     rawYoga: boolean | "paint" = false,

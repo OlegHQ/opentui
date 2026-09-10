@@ -294,7 +294,7 @@ test("rejected dimension flush retains implicit flex-shrink through unchanged an
       scene.flushStaged()
       box.width = 20
       const reject = spyOn(symbols, "ot_scene_flush").mockImplementation((...args: any[]) => {
-        args[7][0] = 0
+        args[3][0] = 0
         return NativeStatus.OutOfMemory
       })
       try {
