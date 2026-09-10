@@ -50,11 +50,20 @@ Geometry getters expose completed native observations. Reading a layout property
 can flush staged mutations without running Yoga; a new requested width therefore
 does not imply a new computed width.
 
+Property updates use one bounded stream. Layout and translation writes retain
+order. A translation update can merge only into the last record: its prepared
+coordinates depend on previously accepted ancestor translations. Other visual
+writes coalesce at the node's latest visual record, with the last write winning for each
+selected field. Unselected fields keep their accepted native values.
+A flush applies records in stream order without calling host code between them.
+Each record publishes atomically, including border appearance and Yoga widths.
+
 Topology and immediate resource replacements publish host projections after
 native acceptance. A property flush can accept a prefix before rejecting an
-entry. The driver removes the consumed prefix and retains the rejected entry and
-suffix for retry. Frame cancellation does not undo accepted mutations or host
-callback effects.
+entry. The consumed prefix counts records, not bytes. The driver removes that
+prefix and retains the rejected entry and suffix for retry. A successful flush
+ends the coalescing window. Frame cancellation does not undo accepted mutations
+or host callback effects.
 
 The TypeScript driver owns flush boundaries, including cross-scene visibility
 before synchronous measurement callbacks. React and Solid use Renderable

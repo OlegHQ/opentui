@@ -1356,9 +1356,11 @@ function propertyWordLength(fields: number): number {
   return (words + 1) & ~1
 }
 
-/** One ordered property stream. Visual writes coalesce at the node's first-touch
- * position; last write wins per field. Layout writes stay ordered because Yoga
- * shorthand/edge and dimension/flex-shrink operations can overlap. There are no
+/** One ordered property stream. Visual writes coalesce at the node's latest visual
+ * record; last write wins per field. Translations only merge into the last
+ * record so prepared coordinates observe preceding ancestor translations.
+ * Layout writes stay ordered because Yoga shorthand/edge and dimension/flex-shrink
+ * operations can overlap. There are no
  * reads or callbacks between records. A successful flush ends coalescing.
  *
  * Slots reserve room for any visual mask so coalescing is O(1), without shifting
@@ -1530,8 +1532,10 @@ export class SceneStaging {
     if (fields === 0) return false
     const slot = scratch.handle.words[2]
     const entry = this.paintBySlot.get(slot)
+    const translation =
+      fields & (nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_X | nativeConstants.OT_SCENE_PROPERTY_TRANSLATE_Y)
     let base: number
-    if (entry === undefined) {
+    if (entry === undefined || (translation !== 0 && entry !== this.entryCount - 1)) {
       base = this.reserve(scratch.handle, fields)
       this.paintBySlot.set(slot, base / propertySlotWords)
     } else {

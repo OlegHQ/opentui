@@ -349,6 +349,7 @@ export class BoxRenderable extends Renderable {
   }
 
   public set shouldFill(value: boolean) {
+    if (value === undefined) throw new TypeError("Scene shouldFill must be a boolean")
     if (this._shouldFill === value) return
     this.setNativeScenePaint({ shouldFill: value })
     this._shouldFill = value

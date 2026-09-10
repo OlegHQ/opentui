@@ -460,6 +460,7 @@ export abstract class Renderable extends BaseRenderable {
   }
 
   public set focusable(value: boolean) {
+    if (value === undefined) throw new TypeError("Scene focusable must be a boolean")
     if (this._focusable === value) return
     this.setNativeScenePaint({ focusable: value })
     this._focusable = value
@@ -676,6 +677,7 @@ export abstract class Renderable extends BaseRenderable {
 
   // Translation during a paint hook also moves this node's buffered composition.
   public set translateX(value: number) {
+    if (value === undefined) throw new RangeError("Scene translations must be finite numbers")
     if (this._translateX === value) return
     this.setNativeScenePaint({ translateX: value })
     this._translateX = value
@@ -687,6 +689,7 @@ export abstract class Renderable extends BaseRenderable {
   }
 
   public set translateY(value: number) {
+    if (value === undefined) throw new RangeError("Scene translations must be finite numbers")
     if (this._translateY === value) return
     this.setNativeScenePaint({ translateY: value })
     this._translateY = value

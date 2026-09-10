@@ -108,6 +108,69 @@ test("small visual edits never reconstruct a full host paint projection", async 
   await target.frame()
 })
 
+test.each(["shouldFill", "focusable", "translateX", "translateY"] as const)(
+  "undefined %s rejects before changing host or native paint state",
+  async (property) => {
+    const target = await setup()
+    class InheritedBox extends BoxRenderable {
+      protected renderSelf(buffer: OptimizedBuffer): void {
+        super.renderSelf(buffer)
+      }
+    }
+    const boxes = [BoxRenderable, InheritedBox].map((Box) => {
+      const box = new Box(target.renderer, { width: 3, height: 1, backgroundColor: "red", focusable: true })
+      target.renderer.root.add(box)
+      return box
+    })
+    const before = await target.frame()
+    for (const box of boxes) {
+      const accepted = box[property]
+      assert.throws(() => Reflect.set(box, property, undefined))
+      assert.equal(box[property], accepted)
+    }
+    assert.equal(target.renderer.nativeScene.hasStagedMutations, false)
+    assert.deepEqual((await target.frame()).lines, before.lines)
+  },
+)
+
+test.each([false, true])(
+  "background staging preserves explicit translation order (inherited body: %s)",
+  async (host) => {
+    const target = await setup()
+    class InheritedBox extends BoxRenderable {
+      protected renderSelf(buffer: OptimizedBuffer): void {
+        super.renderSelf(buffer)
+      }
+    }
+    const parent = new BoxRenderable(target.renderer, { position: "absolute", left: 1, width: 10, height: 1 })
+    const Box = host ? InheritedBox : BoxRenderable
+    const child = new Box(target.renderer, {
+      position: "absolute",
+      left: 1,
+      width: 1,
+      height: 1,
+      backgroundColor: "red",
+    })
+    parent.add(child)
+    target.renderer.root.add(parent)
+    await target.frame()
+    parent.renderBefore = () => {
+      parent.renderBefore = undefined
+      child.backgroundColor = "red"
+      parent.translateX = 3
+      child.translateX = 1
+      parent.translateX = 4
+    }
+    await target.frame()
+    assert.equal(child.x, 7)
+    assert.equal(target.renderer.hitTest(6, 0), child.num)
+    const buffer = target.renderer.currentRenderBuffer
+    buffer.withBuffers(({ bg }) => {
+      assert.deepEqual([...bg.subarray(6 * 4, 7 * 4)], [255, 0, 0, 255])
+    })
+  },
+)
+
 test("background coalescing requires no spare Context objects", async () => {
   const stdout = createTestStdout(8, 2)
   const driver = new NativeSession(stdout, { context: { objectCapacity: 8, renderCellsMax: 32 } })

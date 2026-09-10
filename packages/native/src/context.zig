@@ -2126,11 +2126,7 @@ pub const Context = struct {
         if (reset and node.kind != 1) return error.WrongKind;
         if (reset and fields & 256 == 0) return error.InvalidOptions;
         const paint_fields = fields & ~@as(u32, 4096);
-        if (paint_fields == scene.paint_fields_all) {
-            try node.owner.setPaint(value, paint);
-        } else {
-            try node.owner.setPaintPartial(value, paint_fields, paint);
-        }
+        try node.owner.setPaintPartial(value, paint_fields, paint);
         if (reset) {
             if (node.control.box) |details| details.custom_border_chars = null;
         }
