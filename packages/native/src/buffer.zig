@@ -14,6 +14,7 @@ const native_image = @import("image.zig");
 
 const logger = @import("logger.zig");
 const utf8 = @import("utf8.zig");
+const api = @import("context_abi_c");
 
 pub const RGBA = ansi.RGBA;
 pub const Vec3f = @Vector(3, f32);
@@ -25,7 +26,7 @@ const EditorView = edv.EditorView;
 
 pub const DEFAULT_SPACE_CHAR: u32 = 32;
 /// Bounds segmentation and provisional storage for one checked text draw call.
-pub const text_bytes_max: u32 = 64 * 1024;
+pub const text_bytes_max: u32 = api.OT_BUFFER_TEXT_BYTES_MAX;
 
 pub fn validateColor(color: RGBA) error{InvalidOptions}!void {
     const intent = ansi.intent(color);

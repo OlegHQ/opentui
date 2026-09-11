@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const io = if (builtin.is_test) std.testing.io else @import("root").io;
 
 const Allocator = std.mem.Allocator;
+const api = @import("context_abi_c");
 var icc_cache_mutex: std.Io.Mutex = .init;
 var icc_cache_clients: u32 = 0;
 
@@ -90,21 +91,21 @@ pub const Status = enum(u32) {
 };
 
 pub const Format = enum(u32) {
-    unknown = 0,
-    png = 1,
-    raw_rgba = 2,
-    jpeg = 3,
-    webp = 4,
-    gif = 5,
+    unknown = api.OT_IMAGE_FORMAT_UNKNOWN,
+    png = api.OT_IMAGE_FORMAT_PNG,
+    raw_rgba = api.OT_IMAGE_FORMAT_RGBA,
+    jpeg = api.OT_IMAGE_FORMAT_JPEG,
+    webp = api.OT_IMAGE_FORMAT_WEBP,
+    gif = api.OT_IMAGE_FORMAT_GIF,
 };
 
 pub const ColorStatus = enum(u32) {
-    assumed_srgb = 0,
-    explicit_srgb = 1,
+    assumed_srgb = api.OT_IMAGE_ASSUMED_SRGB,
+    explicit_srgb = api.OT_IMAGE_EXPLICIT_SRGB,
 };
 
-pub const PixelFormat = enum(u32) { rgba8 = 0, bgra8 = 1 };
-pub const PixelAlpha = enum(u32) { straight = 0, @"opaque" = 1 };
+pub const PixelFormat = enum(u32) { rgba8 = api.OT_IMAGE_RGBA8, bgra8 = api.OT_IMAGE_BGRA8 };
+pub const PixelAlpha = enum(u32) { straight = api.OT_IMAGE_ALPHA_STRAIGHT, @"opaque" = api.OT_IMAGE_ALPHA_OPAQUE };
 pub const PixelImportOptions = struct {
     stride: u32,
     format: PixelFormat = .rgba8,
@@ -131,37 +132,37 @@ pub const Limits = struct {
 };
 
 pub const ResizeFilter = enum(u32) {
-    default = 0,
-    area = 1,
-    triangle = 2,
-    cubic_bspline = 3,
-    catmull_rom = 4,
-    mitchell = 5,
-    nearest = 6,
+    default = api.OT_IMAGE_FILTER_DEFAULT,
+    area = api.OT_IMAGE_FILTER_AREA,
+    triangle = api.OT_IMAGE_FILTER_TRIANGLE,
+    cubic_bspline = api.OT_IMAGE_FILTER_CUBIC_BSPLINE,
+    catmull_rom = api.OT_IMAGE_FILTER_CATMULL_ROM,
+    mitchell = api.OT_IMAGE_FILTER_MITCHELL,
+    nearest = api.OT_IMAGE_FILTER_NEAREST,
 };
 
 pub const Transform = enum(u32) {
-    rotate_90 = 0,
-    rotate_180 = 1,
-    rotate_270 = 2,
-    flip = 3,
-    flop = 4,
+    rotate_90 = api.OT_IMAGE_ROTATE_90,
+    rotate_180 = api.OT_IMAGE_ROTATE_180,
+    rotate_270 = api.OT_IMAGE_ROTATE_270,
+    flip = api.OT_IMAGE_FLIP,
+    flop = api.OT_IMAGE_FLOP,
 };
 
 pub const Blend = enum(u32) {
-    source_over = 0,
-    source = 1,
-    destination_over = 2,
+    source_over = api.OT_IMAGE_BLEND_SOURCE_OVER,
+    source = api.OT_IMAGE_BLEND_SOURCE,
+    destination_over = api.OT_IMAGE_BLEND_DESTINATION_OVER,
 };
 
 pub const RenderProtocol = enum(u32) {
-    auto,
-    kitty,
-    sixel,
-    blocks,
+    auto = api.OT_IMAGE_PROTOCOL_AUTO,
+    kitty = api.OT_IMAGE_PROTOCOL_KITTY,
+    sixel = api.OT_IMAGE_PROTOCOL_SIXEL,
+    blocks = api.OT_IMAGE_PROTOCOL_BLOCKS,
 };
 
-pub const Fit = enum(u32) { fit, cover, fill };
+pub const Fit = enum(u32) { fit = api.OT_IMAGE_FIT, cover = api.OT_IMAGE_COVER, fill = api.OT_IMAGE_FILL };
 
 const compatibility_io = io;
 

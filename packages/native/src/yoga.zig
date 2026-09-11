@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const c = @import("yoga");
 const compatibility = @import("compatibility-context.zig");
 const logger = @import("logger.zig");
+const api = @import("context_abi_c");
 
 pub const YGNodeRef = c.YGNodeRef;
 pub const YGNodeConstRef = c.YGNodeConstRef;
@@ -49,70 +50,70 @@ pub fn fromError(err: Error) Status {
 pub const depth_max = c.OT_YOGA_DEPTH_MAX;
 
 pub const YogaEnumKind = enum(u32) {
-    direction = 0,
-    flex_direction = 1,
-    justify_content = 2,
-    align_content = 3,
-    align_items = 4,
-    align_self = 5,
-    position_type = 6,
-    flex_wrap = 7,
-    overflow = 8,
-    display = 9,
-    box_sizing = 10,
+    direction = api.OT_STYLE_ENUM_DIRECTION,
+    flex_direction = api.OT_STYLE_ENUM_FLEX_DIRECTION,
+    justify_content = api.OT_STYLE_ENUM_JUSTIFY_CONTENT,
+    align_content = api.OT_STYLE_ENUM_ALIGN_CONTENT,
+    align_items = api.OT_STYLE_ENUM_ALIGN_ITEMS,
+    align_self = api.OT_STYLE_ENUM_ALIGN_SELF,
+    position_type = api.OT_STYLE_ENUM_POSITION_TYPE,
+    flex_wrap = api.OT_STYLE_ENUM_FLEX_WRAP,
+    overflow = api.OT_STYLE_ENUM_OVERFLOW,
+    display = api.OT_STYLE_ENUM_DISPLAY,
+    box_sizing = api.OT_STYLE_ENUM_BOX_SIZING,
 };
 
 pub const YogaFloatKind = enum(u32) {
-    flex = 0,
-    flex_grow = 1,
-    flex_shrink = 2,
-    aspect_ratio = 3,
+    flex = api.OT_STYLE_FLOAT_FLEX,
+    flex_grow = api.OT_STYLE_FLOAT_FLEX_GROW,
+    flex_shrink = api.OT_STYLE_FLOAT_FLEX_SHRINK,
+    aspect_ratio = api.OT_STYLE_FLOAT_ASPECT_RATIO,
 };
 
 pub const YogaValueKind = enum(u32) {
-    width = 0,
-    height = 1,
-    min_width = 2,
-    min_height = 3,
-    max_width = 4,
-    max_height = 5,
-    flex_basis = 6,
-    margin = 7,
-    padding = 8,
-    position = 9,
-    gap = 10,
+    width = api.OT_STYLE_VALUE_WIDTH,
+    height = api.OT_STYLE_VALUE_HEIGHT,
+    min_width = api.OT_STYLE_VALUE_MIN_WIDTH,
+    min_height = api.OT_STYLE_VALUE_MIN_HEIGHT,
+    max_width = api.OT_STYLE_VALUE_MAX_WIDTH,
+    max_height = api.OT_STYLE_VALUE_MAX_HEIGHT,
+    flex_basis = api.OT_STYLE_VALUE_FLEX_BASIS,
+    margin = api.OT_STYLE_VALUE_MARGIN,
+    padding = api.OT_STYLE_VALUE_PADDING,
+    position = api.OT_STYLE_VALUE_POSITION,
+    gap = api.OT_STYLE_VALUE_GAP,
 };
 
 pub const YogaUnit = enum(u32) {
-    undefined = 0,
-    point = 1,
-    percent = 2,
-    auto = 3,
+    undefined = api.OT_UNIT_UNDEFINED,
+    point = api.OT_UNIT_POINT,
+    percent = api.OT_UNIT_PERCENT,
+    auto = api.OT_UNIT_AUTO,
 };
 
 pub const YogaDirection = enum(u32) {
-    inherit = 0,
-    ltr = 1,
-    rtl = 2,
+    inherit = api.OT_DIRECTION_INHERIT,
+    ltr = api.OT_DIRECTION_LTR,
+    rtl = api.OT_DIRECTION_RTL,
 };
 
 pub const YogaMeasureMode = enum(u32) {
-    undefined = 0,
-    exactly = 1,
-    at_most = 2,
+    undefined = api.OT_MEASURE_UNDEFINED,
+    exactly = api.OT_MEASURE_EXACTLY,
+    at_most = api.OT_MEASURE_AT_MOST,
 };
 
 pub const YogaPositionType = enum(u32) {
-    static = 0,
-    relative = 1,
-    absolute = 2,
+    static = api.OT_POSITION_STATIC,
+    relative = api.OT_POSITION_RELATIVE,
+    absolute = api.OT_POSITION_ABSOLUTE,
 };
 
 pub const YogaFlexDirection = enum(u32) {
-    column = 0,
-    column_reverse = 1,
-    row = 2,
-    row_reverse = 3,
+    column = api.OT_FLEX_DIRECTION_COLUMN,
+    column_reverse = api.OT_FLEX_DIRECTION_COLUMN_REVERSE,
+    row = api.OT_FLEX_DIRECTION_ROW,
+    row_reverse = api.OT_FLEX_DIRECTION_ROW_REVERSE,
 };
 
 pub const ExternalYogaLayout = c.OTYogaLayout;

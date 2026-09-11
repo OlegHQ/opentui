@@ -122,7 +122,17 @@ pub const BufferGrid = struct {
 };
 
 pub const BufferDraw = struct {
-    pub const Operation = enum(u32) { clear, fill, text, cell, cell_blend, char, box, compose, respect_alpha };
+    pub const Operation = enum(u32) {
+        clear = api.OT_BUFFER_DRAW_CLEAR,
+        fill = api.OT_BUFFER_DRAW_FILL,
+        text = api.OT_BUFFER_DRAW_TEXT,
+        cell = api.OT_BUFFER_DRAW_CELL,
+        cell_blend = api.OT_BUFFER_DRAW_CELL_BLEND,
+        char = api.OT_BUFFER_DRAW_CHAR,
+        box = api.OT_BUFFER_DRAW_BOX,
+        compose = api.OT_BUFFER_DRAW_COMPOSE,
+        respect_alpha = api.OT_BUFFER_DRAW_RESPECT_ALPHA,
+    };
     operation: Operation,
     x: i32 = 0,
     y: i32 = 0,
@@ -141,15 +151,15 @@ pub const BufferDraw = struct {
 
 pub const BufferStack = struct {
     // Custom scopes are bounded independently of the scene's single inherited entry.
-    pub const depth_max: u32 = 256;
+    pub const depth_max: u32 = api.OT_BUFFER_STACK_DEPTH_MAX;
     pub const Operation = enum(u32) {
-        get_opacity,
-        push_scissor,
-        pop_scissor,
-        clear_scissors,
-        push_opacity,
-        pop_opacity,
-        clear_opacity,
+        get_opacity = api.OT_BUFFER_STACK_GET_OPACITY,
+        push_scissor = api.OT_BUFFER_STACK_PUSH_SCISSOR,
+        pop_scissor = api.OT_BUFFER_STACK_POP_SCISSOR,
+        clear_scissors = api.OT_BUFFER_STACK_CLEAR_SCISSORS,
+        push_opacity = api.OT_BUFFER_STACK_PUSH_OPACITY,
+        pop_opacity = api.OT_BUFFER_STACK_POP_OPACITY,
+        clear_opacity = api.OT_BUFFER_STACK_CLEAR_OPACITY,
     };
     operation: Operation,
     x: i32 = 0,
@@ -159,7 +169,11 @@ pub const BufferStack = struct {
     opacity: f32 = 1,
 };
 
-pub const EditEvent = enum(u32) { cursor_changed = 1, content_changed = 2, history_cursor_changed = 4 };
+pub const EditEvent = enum(u32) {
+    cursor_changed = api.OT_EDIT_CURSOR_CHANGED,
+    content_changed = api.OT_EDIT_CONTENT_CHANGED,
+    history_cursor_changed = api.OT_EDIT_HISTORY_CURSOR_CHANGED,
+};
 pub const EditEventCallback = *const fn (?*anyopaque, Handle, EditEvent) void;
 
 pub const Edit = struct {
