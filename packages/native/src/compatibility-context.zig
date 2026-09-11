@@ -1,21 +1,19 @@
 const std = @import("std");
 const build_options = @import("build_options");
-const handles = @import("handles.zig");
 const grapheme = @import("grapheme.zig");
 const link = @import("link.zig");
 const yoga = @import("yoga.zig");
 const logger = @import("logger.zig");
 
-/// Storage for the serialized, shipped 32-bit FFI. This is not the 64-bit Context
-/// API: its registry has no context identity and does not own resource destructors.
-/// Keep this owner address-stable until all resources and borrowed pool IDs expire.
+/// Process-wide defaults for standalone Yoga, pools, logging, and I/O.
+/// This is not a Context and does not own resource destructors.
+/// Keep this owner address-stable until borrowed pool IDs expire.
 pub const CompatibilityOwner = struct {
     gpa: std.heap.DebugAllocator(.{
         .enable_memory_limit = build_options.gpa_safe_stats,
         .safety = build_options.gpa_safe_stats,
     }) = .init,
     arena: std.heap.ArenaAllocator,
-    registry: handles.Registry = .{},
     graphemes: ?grapheme.GraphemePool = null,
     links: ?link.LinkPool = null,
     logger: logger.Logger = .{ .callback = null },
@@ -27,7 +25,6 @@ pub const CompatibilityOwner = struct {
     pub fn init(self: *CompatibilityOwner) void {
         self.gpa = .init;
         self.arena = std.heap.ArenaAllocator.init(self.gpa.allocator());
-        self.registry.init();
         self.graphemes = null;
         self.links = null;
         self.logger = .{ .callback = null };
@@ -36,10 +33,8 @@ pub const CompatibilityOwner = struct {
         self.yoga_mutex = .init;
     }
 
-    /// Callers destroy resources first, including Yoga nodes outside the registry.
-    /// Refuse teardown while a handle or Yoga node is live.
-    pub fn deinit(self: *CompatibilityOwner) error{ LiveHandles, LiveYogaNodes }!std.heap.Check {
-        if (!self.registry.isEmpty()) return error.LiveHandles;
+    /// Callers destroy Yoga nodes first. Refuse teardown while a Yoga node is live.
+    pub fn deinit(self: *CompatibilityOwner) error{LiveYogaNodes}!std.heap.Check {
         if (self.yoga_initialized) {
             if (self.yoga_config.hasLiveNodes()) return error.LiveYogaNodes;
             self.yoga_config.deinit();
@@ -95,8 +90,8 @@ pub const CompatibilityOwner = struct {
     }
 };
 
-// Only compatibility adapters use this singleton. Native Context instances and
-// independent registries keep their own storage and never route through it.
+// Only compatibility adapters use this singleton. Native Context instances keep
+// their own storage and never route through it.
 pub var compatDefault: CompatibilityOwner = .{
     .arena = std.heap.ArenaAllocator.init(compatDefault.gpa.allocator()),
 };

@@ -604,7 +604,7 @@ ot_status ot_scene_frame_cancel(ot_context *, const ot_handle *session, uint64_t
 
 /* A root creates one Session scene. Other nodes may remain detached. Nonzero public
  * numbers are immutable; native hit tokens do not recycle. Node handles use the
- * Context table, never the compatibility renderer/Yoga handle registry. */
+ * Context table. */
 ot_status ot_scene_create_node(ot_context *, const ot_handle *session, uint32_t kind,
     uint32_t num, ot_handle *out_node);
 /* Individual destruction detaches surviving children. Session destruction frees
@@ -2087,7 +2087,7 @@ ot_status ot_context_get_link_url(ot_context *context, uint32_t link_id,
     uint8_t *bytes, uint32_t capacity, uint32_t *out_count);
 
 /* Options require the exact size and version. Failure leaves out_buffer unchanged.
- * The Context owns the buffer and its pools; legacy buffer handles are not accepted.
+ * The Context owns the buffer and its pools.
  * These functions obey the Context owner-thread and busy-operation rules. */
 ot_status ot_buffer_create(
     ot_context *context,
@@ -2226,7 +2226,7 @@ ot_status ot_session_create(
     ot_handle *out_session);
 
 /* Attach once. A rejected call preserves the Session and its queued output.
- * The renderer uses its Context's pools and cannot consume legacy FFI handles. */
+ * The renderer uses its Context's pools. */
 ot_status ot_session_attach_renderer(
     ot_context *context,
     const ot_handle *session,

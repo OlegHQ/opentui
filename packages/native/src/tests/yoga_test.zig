@@ -971,7 +971,6 @@ test "Yoga compatibility owner retains config until unregistered native nodes ar
     const root = try config.createNode();
     const child = yoga.yogaNodeCreateWithConfig(config.ref);
     yoga.yogaNodeInsertChild(root, child, 0);
-    try std.testing.expect(owner.registry.isEmpty());
     try std.testing.expectError(error.LiveYogaNodes, owner.deinit());
     try std.testing.expect(config.hasLiveNodes());
     yoga.yogaNodeFree(root);

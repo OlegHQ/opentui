@@ -185,12 +185,12 @@ test "diagnostics compatibility owners clear only their own callback on successf
     const log = &owner.logger;
     try std.testing.expect(log.callback == null);
     owner.logger = .{ .callback = LegacyProbe.callback };
-    var value: u32 = 0;
-    const handle = try owner.registry.insert(.renderer, &value);
-    try std.testing.expectError(error.LiveHandles, owner.deinit());
+    const yoga = @import("../yoga.zig");
+    const node = try (try owner.getYogaConfig()).createNode();
+    try std.testing.expectError(error.LiveYogaNodes, owner.deinit());
     log.warn("busy owner keeps its callback", .{});
     try std.testing.expectEqual(@as(u32, 1), LegacyProbe.calls.load(.monotonic));
-    owner.registry.invalidate(handle, .renderer);
+    yoga.yogaNodeFree(node);
     try std.testing.expectEqual(std.heap.Check.ok, try owner.deinit());
     try std.testing.expect(log.callback == null);
     log.warn("closed owner is silent", .{});

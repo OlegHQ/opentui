@@ -9,7 +9,6 @@ const ss = @import("../syntax-style.zig");
 const link = @import("../link.zig");
 const ansi = @import("../ansi.zig");
 const image = @import("../image.zig");
-const handles = @import("../handles.zig");
 const ghostty_vt = @import("../ghostty-vt.zig");
 const test_renderer_mod = @import("test-renderer.zig");
 const terminal_image_test = @import("terminal-image_test.zig");
@@ -2636,16 +2635,9 @@ test "renderer - split scrollback images remain addressable before and across pi
     defer gp.deinitGlobalPool();
     var local_link_pool = link.LinkPool.init(std.testing.allocator);
     defer local_link_pool.deinit();
-    const registry = try std.testing.allocator.create(handles.Registry);
-    defer std.testing.allocator.destroy(registry);
-    registry.init();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
-    const image_handle = try registry.insert(.image, @ptrCast(value));
-    defer {
-        const token = registry.beginDestroy(image_handle, .image, image.Image).?;
-        token.ptr.deinit();
-        registry.finishDestroy(token.handle);
-    }
+    defer value.deinit();
+    const image_handle: u32 = 1;
 
     for ([_]bool{ false, true }) |sixel| {
         for ([_]u32{ 0, 2, 5, 6 }) |seed_rows| {
@@ -4109,9 +4101,6 @@ test "FeedBackend - failed frame retries unsent terminal controls" {
 }
 
 test "FeedBackend - failed Sixel frame does not publish an unterminated DCS" {
-    const registry = try std.testing.allocator.create(handles.Registry);
-    defer std.testing.allocator.destroy(registry);
-    registry.init();
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     _ = link.initGlobalLinkPool(std.testing.allocator);
@@ -4141,12 +4130,8 @@ test "FeedBackend - failed Sixel frame does not publish an unterminated DCS" {
         pixels[index * 4 + 3] = 255;
     }
     const value = try image.createFromRgba(std.testing.allocator, pixels, 32, 16, 32 * 4);
-    const image_handle = try registry.insert(.image, @ptrCast(value));
-    defer {
-        const token = registry.beginDestroy(image_handle, .image, image.Image).?;
-        token.ptr.deinit();
-        registry.finishDestroy(token.handle);
-    }
+    defer value.deinit();
+    const image_handle: u32 = 1;
 
     try std.testing.expect(try cli_renderer.getNextBuffer().drawImage(
         value,
