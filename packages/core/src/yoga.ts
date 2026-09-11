@@ -1,33 +1,42 @@
-import { resolveRenderLib, type RenderLib, type SceneNodeHandle } from "./zig.js"
+import { nativeConstants } from "./native-abi.generated.js"
+import {
+  NATIVE_EDGE_NONE,
+  NATIVE_STYLE_BORDER_WIDTH,
+  NativeStyleFlags,
+  NativeStyleGroup,
+  resolveRenderLib,
+  type RenderLib,
+  type SceneNodeHandle,
+} from "./zig.js"
 import type { FFICallbackInstance, Pointer } from "./platform/ffi.js"
 import type { NativeScene } from "./NativeScene.js"
 
 export enum Align {
-  Auto = 0,
-  FlexStart = 1,
-  Center = 2,
-  FlexEnd = 3,
-  Stretch = 4,
-  Baseline = 5,
-  SpaceBetween = 6,
-  SpaceAround = 7,
-  SpaceEvenly = 8,
+  Auto = nativeConstants.OT_ALIGN_AUTO,
+  FlexStart = nativeConstants.OT_ALIGN_FLEX_START,
+  Center = nativeConstants.OT_ALIGN_CENTER,
+  FlexEnd = nativeConstants.OT_ALIGN_FLEX_END,
+  Stretch = nativeConstants.OT_ALIGN_STRETCH,
+  Baseline = nativeConstants.OT_ALIGN_BASELINE,
+  SpaceBetween = nativeConstants.OT_ALIGN_SPACE_BETWEEN,
+  SpaceAround = nativeConstants.OT_ALIGN_SPACE_AROUND,
+  SpaceEvenly = nativeConstants.OT_ALIGN_SPACE_EVENLY,
 }
 
 export enum BoxSizing {
-  BorderBox = 0,
-  ContentBox = 1,
+  BorderBox = nativeConstants.OT_BOX_SIZING_BORDER_BOX,
+  ContentBox = nativeConstants.OT_BOX_SIZING_CONTENT_BOX,
 }
 
 export enum Dimension {
-  Width = 0,
-  Height = 1,
+  Width = nativeConstants.OT_DIMENSION_WIDTH,
+  Height = nativeConstants.OT_DIMENSION_HEIGHT,
 }
 
 export enum Direction {
-  Inherit = 0,
-  LTR = 1,
-  RTL = 2,
+  Inherit = nativeConstants.OT_DIRECTION_INHERIT,
+  LTR = nativeConstants.OT_DIRECTION_LTR,
+  RTL = nativeConstants.OT_DIRECTION_RTL,
 }
 
 export enum Display {
@@ -37,15 +46,15 @@ export enum Display {
 }
 
 export enum Edge {
-  Left = 0,
-  Top = 1,
-  Right = 2,
-  Bottom = 3,
-  Start = 4,
-  End = 5,
-  Horizontal = 6,
-  Vertical = 7,
-  All = 8,
+  Left = nativeConstants.OT_EDGE_LEFT,
+  Top = nativeConstants.OT_EDGE_TOP,
+  Right = nativeConstants.OT_EDGE_RIGHT,
+  Bottom = nativeConstants.OT_EDGE_BOTTOM,
+  Start = nativeConstants.OT_EDGE_START,
+  End = nativeConstants.OT_EDGE_END,
+  Horizontal = nativeConstants.OT_EDGE_HORIZONTAL,
+  Vertical = nativeConstants.OT_EDGE_VERTICAL,
+  All = nativeConstants.OT_EDGE_ALL,
 }
 
 export enum Errata {
@@ -62,25 +71,25 @@ export enum ExperimentalFeature {
 }
 
 export enum FlexDirection {
-  Column = 0,
-  ColumnReverse = 1,
-  Row = 2,
-  RowReverse = 3,
+  Column = nativeConstants.OT_FLEX_DIRECTION_COLUMN,
+  ColumnReverse = nativeConstants.OT_FLEX_DIRECTION_COLUMN_REVERSE,
+  Row = nativeConstants.OT_FLEX_DIRECTION_ROW,
+  RowReverse = nativeConstants.OT_FLEX_DIRECTION_ROW_REVERSE,
 }
 
 export enum Gutter {
-  Column = 0,
-  Row = 1,
-  All = 2,
+  Column = nativeConstants.OT_GUTTER_COLUMN,
+  Row = nativeConstants.OT_GUTTER_ROW,
+  All = nativeConstants.OT_GUTTER_ALL,
 }
 
 export enum Justify {
-  FlexStart = 0,
-  Center = 1,
-  FlexEnd = 2,
-  SpaceBetween = 3,
-  SpaceAround = 4,
-  SpaceEvenly = 5,
+  FlexStart = nativeConstants.OT_JUSTIFY_FLEX_START,
+  Center = nativeConstants.OT_JUSTIFY_CENTER,
+  FlexEnd = nativeConstants.OT_JUSTIFY_FLEX_END,
+  SpaceBetween = nativeConstants.OT_JUSTIFY_SPACE_BETWEEN,
+  SpaceAround = nativeConstants.OT_JUSTIFY_SPACE_AROUND,
+  SpaceEvenly = nativeConstants.OT_JUSTIFY_SPACE_EVENLY,
 }
 
 export enum LogLevel {
@@ -93,9 +102,9 @@ export enum LogLevel {
 }
 
 export enum MeasureMode {
-  Undefined = 0,
-  Exactly = 1,
-  AtMost = 2,
+  Undefined = nativeConstants.OT_MEASURE_UNDEFINED,
+  Exactly = nativeConstants.OT_MEASURE_EXACTLY,
+  AtMost = nativeConstants.OT_MEASURE_AT_MOST,
 }
 
 export enum NodeType {
@@ -104,28 +113,28 @@ export enum NodeType {
 }
 
 export enum Overflow {
-  Visible = 0,
-  Hidden = 1,
-  Scroll = 2,
+  Visible = nativeConstants.OT_OVERFLOW_VISIBLE,
+  Hidden = nativeConstants.OT_OVERFLOW_HIDDEN,
+  Scroll = nativeConstants.OT_OVERFLOW_SCROLL,
 }
 
 export enum PositionType {
-  Static = 0,
-  Relative = 1,
-  Absolute = 2,
+  Static = nativeConstants.OT_POSITION_STATIC,
+  Relative = nativeConstants.OT_POSITION_RELATIVE,
+  Absolute = nativeConstants.OT_POSITION_ABSOLUTE,
 }
 
 export enum Unit {
-  Undefined = 0,
-  Point = 1,
-  Percent = 2,
-  Auto = 3,
+  Undefined = nativeConstants.OT_UNIT_UNDEFINED,
+  Point = nativeConstants.OT_UNIT_POINT,
+  Percent = nativeConstants.OT_UNIT_PERCENT,
+  Auto = nativeConstants.OT_UNIT_AUTO,
 }
 
 export enum Wrap {
-  NoWrap = 0,
-  Wrap = 1,
-  WrapReverse = 2,
+  NoWrap = nativeConstants.OT_FLEX_WRAP_NONE,
+  Wrap = nativeConstants.OT_FLEX_WRAP_WRAP,
+  WrapReverse = nativeConstants.OT_FLEX_WRAP_REVERSE,
 }
 
 export const ALIGN_AUTO = Align.Auto
@@ -245,39 +254,113 @@ type ValueInput = number | "auto" | `${number}%` | Value | undefined
 type ValueInputNoAuto = number | `${number}%` | Value | undefined
 
 export const YogaEnumKind = {
-  Direction: 0,
-  FlexDirection: 1,
-  JustifyContent: 2,
-  AlignContent: 3,
-  AlignItems: 4,
-  AlignSelf: 5,
-  PositionType: 6,
-  FlexWrap: 7,
-  Overflow: 8,
-  Display: 9,
-  BoxSizing: 10,
+  Direction: nativeConstants.OT_STYLE_ENUM_DIRECTION,
+  FlexDirection: nativeConstants.OT_STYLE_ENUM_FLEX_DIRECTION,
+  JustifyContent: nativeConstants.OT_STYLE_ENUM_JUSTIFY_CONTENT,
+  AlignContent: nativeConstants.OT_STYLE_ENUM_ALIGN_CONTENT,
+  AlignItems: nativeConstants.OT_STYLE_ENUM_ALIGN_ITEMS,
+  AlignSelf: nativeConstants.OT_STYLE_ENUM_ALIGN_SELF,
+  PositionType: nativeConstants.OT_STYLE_ENUM_POSITION_TYPE,
+  FlexWrap: nativeConstants.OT_STYLE_ENUM_FLEX_WRAP,
+  Overflow: nativeConstants.OT_STYLE_ENUM_OVERFLOW,
+  Display: nativeConstants.OT_STYLE_ENUM_DISPLAY,
+  BoxSizing: nativeConstants.OT_STYLE_ENUM_BOX_SIZING,
 } as const
 
 export const YogaFloatKind = {
-  Flex: 0,
-  FlexGrow: 1,
-  FlexShrink: 2,
-  AspectRatio: 3,
+  Flex: nativeConstants.OT_STYLE_FLOAT_FLEX,
+  FlexGrow: nativeConstants.OT_STYLE_FLOAT_FLEX_GROW,
+  FlexShrink: nativeConstants.OT_STYLE_FLOAT_FLEX_SHRINK,
+  AspectRatio: nativeConstants.OT_STYLE_FLOAT_ASPECT_RATIO,
 } as const
 
 export const YogaValueKind = {
-  Width: 0,
-  Height: 1,
-  MinWidth: 2,
-  MinHeight: 3,
-  MaxWidth: 4,
-  MaxHeight: 5,
-  FlexBasis: 6,
-  Margin: 7,
-  Padding: 8,
-  Position: 9,
-  Gap: 10,
+  Width: nativeConstants.OT_STYLE_VALUE_WIDTH,
+  Height: nativeConstants.OT_STYLE_VALUE_HEIGHT,
+  MinWidth: nativeConstants.OT_STYLE_VALUE_MIN_WIDTH,
+  MinHeight: nativeConstants.OT_STYLE_VALUE_MIN_HEIGHT,
+  MaxWidth: nativeConstants.OT_STYLE_VALUE_MAX_WIDTH,
+  MaxHeight: nativeConstants.OT_STYLE_VALUE_MAX_HEIGHT,
+  FlexBasis: nativeConstants.OT_STYLE_VALUE_FLEX_BASIS,
+  Margin: nativeConstants.OT_STYLE_VALUE_MARGIN,
+  Padding: nativeConstants.OT_STYLE_VALUE_PADDING,
+  Position: nativeConstants.OT_STYLE_VALUE_POSITION,
+  Gap: nativeConstants.OT_STYLE_VALUE_GAP,
 } as const
+
+export type YogaEnumKindId = (typeof YogaEnumKind)[keyof typeof YogaEnumKind]
+export type YogaFloatKindId = (typeof YogaFloatKind)[keyof typeof YogaFloatKind]
+export type YogaValueKindId = (typeof YogaValueKind)[keyof typeof YogaValueKind]
+
+type SceneStyleNode = { _getSceneHandle(owner: NativeScene): SceneNodeHandle }
+
+export function sceneSetEnum(scene: NativeScene, node: SceneStyleNode, kind: YogaEnumKindId, value: number): void {
+  scene.setStyle(node, NativeStyleGroup.Enum, kind, NATIVE_EDGE_NONE, Unit.Undefined, value)
+}
+
+export function sceneGetEnum(
+  scene: NativeScene,
+  node: SceneStyleNode,
+  kind: YogaEnumKindId,
+  fallback?: number,
+): number {
+  return scene.getStyle(node, NativeStyleGroup.Enum, kind, NATIVE_EDGE_NONE).value ?? fallback
+}
+
+export function sceneSetFloat(
+  scene: NativeScene,
+  node: SceneStyleNode,
+  kind: YogaFloatKindId,
+  value: number | undefined,
+): void {
+  scene.setStyle(node, NativeStyleGroup.Float, kind, NATIVE_EDGE_NONE, Unit.Undefined, value ?? NaN)
+}
+
+export function sceneGetFloat(scene: NativeScene, node: SceneStyleNode, kind: YogaFloatKindId): number {
+  return scene.getStyle(node, NativeStyleGroup.Float, kind, NATIVE_EDGE_NONE).value
+}
+
+export function sceneSetValue(
+  scene: NativeScene,
+  node: SceneStyleNode,
+  kind: YogaValueKindId,
+  edge: number,
+  valueInput: ValueInput,
+): void {
+  const value = parseYogaValue(valueInput)
+  scene.setStyle(node, NativeStyleGroup.Value, kind, edge, value.unit, value.value)
+}
+
+export function sceneGetValue(scene: NativeScene, node: SceneStyleNode, kind: YogaValueKindId, edge: number): Value {
+  return scene.getStyle(node, NativeStyleGroup.Value, kind, edge)
+}
+
+export function sceneSetDimension(
+  scene: NativeScene,
+  node: SceneStyleNode,
+  dimension: Dimension,
+  input: ValueInput,
+  disableFlexShrink: boolean = false,
+): void {
+  const value = parseYogaValue(input)
+  scene.setStyle(
+    node,
+    NativeStyleGroup.Dimension,
+    dimension,
+    NATIVE_EDGE_NONE,
+    value.unit,
+    value.value,
+    disableFlexShrink ? NativeStyleFlags.DisableFlexShrink : NativeStyleFlags.None,
+  )
+}
+
+export function sceneSetBorder(scene: NativeScene, node: SceneStyleNode, edge: Edge, border: number | undefined): void {
+  scene.setStyle(node, NativeStyleGroup.Border, NATIVE_STYLE_BORDER_WIDTH, edge, Unit.Point, border ?? NaN)
+}
+
+export function sceneGetBorder(scene: NativeScene, node: SceneStyleNode, edge: Edge): number {
+  return scene.getStyle(node, NativeStyleGroup.Border, NATIVE_STYLE_BORDER_WIDTH, edge).value
+}
 
 const YogaEdgeLayoutKind = {
   Margin: 0,
@@ -962,33 +1045,32 @@ export class Node {
   }
 
   setFlexBasis(flexBasis: ValueInput): void {
-    this.setValue(YogaValueKind.FlexBasis, 0, flexBasis)
+    this.setValue(YogaValueKind.FlexBasis, NATIVE_EDGE_NONE, flexBasis)
   }
 
   setFlexBasisPercent(flexBasis: number | undefined): void {
     this.setValue(
       YogaValueKind.FlexBasis,
-      0,
+      NATIVE_EDGE_NONE,
       flexBasis === undefined ? undefined : { unit: Unit.Percent, value: flexBasis },
     )
   }
 
   setFlexBasisAuto(): void {
-    this.setValue(YogaValueKind.FlexBasis, 0, "auto")
+    this.setValue(YogaValueKind.FlexBasis, NATIVE_EDGE_NONE, "auto")
   }
 
   getFlexBasis(): Value {
-    return this.getValue(YogaValueKind.FlexBasis, 0)
+    return this.getValue(YogaValueKind.FlexBasis, NATIVE_EDGE_NONE)
   }
 
   setWidth(width: ValueInput): void {
-    this.setValue(YogaValueKind.Width, 0, width)
+    this.setValue(YogaValueKind.Width, NATIVE_EDGE_NONE, width)
   }
 
   setDimension(dimension: Dimension, input: ValueInput, disableFlexShrink: boolean = false): void {
     if (this.backing.kind === "scene") {
-      const value = parseYogaValue(input)
-      this.backing.owner.setStyle(this, 4, dimension, 0, value.unit, value.value, disableFlexShrink ? 1 : 0)
+      sceneSetDimension(this.backing.owner, this, dimension, input, disableFlexShrink)
       return
     }
     if (this.freed) return
@@ -999,10 +1081,10 @@ export class Node {
   setPositions(positions: readonly [ValueInput, ValueInput, ValueInput, ValueInput]): void {
     if (this.backing.kind === "scene") this.assertMutable()
     if (this.freed) return
-    const units = new Uint32Array(4)
-    const values = new Float32Array(4)
+    const units = new Uint32Array(Edge.Bottom + 1)
+    const values = new Float32Array(Edge.Bottom + 1)
     let mask = 0
-    for (let edge = 0; edge < 4; edge++) {
+    for (let edge = 0; edge <= Edge.Bottom; edge++) {
       if (positions[edge] === undefined) continue
       const value = parseYogaValue(positions[edge])
       if (!Number.isInteger(value.unit) || value.unit < Unit.Undefined || value.unit > Unit.Auto) {
@@ -1017,95 +1099,103 @@ export class Node {
   }
 
   setWidthPercent(width: number | undefined): void {
-    this.setValue(YogaValueKind.Width, 0, width === undefined ? undefined : { unit: Unit.Percent, value: width })
+    this.setValue(
+      YogaValueKind.Width,
+      NATIVE_EDGE_NONE,
+      width === undefined ? undefined : { unit: Unit.Percent, value: width },
+    )
   }
 
   setWidthAuto(): void {
-    this.setValue(YogaValueKind.Width, 0, "auto")
+    this.setValue(YogaValueKind.Width, NATIVE_EDGE_NONE, "auto")
   }
 
   getWidth(): Value {
-    return this.getValue(YogaValueKind.Width, 0)
+    return this.getValue(YogaValueKind.Width, NATIVE_EDGE_NONE)
   }
 
   setHeight(height: ValueInput): void {
-    this.setValue(YogaValueKind.Height, 0, height)
+    this.setValue(YogaValueKind.Height, NATIVE_EDGE_NONE, height)
   }
 
   setHeightPercent(height: number | undefined): void {
-    this.setValue(YogaValueKind.Height, 0, height === undefined ? undefined : { unit: Unit.Percent, value: height })
+    this.setValue(
+      YogaValueKind.Height,
+      NATIVE_EDGE_NONE,
+      height === undefined ? undefined : { unit: Unit.Percent, value: height },
+    )
   }
 
   setHeightAuto(): void {
-    this.setValue(YogaValueKind.Height, 0, "auto")
+    this.setValue(YogaValueKind.Height, NATIVE_EDGE_NONE, "auto")
   }
 
   getHeight(): Value {
-    return this.getValue(YogaValueKind.Height, 0)
+    return this.getValue(YogaValueKind.Height, NATIVE_EDGE_NONE)
   }
 
   setMinWidth(minWidth: ValueInputNoAuto): void {
-    this.setValue(YogaValueKind.MinWidth, 0, minWidth)
+    this.setValue(YogaValueKind.MinWidth, NATIVE_EDGE_NONE, minWidth)
   }
 
   setMinWidthPercent(minWidth: number | undefined): void {
     this.setValue(
       YogaValueKind.MinWidth,
-      0,
+      NATIVE_EDGE_NONE,
       minWidth === undefined ? undefined : { unit: Unit.Percent, value: minWidth },
     )
   }
 
   getMinWidth(): Value {
-    return this.getValue(YogaValueKind.MinWidth, 0)
+    return this.getValue(YogaValueKind.MinWidth, NATIVE_EDGE_NONE)
   }
 
   setMinHeight(minHeight: ValueInputNoAuto): void {
-    this.setValue(YogaValueKind.MinHeight, 0, minHeight)
+    this.setValue(YogaValueKind.MinHeight, NATIVE_EDGE_NONE, minHeight)
   }
 
   setMinHeightPercent(minHeight: number | undefined): void {
     this.setValue(
       YogaValueKind.MinHeight,
-      0,
+      NATIVE_EDGE_NONE,
       minHeight === undefined ? undefined : { unit: Unit.Percent, value: minHeight },
     )
   }
 
   getMinHeight(): Value {
-    return this.getValue(YogaValueKind.MinHeight, 0)
+    return this.getValue(YogaValueKind.MinHeight, NATIVE_EDGE_NONE)
   }
 
   setMaxWidth(maxWidth: ValueInputNoAuto): void {
-    this.setValue(YogaValueKind.MaxWidth, 0, maxWidth)
+    this.setValue(YogaValueKind.MaxWidth, NATIVE_EDGE_NONE, maxWidth)
   }
 
   setMaxWidthPercent(maxWidth: number | undefined): void {
     this.setValue(
       YogaValueKind.MaxWidth,
-      0,
+      NATIVE_EDGE_NONE,
       maxWidth === undefined ? undefined : { unit: Unit.Percent, value: maxWidth },
     )
   }
 
   getMaxWidth(): Value {
-    return this.getValue(YogaValueKind.MaxWidth, 0)
+    return this.getValue(YogaValueKind.MaxWidth, NATIVE_EDGE_NONE)
   }
 
   setMaxHeight(maxHeight: ValueInputNoAuto): void {
-    this.setValue(YogaValueKind.MaxHeight, 0, maxHeight)
+    this.setValue(YogaValueKind.MaxHeight, NATIVE_EDGE_NONE, maxHeight)
   }
 
   setMaxHeightPercent(maxHeight: number | undefined): void {
     this.setValue(
       YogaValueKind.MaxHeight,
-      0,
+      NATIVE_EDGE_NONE,
       maxHeight === undefined ? undefined : { unit: Unit.Percent, value: maxHeight },
     )
   }
 
   getMaxHeight(): Value {
-    return this.getValue(YogaValueKind.MaxHeight, 0)
+    return this.getValue(YogaValueKind.MaxHeight, NATIVE_EDGE_NONE)
   }
 
   setMargin(edge: Edge, margin: ValueInput): void {
@@ -1174,7 +1264,7 @@ export class Node {
 
   setBorder(edge: Edge, border: number | undefined): void {
     if (this.backing.kind === "scene") {
-      this.backing.owner.setStyle(this, 3, 0, edge, Unit.Point, border ?? NaN)
+      sceneSetBorder(this.backing.owner, this, edge, border)
       return
     }
     if (this.freed) return
@@ -1182,7 +1272,7 @@ export class Node {
   }
 
   getBorder(edge: Edge): number {
-    if (this.backing.kind === "scene") return this.backing.owner.getStyle(this, 3, 0, edge).value
+    if (this.backing.kind === "scene") return sceneGetBorder(this.backing.owner, this, edge)
     if (this.freed) return NaN
     return this.renderLib.yogaNodeStyleGetBorder(this.ptr, edge)
   }
@@ -1268,40 +1358,39 @@ export class Node {
     })
   }
 
-  private setEnum(kind: number, value: number): void {
+  private setEnum(kind: YogaEnumKindId, value: number): void {
     if (this.backing.kind === "scene") {
-      this.backing.owner.setStyle(this, 0, kind, 0, Unit.Undefined, value)
+      sceneSetEnum(this.backing.owner, this, kind, value)
       return
     }
     if (this.freed) return
     this.renderLib.yogaNodeStyleSetEnum(this.ptr, kind, value)
   }
 
-  private getEnum(kind: number, fallback: number): number {
-    if (this.backing.kind === "scene") return this.backing.owner.getStyle(this, 0, kind, 0).value
+  private getEnum(kind: YogaEnumKindId, fallback: number): number {
+    if (this.backing.kind === "scene") return sceneGetEnum(this.backing.owner, this, kind)
     if (this.freed) return fallback
     return this.renderLib.yogaNodeStyleGetEnum(this.ptr, kind)
   }
 
-  private setFloat(kind: number, value: number | undefined): void {
+  private setFloat(kind: YogaFloatKindId, value: number | undefined): void {
     if (this.backing.kind === "scene") {
-      this.backing.owner.setStyle(this, 1, kind, 0, Unit.Undefined, value ?? NaN)
+      sceneSetFloat(this.backing.owner, this, kind, value)
       return
     }
     if (this.freed) return
     this.renderLib.yogaNodeStyleSetFloat(this.ptr, kind, value ?? NaN)
   }
 
-  private getFloat(kind: number): number {
-    if (this.backing.kind === "scene") return this.backing.owner.getStyle(this, 1, kind, 0).value
+  private getFloat(kind: YogaFloatKindId): number {
+    if (this.backing.kind === "scene") return sceneGetFloat(this.backing.owner, this, kind)
     if (this.freed) return NaN
     return this.renderLib.yogaNodeStyleGetFloat(this.ptr, kind)
   }
 
-  private setValue(kind: number, edgeOrGutter: number, valueInput: ValueInput): void {
+  private setValue(kind: YogaValueKindId, edgeOrGutter: number, valueInput: ValueInput): void {
     if (this.backing.kind === "scene") {
-      const value = parseYogaValue(valueInput)
-      this.backing.owner.setStyle(this, 2, kind, edgeOrGutter, value.unit, value.value)
+      sceneSetValue(this.backing.owner, this, kind, edgeOrGutter, valueInput)
       return
     }
     if (this.freed) return
@@ -1309,8 +1398,8 @@ export class Node {
     this.renderLib.yogaNodeStyleSetValue(this.ptr, kind, edgeOrGutter, value.unit, value.value)
   }
 
-  private getValue(kind: number, edgeOrGutter: number): Value {
-    if (this.backing.kind === "scene") return this.backing.owner.getStyle(this, 2, kind, edgeOrGutter)
+  private getValue(kind: YogaValueKindId, edgeOrGutter: number): Value {
+    if (this.backing.kind === "scene") return sceneGetValue(this.backing.owner, this, kind, edgeOrGutter)
     if (this.freed) return UNDEFINED_VALUE
     return unpackValue(this.renderLib.yogaNodeStyleGetValue(this.ptr, kind, edgeOrGutter))
   }

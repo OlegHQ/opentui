@@ -11,6 +11,13 @@ import {
   YogaFloatKind,
   YogaValueKind,
   parseYogaValue,
+  sceneGetEnum,
+  sceneGetFloat,
+  sceneGetValue,
+  sceneSetDimension,
+  sceneSetEnum,
+  sceneSetFloat,
+  sceneSetValue,
   type Layout,
   type MeasureFunction,
   type Value,
@@ -45,8 +52,6 @@ import {
   NativeBorder,
   NativeSceneFrame,
   NativeSceneHook,
-  NativeStyleFlags,
-  NativeStyleGroup,
   type NativeSceneFrameRequest,
   type NativeSceneLayout,
   type NativeScenePaint,
@@ -931,19 +936,19 @@ export abstract class Renderable extends BaseRenderable {
   }
 
   private yogaSetEnum(kind: (typeof YogaEnumKind)[keyof typeof YogaEnumKind], value: number): void {
-    this._ctx.nativeScene.setStyle(this, NativeStyleGroup.Enum, kind, NATIVE_EDGE_NONE, Unit.Undefined, value)
+    sceneSetEnum(this._ctx.nativeScene, this, kind, value)
   }
 
   private yogaGetEnum(kind: (typeof YogaEnumKind)[keyof typeof YogaEnumKind], fallback: number): number {
-    return this._ctx.nativeScene.getStyle(this, NativeStyleGroup.Enum, kind, NATIVE_EDGE_NONE).value ?? fallback
+    return sceneGetEnum(this._ctx.nativeScene, this, kind, fallback)
   }
 
   private yogaSetFloat(kind: (typeof YogaFloatKind)[keyof typeof YogaFloatKind], value: number | undefined): void {
-    this._ctx.nativeScene.setStyle(this, NativeStyleGroup.Float, kind, NATIVE_EDGE_NONE, Unit.Undefined, value ?? NaN)
+    sceneSetFloat(this._ctx.nativeScene, this, kind, value)
   }
 
   private yogaGetFloat(kind: (typeof YogaFloatKind)[keyof typeof YogaFloatKind]): number {
-    return this._ctx.nativeScene.getStyle(this, NativeStyleGroup.Float, kind, NATIVE_EDGE_NONE).value
+    return sceneGetFloat(this._ctx.nativeScene, this, kind)
   }
 
   private yogaSetValue(
@@ -951,12 +956,11 @@ export abstract class Renderable extends BaseRenderable {
     edge: number,
     valueInput: number | "auto" | `${number}%` | Value | undefined,
   ): void {
-    const value = parseYogaValue(valueInput)
-    this._ctx.nativeScene.setStyle(this, NativeStyleGroup.Value, kind, edge, value.unit, value.value)
+    sceneSetValue(this._ctx.nativeScene, this, kind, edge, valueInput)
   }
 
   private yogaGetValue(kind: (typeof YogaValueKind)[keyof typeof YogaValueKind], edge: number): Value {
-    return this._ctx.nativeScene.getStyle(this, NativeStyleGroup.Value, kind, edge)
+    return sceneGetValue(this._ctx.nativeScene, this, kind, edge)
   }
 
   setDisplay(display: Display): void {
@@ -1080,16 +1084,7 @@ export abstract class Renderable extends BaseRenderable {
     input: number | "auto" | `${number}%`,
     disableFlexShrink: boolean = false,
   ): void {
-    const value = parseYogaValue(input)
-    this._ctx.nativeScene.setStyle(
-      this,
-      NativeStyleGroup.Dimension,
-      dimension,
-      NATIVE_EDGE_NONE,
-      value.unit,
-      value.value,
-      disableFlexShrink ? NativeStyleFlags.DisableFlexShrink : NativeStyleFlags.None,
-    )
+    sceneSetDimension(this._ctx.nativeScene, this, dimension, input, disableFlexShrink)
   }
 
   setPositions(positions: readonly [unknown, unknown, unknown, unknown]): void {

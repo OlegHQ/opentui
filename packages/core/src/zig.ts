@@ -344,6 +344,9 @@ export enum NativeStyleFlags {
 /** ENUM/FLOAT/DIMENSION writes occupy this unused-edge slot. */
 export const NATIVE_EDGE_NONE = nativeConstants.OT_EDGE_NONE
 
+/** Scene border style reads use this width kind. */
+export const NATIVE_STYLE_BORDER_WIDTH = nativeConstants.OT_STYLE_BORDER_WIDTH
+
 export enum NativeBorder {
   None = nativeConstants.OT_BORDER_NONE,
   Left = nativeConstants.OT_BORDER_LEFT,
