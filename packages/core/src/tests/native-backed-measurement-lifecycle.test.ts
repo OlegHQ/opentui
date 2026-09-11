@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
 import { Renderable, RenderableEvents } from "../Renderable.js"
@@ -222,7 +221,7 @@ describe("native-backed measurement lifecycle", () => {
         expect(() => node.destroy()).toThrow(failure)
       }
       expect(node.isDestroyed).toBe(false)
-      expect(getYogaNode(node).isFreed()).toBe(false)
+      expect(node.isFreed()).toBe(false)
     }
     expect(text.textNode.children).toEqual(children)
     expect(input.traits).toEqual({ status: "active" })
@@ -291,9 +290,8 @@ describe("native-backed measurement lifecycle", () => {
       input.focus()
       input.value = "after"
       input.setMeasureProvider(() => ({ width: 7, height: 1 }))
-      const node = getYogaNode(input)
       const scene = renderer.nativeScene
-      const handle = node._getSceneHandle(scene)
+      const handle = input._getSceneHandle(scene)
       const events: string[] = []
       for (const [event, name] of [
         [EditBufferRenderableEvents.TRAITS_CHANGED, "traits"],
@@ -302,7 +300,7 @@ describe("native-backed measurement lifecycle", () => {
         input.on(event, () => {
           events.push(name)
           expect(input.isDestroyed).toBe(false)
-          expect(node.hasMeasureFunc()).toBe(true)
+          expect(input.hasMeasureFunc()).toBe(true)
           expect(input.parent).toBe(renderer.root)
           input.destroy()
           input.destroyRecursively()
@@ -320,7 +318,7 @@ describe("native-backed measurement lifecycle", () => {
         input[method]()
         expect(events).toEqual(["traits", "change", "blurred", "destroyed"])
         expect(release).toHaveBeenCalledTimes(1)
-        expect(node.isFreed()).toBe(true)
+        expect(input.isFreed()).toBe(true)
         assert.throws(() => scene.driver.renderLib.sceneHasMeasure(scene.driver.context, handle), {
           status: NativeStatus.StaleHandle,
         })
@@ -356,9 +354,12 @@ describe("native-backed measurement lifecycle", () => {
       input.on(RenderableEvents.DESTROYED, () => events.push("input"))
       parent.on(RenderableEvents.DESTROYED, () => {
         events.push("parent")
-        expect([input.isDestroyed, getYogaNode(input).isFreed(), input.focused, ancestor.hasFocusedDescendant]).toEqual(
-          [true, true, false, false],
-        )
+        expect([input.isDestroyed, input.isFreed(), input.focused, ancestor.hasFocusedDescendant]).toEqual([
+          true,
+          true,
+          false,
+          false,
+        ])
       })
       if (behavior === "throws") expect(() => input.destroy()).toThrow(failure)
       else input.destroy()
@@ -367,7 +368,7 @@ describe("native-backed measurement lifecycle", () => {
           ? ["change", "change-return", "input", "blurred", "parent"]
           : ["change", "change-return", "blurred", "input", "parent"],
       )
-      expect(getYogaNode(parent).isFreed()).toBe(true)
+      expect(parent.isFreed()).toBe(true)
       expect(ancestor.isDestroyed).toBe(false)
     },
   )
@@ -396,7 +397,7 @@ describe("native-backed measurement lifecycle", () => {
       )
       expect(events).toEqual(["blurred", "destroyed"])
       expect(remove).toHaveBeenCalledTimes(1)
-      expect(getYogaNode(textarea).isFreed()).toBe(true)
+      expect(textarea.isFreed()).toBe(true)
       expect(() => textarea.editBuffer.getText()).toThrow("destroyed")
       expect(() => textarea.editorView.getVirtualLineCount()).toThrow("destroyed")
       resolveRenderLib().getYogaHost().throwCallbackError()
@@ -452,7 +453,7 @@ describe("native-backed measurement lifecycle", () => {
         expect(text.parent).toBeNull()
         expect(parent.getChildrenCount()).toBe(0)
         expect(parent.liveCount).toBe(0)
-        expect(getYogaNode(text).isFreed()).toBe(true)
+        expect(text.isFreed()).toBe(true)
         expect(() => internals.textBuffer.getPlainText()).toThrow("destroyed")
         text.destroy()
       } finally {
@@ -477,7 +478,7 @@ describe("native-backed measurement lifecycle", () => {
     renderer.on(CliRenderEvents.FOCUSED_EDITOR, onFocus)
     try {
       expect(() => input.destroy()).toThrow(failure)
-      expect(getYogaNode(input).isFreed()).toBe(true)
+      expect(input.isFreed()).toBe(true)
       expect(renderer.currentFocusedRenderable).toBeNull()
       expect(input.focused).toBe(false)
       expect(ancestor.hasFocusedDescendant).toBe(false)
@@ -518,7 +519,7 @@ describe("native-backed measurement lifecycle", () => {
     const children = lines.getChildren()
     const child = kind === "target" ? target : children.find((node) => node !== target)!
     await renderOnce()
-    const before = renderer.nativeScene.getLayout(getYogaNode(child))
+    const before = renderer.nativeScene.getLayout(child)
     for (const move of [() => other.add(child), () => other.insertBefore(child, anchor)]) {
       expect(move).toThrow(`LineNumberRenderable: Cannot remove ${kind} directly.`)
       expect(lines.getChildren()).toEqual(children)
@@ -526,7 +527,7 @@ describe("native-backed measurement lifecycle", () => {
       expect(child.parent).toBe(lines)
       expect(target.listenerCount("line-info-change")).toBe(1)
       await renderOnce()
-      expect(renderer.nativeScene.getLayout(getYogaNode(child))).toEqual(before)
+      expect(renderer.nativeScene.getLayout(child)).toEqual(before)
     }
   })
 
@@ -624,7 +625,7 @@ describe("native-backed measurement lifecycle", () => {
           expect(siblings[index]).toBe(child)
           expect(index).toBe(method === "add" ? siblings.length - 1 : siblings.indexOf(anchor) - 1)
           renderer.nativeScene.measureSnapshot(other)
-          expect(getYogaNode(child).getComputedTop()).toBe(index + 2)
+          expect(child.getComputedTop()).toBe(index + 2)
         }
         if (change === "parent") expect(previous.isDestroyed).toBe(true)
         else expect(previous.getChildrenCount()).toBe(0)
@@ -653,7 +654,7 @@ describe("native-backed measurement lifecycle", () => {
         expect(target.listenerCount("line-info-change")).toBe(0)
         expect(lines.getChildrenCount()).toBe(0)
         expect(target.isDestroyed).toBe(entry === "target" || entry === "reentrant target")
-        expect(getYogaNode(gutter).isFreed()).toBe(true)
+        expect(gutter.isFreed()).toBe(true)
         expect(replacement.parent).toBeNull()
         expect(replacement.listenerCount("line-info-change")).toBe(0)
       } finally {
@@ -682,11 +683,7 @@ describe("native-backed measurement lifecycle", () => {
     second.on(RenderableEvents.DESTROYED, () => events.push("second"))
     parent.on(RenderableEvents.DESTROYED, () => {
       events.push("parent")
-      expect([getYogaNode(first).isFreed(), getYogaNode(second).isFreed(), getYogaNode(parent).isFreed()]).toEqual([
-        true,
-        true,
-        false,
-      ])
+      expect([first.isFreed(), second.isFreed(), parent.isFreed()]).toEqual([true, true, false])
       if (throws) throw new Error("later parent failure")
     })
     if (throws)
@@ -696,7 +693,7 @@ describe("native-backed measurement lifecycle", () => {
       )
     else parent.destroyRecursively()
     expect(events).toEqual(["first", "second", "parent"])
-    expect(getYogaNode(parent).isFreed()).toBe(true)
+    expect(parent.isFreed()).toBe(true)
   })
 
   test("destroying a text renderable keeps sibling measurement working", async () => {

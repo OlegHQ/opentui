@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { afterEach, spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
 
@@ -267,7 +266,7 @@ test("native 10000-entry ScrollBox frames never traverse or read content child l
   const rows = addRows(target, scroll, 10_000)
   target.renderer.root.add(scroll)
   const scene = target.renderer.nativeScene!
-  const childSlots = new Set(rows.map((row) => getYogaNode(row)._getSceneHandle(scene).slot))
+  const childSlots = new Set(rows.map((row) => row._getSceneHandle(scene).slot))
   const internalCount = tree(target.renderer.root).length - rows.length
   for (const operation of ["initial", "steady", "down", "up", "changed"] as const) {
     if (operation === "down") scroll.scrollTo(1_000_000)

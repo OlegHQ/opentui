@@ -8,7 +8,6 @@ import { parsePatch, type StructuredPatch } from "diff"
 import { TextRenderable } from "./Text.js"
 import type { TreeSitterClient } from "../lib/tree-sitter/index.js"
 import type { MouseEvent } from "../renderer.js"
-import { getYogaNode } from "../lib/renderable-layout.js"
 
 interface LogicalLine {
   content: string
@@ -315,7 +314,7 @@ export class DiffRenderable extends Renderable {
 
   public override destroyRecursively(): void {
     if (this.isDestroyed) return
-    getYogaNode(this).assertMutable()
+    this.assertMutable()
     this.runCleanup((run) => {
       run(() => this.detachLineInfoListeners())
       this.pendingRebuild = false

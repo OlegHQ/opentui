@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import {
   BoxRenderable,
   MarkdownRenderable,
@@ -782,7 +781,7 @@ function yogaLayoutReadsCase(): BenchmarkCase {
       const nodes = Array.from({ length: YOGA_NODE_COUNT }, (_, index) => {
         const node = new BoxRenderable(renderer, { width: "100%", height: 1, flexShrink: 0 })
         root.add(node)
-        return getYogaNode(node)
+        return node
       })
       await renderOnce()
       try {
@@ -880,7 +879,7 @@ function mouseCase(name: string, stdin: boolean): BenchmarkCase {
   }
 }
 
-function validateYogaFixture(nodes: readonly ReturnType<typeof getYogaNode>[]): void {
+function validateYogaFixture(nodes: readonly BoxRenderable[]): void {
   for (let index = 0; index < nodes.length; index++) {
     const layout = nodes[index]!.getComputedLayout()
     if (

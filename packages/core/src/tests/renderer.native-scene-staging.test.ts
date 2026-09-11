@@ -3,7 +3,6 @@ import assert from "node:assert/strict"
 import { NativeSession } from "../NativeSession.js"
 import type { OptimizedBuffer } from "../buffer.js"
 import { RGBA } from "../lib/RGBA.js"
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { CliRenderEvents } from "../renderer.js"
 import { BoxRenderable } from "../renderables/Box.js"
 import { TextRenderable } from "../renderables/Text.js"
@@ -83,7 +82,7 @@ test("property getters report requested values while style reads accept staging 
   assert.equal(box.opacity, 0.5)
   assert.deepEqual(box.backgroundColor.toInts(), [255, 0, 0, 255])
   assert.equal(target.renderer.nativeScene.hasStagedMutations, true)
-  assert.equal(getYogaNode(box).getWidth().value, 7)
+  assert.equal(box.getWidth().value, 7)
   assert.equal(target.renderer.nativeScene.hasStagedMutations, false)
   assert.equal(box.width, 4)
   await target.frame()
@@ -210,7 +209,7 @@ test("measurement callbacks observe staged writes in another scene without flush
   await target.frame()
   assert.equal(peer.renderer.nativeScene.hasStagedMutations, true)
   const box = new BoxRenderable(target.renderer, { alignSelf: "flex-start" })
-  box.setMeasureProvider(() => ({ width: getYogaNode(peerBox).getWidth().value, height: 1 }))
+  box.setMeasureProvider(() => ({ width: peerBox.getWidth().value, height: 1 }))
   target.renderer.root.add(box)
   await target.frame()
   assert.equal(box.width, 7)

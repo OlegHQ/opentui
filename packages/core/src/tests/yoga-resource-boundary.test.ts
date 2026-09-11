@@ -1,6 +1,5 @@
 import { expect, spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { h } from "../renderables/composition/vnode.js"
 import { BoxRenderable } from "../renderables/Box.js"
 import { createTestRenderer } from "../testing/test-renderer.js"
@@ -229,8 +228,8 @@ test("measurement reentry leaves renderer projections, topology and VNode factor
       expect(() => scene.measureSnapshot(observer)).toThrow("Cannot mutate Yoga during a callback")
       expect(scene.hasStagedMutations).toBe(false)
       expect([child.width, child.height, child.visible, child.overflow]).toEqual([2, 1, true, "visible"])
-      expect(getYogaNode(child).getPositionType()).toBe(Yoga.PositionType.Relative)
-      expect(getYogaNode(child).getFlexShrink()).toBe(0)
+      expect(child.getPositionType()).toBe(Yoga.PositionType.Relative)
+      expect(child.getFlexShrink()).toBe(0)
       expect(parent.getChildren()).toEqual([child])
       expect(other.getChildren()).toEqual([])
       expect(child.parent).toBe(parent)
@@ -304,8 +303,8 @@ test("rejected dimension flush retains implicit flex-shrink through unchanged an
         reject.mockRestore()
       }
       box.width = next
-      expect(getYogaNode(box).getWidth().value).toBe(next)
-      expect(getYogaNode(box).getFlexShrink()).toBe(0)
+      expect(box.getWidth().value).toBe(next)
+      expect(box.getFlexShrink()).toBe(0)
       expect(scene.hasStagedMutations).toBe(false)
     }
   } finally {

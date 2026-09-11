@@ -1,4 +1,3 @@
-import { getYogaNode } from "../../lib/renderable-layout.js"
 import type { Renderable } from "../../Renderable.js"
 import { test, expect, beforeAll, beforeEach, afterEach, afterAll } from "bun:test"
 import { Edge } from "../../yoga.js"
@@ -203,7 +202,7 @@ function findRenderedText(text: string): { x: number; y: number } {
 }
 
 function getMarginBottom(renderable: Renderable): number {
-  const margin = getYogaNode(renderable).getMargin(Edge.Bottom) as unknown
+  const margin = renderable.getMargin(Edge.Bottom) as unknown
   if (typeof margin === "number") return margin
   if (typeof margin === "object" && margin && "value" in margin && typeof margin.value === "number") {
     return margin.value

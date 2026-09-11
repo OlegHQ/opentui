@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { expect, test } from "bun:test"
 import assert from "node:assert/strict"
 import { Renderable, RenderableEvents } from "../Renderable.js"
@@ -34,7 +33,6 @@ test.each([false, true])("raw cleanup failures preserve an earlier step failure=
   try {
     const box = new FailingBox(renderer, { width: 1, height: 1 })
     renderer.root.add(box)
-    const node = getYogaNode(box)
     let caught: unknown = "not thrown"
     try {
       box.destroy()
@@ -44,7 +42,7 @@ test.each([false, true])("raw cleanup failures preserve an earlier step failure=
     expect(caught).toBe(stepFails ? undefined : rawFailure)
     expect(calls).toEqual(["continued", "released"])
     expect(box.isDestroyed).toBe(true)
-    expect(node.isFreed()).toBe(true)
+    expect(box.isFreed()).toBe(true)
     expect(renderer.root.getChildren()).toEqual([])
   } finally {
     renderer.destroy()
@@ -101,18 +99,17 @@ test("destroys mixed native wrappers child-first after a child listener throws",
       owned.push(...children)
       node.on(RenderableEvents.DESTROYED, () => {
         destroyCount++
-        if (children.some((child) => !destroyed.has(child) || !child.isDestroyed || !getYogaNode(child).isFreed())) {
+        if (children.some((child) => !destroyed.has(child) || !child.isDestroyed || !child.isFreed())) {
           parentFirstCount++
         }
         destroyed.add(node)
       })
     }
-    const layoutNodes = owned.map((node) => getYogaNode(node))
     const scene = renderer.nativeScene!
-    const nativeHandles = layoutNodes.map((node) => node._getSceneHandle(scene))
+    const nativeHandles = owned.map((node) => node._getSceneHandle(scene))
     expect(owned.includes(scrollbox.content)).toBe(true)
     expect(owned.filter((node) => node.parent === lineNumbers).length).toBe(2)
-    expect(layoutNodes.every((node) => !node.isFreed())).toBe(true)
+    expect(owned.every((node) => !node.isFreed())).toBe(true)
     throwingChild.on(RenderableEvents.DESTROYED, throwOnDestroy)
     await renderOnce()
     expect(captureCharFrame()).toContain("before")
@@ -127,7 +124,7 @@ test("destroys mixed native wrappers child-first after a child listener throws",
     expect(new Set(Renderable.renderablesByNumber.keys())).toEqual(registered)
     expect(owned.every((node) => node.isDestroyed && node.parent === null)).toBe(true)
     expect(owned.every((node) => node.listenerCount(RenderableEvents.DESTROYED) === 0)).toBe(true)
-    expect(layoutNodes.every((node) => node.isFreed())).toBe(true)
+    expect(owned.every((node) => node.isFreed())).toBe(true)
     for (const handle of nativeHandles) {
       assert.throws(() => scene.driver.renderLib.sceneGetLayout(scene.driver.context, handle), {
         status: NativeStatus.StaleHandle,
@@ -141,7 +138,7 @@ test("destroys mixed native wrappers child-first after a child listener throws",
     expect(destroyCount).toBe(owned.length)
     expect(recursiveCalls).toBe(1)
 
-    expect(getYogaNode(renderer.root).isFreed()).toBe(false)
+    expect(renderer.root.isFreed()).toBe(false)
     expect(survivor.isDestroyed).toBe(false)
     survivor.content = "still usable"
     await renderOnce()

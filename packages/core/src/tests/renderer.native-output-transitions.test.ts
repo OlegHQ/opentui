@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { test } from "bun:test"
 import assert from "node:assert/strict"
 import { setImmediate } from "node:timers/promises"
@@ -177,12 +176,7 @@ test("native width shrink completes before an optional pixel query consumes the 
     stdout.chunks.length = 0
     assert.doesNotThrow(() => renderer.resize(18, 10))
     assert.deepEqual(
-      [
-        renderer.width,
-        renderer.height,
-        getYogaNode(renderer.root).getWidth().value,
-        getYogaNode(renderer.root).getHeight().value,
-      ],
+      [renderer.width, renderer.height, renderer.root.getWidth().value, renderer.root.getHeight().value],
       [18, 3, 18, 3],
     )
     assert.deepEqual(sizes, [[18, 3]])
@@ -250,7 +244,7 @@ test("native resize rejects an oversized scrub without publishing geometry or co
     for (let attempt = 0; attempt < 2; attempt++) {
       assert.throws(() => renderer.resize(18, 10), { status: NativeStatus.OutputBackpressure })
       assert.deepEqual([renderer.width, renderer.height], [24, 3])
-      assert.equal(getYogaNode(renderer.root).getWidth().value, 24)
+      assert.equal(renderer.root.getWidth().value, 24)
       assert.equal(renderer.currentRenderBuffer.width, 24)
       assert.equal(renderer.nextRenderBuffer.width, 24)
       assert.deepEqual(sizes, [])

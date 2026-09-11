@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { test, expect, spyOn } from "bun:test"
 import { Readable } from "node:stream"
 import { Renderable, RenderableEvents } from "../Renderable.js"
@@ -43,7 +42,7 @@ test.each([
     height: 5,
     onDestroy() {
       events.push("onDestroy")
-      onDestroyState = nodes.map((node) => getYogaNode(node).isFreed())
+      onDestroyState = nodes.map((node) => node.isFreed())
     },
   })
   await renderer.setupTerminal()
@@ -90,7 +89,7 @@ test.each([
   const nativeDestroy = spyOn(lib, "destroyContext").mockImplementation((handle) => {
     if (handle === context) {
       events.push("native")
-      nativeReleaseState = nodes.map((node) => getYogaNode(node).isFreed())
+      nativeReleaseState = nodes.map((node) => node.isFreed())
     }
     destroyContext(handle)
   })
@@ -176,11 +175,11 @@ test.each([
       onDestroy() {
         events.push("onDestroy")
         onDestroyState = {
-          lineNumberFreed: getYogaNode(lineNumbers).isFreed(),
+          lineNumberFreed: lineNumbers.isFreed(),
           gutterDestroyed: gutter.isDestroyed,
-          gutterFreed: getYogaNode(gutter).isFreed(),
+          gutterFreed: gutter.isFreed(),
           targetDestroyed: target.isDestroyed,
-          targetFreed: getYogaNode(target).isFreed(),
+          targetFreed: target.isFreed(),
         }
       },
     })
@@ -253,13 +252,13 @@ test("detached cleanup only delays its own renderer context", async () => {
   const { renderer } = await createTestRenderer({
     onDestroy() {
       events.push("owner")
-      ownerFreed = getYogaNode(widget).isFreed()
+      ownerFreed = widget.isFreed()
     },
   })
   const { renderer: other } = await createTestRenderer({
     onDestroy() {
       events.push("other")
-      otherFreed = getYogaNode(widget).isFreed()
+      otherFreed = widget.isFreed()
     },
   })
   widget = new TextRenderable(renderer, { content: "detached" })
@@ -291,11 +290,10 @@ test("rejected recursive self admission releases the walk index and permits retr
     },
   })
   const widget = new TextRenderable(renderer, { content: "owned" })
-  const node = getYogaNode(widget)
-  const assertMutable = node.assertMutable.bind(node)
+  const assertMutable = widget.assertMutable.bind(widget)
   const failure = new Error("injected recursive self admission failure")
   let calls = 0
-  const begin = spyOn(node, "assertMutable").mockImplementation(() => {
+  const begin = spyOn(widget, "assertMutable").mockImplementation(() => {
     if (++calls === 2) throw failure
     assertMutable()
   })
@@ -306,7 +304,7 @@ test("rejected recursive self admission releases the walk index and permits retr
     expect(renderer.root._deferUntilCleanupComplete(() => {})).toBe(false)
     begin.mockRestore()
     widget.destroyRecursively()
-    expect(getYogaNode(widget).isFreed()).toBe(true)
+    expect(widget.isFreed()).toBe(true)
     renderer.destroy()
     expect(destroyed).toBe(true)
   } finally {

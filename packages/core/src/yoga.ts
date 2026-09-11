@@ -657,48 +657,18 @@ export class Config {
   }
 }
 
-type NodeBacking =
-  | { kind: "legacy"; ptr: Pointer; config: Config }
-  | { kind: "scene"; owner: NativeScene; handle: SceneNodeHandle }
-
 export class Node {
   private freed = false
 
-  private constructor(private readonly backing: NodeBacking) {
-    if (backing.kind === "legacy") backing.config.nodes.set(backing.ptr, this)
-  }
-
-  get ptr(): Pointer {
-    if (this.backing.kind === "scene") throw new Error("Native scene Yoga nodes do not expose raw pointers")
-    return this.backing.ptr
-  }
-
-  private get config(): Config {
-    if (this.backing.kind === "scene") throw new Error("Native scene Yoga nodes do not have a legacy config")
-    return this.backing.config
+  private constructor(
+    readonly ptr: Pointer,
+    private readonly config: Config,
+  ) {
+    config.nodes.set(ptr, this)
   }
 
   private get renderLib(): RenderLib {
-    return this.backing.kind === "scene" ? this.backing.owner.driver.renderLib : this.backing.config.renderLib
-  }
-
-  /** @internal Scene nodes retain checked handles, never borrowed Yoga pointers. */
-  static _createForScene(owner: NativeScene, handle: SceneNodeHandle): Node {
-    return new Node({ kind: "scene", owner, handle: Object.freeze(handle) })
-  }
-
-  /** @internal Only the matching scene can use this node's handle. */
-  _getSceneHandle(owner: NativeScene): SceneNodeHandle {
-    if (this.backing.kind !== "scene" || this.backing.owner !== owner) {
-      throw new Error("Yoga node belongs to a different native scene")
-    }
-    owner.assertAlive()
-    if (this.freed) throw new Error("Native scene Yoga node is freed")
-    return this.backing.handle
-  }
-
-  private assertLegacy(operation: string): void {
-    if (this.backing.kind === "scene") throw new Error(`Native scene Yoga nodes do not support ${operation}`)
+    return this.config.renderLib
   }
 
   static create(config?: Config): Node {
@@ -728,7 +698,7 @@ export class Node {
     const config = Config.fromBorrowedPointer(renderLib.yogaNodeGetConfig(ptr), renderLib)
     const existing = config.nodes.get(ptr)
     if (existing) return existing
-    return new Node({ kind: "legacy", ptr, config })
+    return new Node(ptr, config)
   }
 
   isFreed(): boolean {
@@ -737,20 +707,13 @@ export class Node {
 
   assertMutable(): void {
     this.renderLib.getYogaHost().assertMutable()
-    if (this.backing.kind === "scene") {
-      this._getSceneHandle(this.backing.owner)
-    }
   }
 
   runMutation<T>(operation: () => T): T {
-    if (this.backing.kind === "scene") {
-      this.assertMutable()
-    }
     return this.renderLib.getYogaHost().runMutation(operation)
   }
 
   free(): void {
-    this.assertLegacy("free; destroy the renderable instead")
     if (this.freed) return
     this.assertMutable()
 
@@ -761,7 +724,6 @@ export class Node {
   }
 
   freeRecursive(): void {
-    this.assertLegacy("recursive free; destroy the renderable instead")
     if (this.freed) return
     this.assertMutable()
     const nodes = this.collectSubtree([])
@@ -771,15 +733,7 @@ export class Node {
     })
   }
 
-  /** @internal Invalidate the facade before its native owner releases the node. */
-  _invalidateFromOwner(): void {
-    if (this.freed) return
-    if (this.backing.kind !== "scene") throw new Error("Only native scene Yoga nodes can be invalidated by their owner")
-    this.freed = true
-  }
-
   reset(): void {
-    this.assertLegacy("reset")
     if (this.freed) return
     this.runMutation(() => {
       this.renderLib.yogaNodeReset(this.ptr)
@@ -788,54 +742,46 @@ export class Node {
   }
 
   copyStyle(node: Node): void {
-    this.assertLegacy("copyStyle")
     if (this.freed) return
     this.assertSameLibrary(node)
     this.renderLib.yogaNodeCopyStyle(this.ptr, node.ptr)
   }
 
   insertChild(child: Node, index: number): void {
-    this.assertLegacy("raw topology mutation")
     if (this.freed) return
     this.assertSameLibrary(child)
     this.renderLib.yogaNodeInsertChild(this.ptr, child.ptr, index)
   }
 
   removeChild(child: Node): void {
-    this.assertLegacy("raw topology mutation")
     if (this.freed) return
     this.assertSameLibrary(child)
     this.renderLib.yogaNodeRemoveChild(this.ptr, child.ptr)
   }
 
   removeAllChildren(): void {
-    this.assertLegacy("raw topology mutation")
     if (this.freed) return
     this.renderLib.yogaNodeRemoveAllChildren(this.ptr)
   }
 
   getChild(index: number): Node | null {
-    this.assertLegacy("topology queries; use the renderable instead")
     if (this.freed) return null
     const child = this.renderLib.yogaNodeGetChild(this.ptr, index)
     return child ? Node.fromPointer(child, this.renderLib) : null
   }
 
   getChildCount(): number {
-    this.assertLegacy("topology queries; use the renderable instead")
     if (this.freed) return 0
     return this.renderLib.yogaNodeGetChildCount(this.ptr)
   }
 
   getParent(): Node | null {
-    this.assertLegacy("topology queries; use the renderable instead")
     if (this.freed) return null
     const parent = this.renderLib.yogaNodeGetParent(this.ptr)
     return parent ? Node.fromPointer(parent, this.renderLib) : null
   }
 
   calculateLayout(width?: number | "auto", height?: number | "auto", direction: Direction = Direction.LTR): void {
-    this.assertLegacy("manual layout; paint or query the native scene instead")
     if (this.freed) return
     this.renderLib.yogaNodeCalculateLayout(
       this.ptr,
@@ -846,38 +792,26 @@ export class Node {
   }
 
   hasNewLayout(): boolean {
-    this.assertLegacy("layout flags")
     if (this.freed) return false
     return this.renderLib.yogaNodeGetHasNewLayout(this.ptr)
   }
 
   markLayoutSeen(): void {
-    this.assertLegacy("layout flags")
     if (this.freed) return
     this.renderLib.yogaNodeSetHasNewLayout(this.ptr, false)
   }
 
   markDirty(): void {
-    if (this.backing.kind === "scene") {
-      this.assertMutable()
-      this.backing.owner.markDirty(this)
-      return
-    }
     if (this.freed) return
     this.renderLib.yogaNodeMarkDirty(this.ptr)
   }
 
   isDirty(): boolean {
-    this.assertLegacy("layout flags")
     if (this.freed) return true
     return this.renderLib.yogaNodeIsDirty(this.ptr)
   }
 
   getComputedLayout(): Layout {
-    if (this.backing.kind === "scene") {
-      const { left, top, right, bottom, width, height } = this.backing.owner.getLayout(this, true)
-      return { left, top, right, bottom, width, height }
-    }
     if (this.freed) return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }
     return this.renderLib.yogaNodeGetComputedLayout(this.ptr)
   }
@@ -907,19 +841,16 @@ export class Node {
   }
 
   getComputedMargin(edge: Edge): number {
-    this.assertLegacy("computed edge queries")
     if (this.freed) return 0
     return this.renderLib.yogaNodeLayoutGetEdge(this.ptr, YogaEdgeLayoutKind.Margin, edge)
   }
 
   getComputedPadding(edge: Edge): number {
-    this.assertLegacy("computed edge queries")
     if (this.freed) return 0
     return this.renderLib.yogaNodeLayoutGetEdge(this.ptr, YogaEdgeLayoutKind.Padding, edge)
   }
 
   getComputedBorder(edge: Edge): number {
-    this.assertLegacy("computed edge queries")
     if (this.freed) return 0
     return this.renderLib.yogaNodeLayoutGetEdge(this.ptr, YogaEdgeLayoutKind.Border, edge)
   }
@@ -1069,17 +1000,12 @@ export class Node {
   }
 
   setDimension(dimension: Dimension, input: ValueInput, disableFlexShrink: boolean = false): void {
-    if (this.backing.kind === "scene") {
-      sceneSetDimension(this.backing.owner, this, dimension, input, disableFlexShrink)
-      return
-    }
     if (this.freed) return
     const value = parseYogaValue(input)
     this.renderLib.yogaNodeStyleSetDimension(this.ptr, dimension, value.unit, value.value, disableFlexShrink)
   }
 
   setPositions(positions: readonly [ValueInput, ValueInput, ValueInput, ValueInput]): void {
-    if (this.backing.kind === "scene") this.assertMutable()
     if (this.freed) return
     const units = new Uint32Array(Edge.Bottom + 1)
     const values = new Float32Array(Edge.Bottom + 1)
@@ -1094,8 +1020,7 @@ export class Node {
       units[edge] = value.unit
       values[edge] = value.value
     }
-    if (this.backing.kind === "scene") this.backing.owner.setPositions(this, mask, units, values)
-    else this.renderLib.yogaNodeStyleSetPositions(this.ptr, mask, units, values)
+    this.renderLib.yogaNodeStyleSetPositions(this.ptr, mask, units, values)
   }
 
   setWidthPercent(width: number | undefined): void {
@@ -1263,40 +1188,31 @@ export class Node {
   }
 
   setBorder(edge: Edge, border: number | undefined): void {
-    if (this.backing.kind === "scene") {
-      sceneSetBorder(this.backing.owner, this, edge, border)
-      return
-    }
     if (this.freed) return
     this.renderLib.yogaNodeStyleSetBorder(this.ptr, edge, border ?? NaN)
   }
 
   getBorder(edge: Edge): number {
-    if (this.backing.kind === "scene") return sceneGetBorder(this.backing.owner, this, edge)
     if (this.freed) return NaN
     return this.renderLib.yogaNodeStyleGetBorder(this.ptr, edge)
   }
 
   setIsReferenceBaseline(isReferenceBaseline: boolean): void {
-    this.assertLegacy("reference baselines")
     if (this.freed) return
     this.renderLib.yogaNodeSetIsReferenceBaseline(this.ptr, isReferenceBaseline)
   }
 
   isReferenceBaseline(): boolean {
-    this.assertLegacy("reference baselines")
     if (this.freed) return false
     return this.renderLib.yogaNodeIsReferenceBaseline(this.ptr)
   }
 
   setAlwaysFormsContainingBlock(alwaysFormsContainingBlock: boolean): void {
-    this.assertLegacy("containing block flags")
     if (this.freed) return
     this.renderLib.yogaNodeSetAlwaysFormsContainingBlock(this.ptr, alwaysFormsContainingBlock)
   }
 
   getAlwaysFormsContainingBlock(): boolean {
-    this.assertLegacy("containing block flags")
     if (this.freed) return false
     return this.renderLib.yogaNodeGetAlwaysFormsContainingBlock(this.ptr)
   }
@@ -1305,11 +1221,6 @@ export class Node {
   // (NativeRenderable). Setting a JS measure func on a node that has a native
   // measure target replaces the native one, and vice versa.
   setMeasureFunc(measureFunc: MeasureFunction | null): void {
-    if (this.backing.kind === "scene") {
-      this.assertMutable()
-      this.backing.owner.setMeasureFunc(this, measureFunc)
-      return
-    }
     if (this.freed) return
     if (!measureFunc) return this.unsetMeasureFunc()
 
@@ -1321,7 +1232,6 @@ export class Node {
   }
 
   unsetMeasureFunc(): void {
-    if (this.backing.kind === "scene") return this.setMeasureFunc(null)
     if (this.freed) return
     this.runMutation(() => {
       this.renderLib.yogaNodeUnsetMeasureFunc(this.ptr)
@@ -1330,15 +1240,11 @@ export class Node {
   }
 
   hasMeasureFunc(): boolean {
-    if (this.backing.kind === "scene") {
-      return this.backing.owner.hasMeasureFunc(this)
-    }
     if (this.freed) return false
     return this.renderLib.yogaNodeHasMeasureFunc(this.ptr)
   }
 
   setDirtiedFunc(dirtiedFunc: DirtiedFunction | null): void {
-    this.assertLegacy("dirtied callbacks")
     if (this.freed) return
     if (!dirtiedFunc) return this.unsetDirtiedFunc()
 
@@ -1350,7 +1256,6 @@ export class Node {
   }
 
   unsetDirtiedFunc(): void {
-    this.assertLegacy("dirtied callbacks")
     if (this.freed) return
     this.runMutation(() => {
       this.renderLib.yogaNodeUnsetDirtiedFunc(this.ptr)
@@ -1359,47 +1264,32 @@ export class Node {
   }
 
   private setEnum(kind: YogaEnumKindId, value: number): void {
-    if (this.backing.kind === "scene") {
-      sceneSetEnum(this.backing.owner, this, kind, value)
-      return
-    }
     if (this.freed) return
     this.renderLib.yogaNodeStyleSetEnum(this.ptr, kind, value)
   }
 
   private getEnum(kind: YogaEnumKindId, fallback: number): number {
-    if (this.backing.kind === "scene") return sceneGetEnum(this.backing.owner, this, kind)
     if (this.freed) return fallback
     return this.renderLib.yogaNodeStyleGetEnum(this.ptr, kind)
   }
 
   private setFloat(kind: YogaFloatKindId, value: number | undefined): void {
-    if (this.backing.kind === "scene") {
-      sceneSetFloat(this.backing.owner, this, kind, value)
-      return
-    }
     if (this.freed) return
     this.renderLib.yogaNodeStyleSetFloat(this.ptr, kind, value ?? NaN)
   }
 
   private getFloat(kind: YogaFloatKindId): number {
-    if (this.backing.kind === "scene") return sceneGetFloat(this.backing.owner, this, kind)
     if (this.freed) return NaN
     return this.renderLib.yogaNodeStyleGetFloat(this.ptr, kind)
   }
 
   private setValue(kind: YogaValueKindId, edgeOrGutter: number, valueInput: ValueInput): void {
-    if (this.backing.kind === "scene") {
-      sceneSetValue(this.backing.owner, this, kind, edgeOrGutter, valueInput)
-      return
-    }
     if (this.freed) return
     const value = parseYogaValue(valueInput)
     this.renderLib.yogaNodeStyleSetValue(this.ptr, kind, edgeOrGutter, value.unit, value.value)
   }
 
   private getValue(kind: YogaValueKindId, edgeOrGutter: number): Value {
-    if (this.backing.kind === "scene") return sceneGetValue(this.backing.owner, this, kind, edgeOrGutter)
     if (this.freed) return UNDEFINED_VALUE
     return unpackValue(this.renderLib.yogaNodeStyleGetValue(this.ptr, kind, edgeOrGutter))
   }

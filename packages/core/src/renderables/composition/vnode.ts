@@ -1,6 +1,5 @@
 import { isRenderable, Renderable, type RenderableOptions } from "../../Renderable.js"
 import type { RenderContext } from "../../types.js"
-import { getYogaNode, setYogaNode } from "../../lib/renderable-layout.js"
 import util from "node:util"
 
 export type VChild = VNode | Renderable | VChild[] | null | undefined | false
@@ -183,7 +182,6 @@ export function wrapWithDelegates<T extends InstanceType<RenderableConstructor>>
       return Reflect.set(target, prop, value, receiver)
     },
   })
-  setYogaNode(proxy, getYogaNode(instance))
   return proxy
 }
 

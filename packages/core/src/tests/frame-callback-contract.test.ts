@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { afterEach, beforeEach, expect, test } from "bun:test"
 import { Renderable } from "../Renderable.js"
 import type { BufferAccess, OptimizedBuffer } from "../buffer.js"
@@ -200,7 +199,7 @@ test("accepted width is immediate while computed and painted width wait for layo
   await renderOnce()
 
   box.width = 4
-  expect(getYogaNode(box).getWidth().value).toBe(4)
+  expect(box.getWidth().value).toBe(4)
   expect(box.width).toBe(2)
   box.renderBefore = function () {
     this.width = 6
@@ -209,7 +208,7 @@ test("accepted width is immediate while computed and painted width wait for layo
 
   await renderOnce()
 
-  expect(getYogaNode(box).getWidth().value).toBe(6)
+  expect(box.getWidth().value).toBe(6)
   expect(box.width).toBe(4)
   expect(captureSpans().lines[0].spans[0]).toMatchObject({ width: 4, bg: red })
 

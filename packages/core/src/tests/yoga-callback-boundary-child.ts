@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { ResourceContext } from "../buffer.js"
 import assert from "node:assert/strict"
 import { EditBuffer } from "../edit-buffer.js"
@@ -143,12 +142,11 @@ try {
     const syntaxStyle = SyntaxStyle.create(scene)
     const renderable = new CodeRenderable(renderer, { content: "hello", alignSelf: "flex-start", syntaxStyle })
     try {
-      const nativeNode = getYogaNode(renderable)
-      const nodeHandle = nativeNode._getSceneHandle(scene)
+      const nodeHandle = renderable._getSceneHandle(scene)
       renderer.root.add(renderable)
       if (owner === scene) scene.setTextView(renderable, view._getSceneHandle(scene))
       scene.measureSnapshot(renderable)
-      assert.equal(nativeNode.getComputedWidth(), 5)
+      assert.equal(renderable.getComputedWidth(), 5)
       const resourceContext = owner.resourceContext.context
       const resourceMutations = [
         () => lib.destroyContextTextBuffer(resourceContext, text._getSceneHandle(owner)),
@@ -190,20 +188,20 @@ try {
         return { width: 0, height: 0 }
       })
       scene.measureSnapshot(renderable)
-      assert.equal(nativeNode.getComputedWidth(), 0)
-      assert.equal(nativeNode.getComputedHeight(), 0)
+      assert.equal(renderable.getComputedWidth(), 0)
+      assert.equal(renderable.getComputedHeight(), 0)
       scene.setTextView(renderable, owner === scene ? view._getSceneHandle(scene) : null)
       renderable.invalidateIntrinsicSize()
       scene.measureSnapshot(renderable)
-      assert.equal(nativeNode.getComputedWidth(), 0)
+      assert.equal(renderable.getComputedWidth(), 0)
       renderable.setMeasureProvider(null)
-      assert.equal(nativeNode.hasMeasureFunc(), false)
+      assert.equal(renderable.hasMeasureFunc(), false)
       renderable.setMeasureProvider(() => {
         const result = view.measureForDimensions(20, 10)!
         return { width: result.widthColsMax, height: result.lineCount }
       })
       scene.measureSnapshot(renderable)
-      assert.equal(nativeNode.getComputedWidth(), 5)
+      assert.equal(renderable.getComputedWidth(), 5)
       renderable.destroy()
       assert.throws(() => lib.sceneHasMeasure(context, nodeHandle), { status: NativeStatus.StaleHandle })
     } finally {
@@ -260,7 +258,6 @@ try {
     }
   }
   const projected = new ProjectionRenderable(renderer, { width: 10, height: 5, flexShrink: 1, top: 1, left: 2 })
-  const projectedNode = getYogaNode(projected)
   const projectedError = new YogaError("user callback", YogaStatus.Exception)
   const observer = new ProjectionRenderable(renderer, { alignSelf: "flex-start" })
   renderer.root.add(observer)
@@ -271,7 +268,7 @@ try {
       throw projectedError
     })
     assert.throws(
-      () => lib.sceneMeasureLayout(context, session, getYogaNode(renderer.root)._getSceneHandle(scene)),
+      () => lib.sceneMeasureLayout(context, session, renderer.root._getSceneHandle(scene)),
       (error) => error === projectedError,
     )
   }
@@ -285,28 +282,22 @@ try {
       projected[property] = Infinity
     }, RangeError)
     assert.deepEqual(projected.requestedSize, before)
-    assert.equal(projectedNode.getFlexShrink(), 1)
+    assert.equal(projected.getFlexShrink(), 1)
     projected[property] = value
     observeProjection(() => {
       assert.equal(projected.requestedSize[dimension], value)
-      assert.equal(dimension === 0 ? projectedNode.getWidth().value : projectedNode.getHeight().value, value)
-      assert.equal(projectedNode.getFlexShrink(), 0)
+      assert.equal(dimension === 0 ? projected.getWidth().value : projected.getHeight().value, value)
+      assert.equal(projected.getFlexShrink(), 0)
     })
     assert.equal(projected.requestedSize[dimension], value)
   }
   assert.throws(() => projected.setPosition({ top: 7, left: Infinity }), RangeError)
   assert.deepEqual([projected.top, projected.left], [1, 2])
-  assert.deepEqual(
-    [projectedNode.getPosition(Yoga.Edge.Top).value, projectedNode.getPosition(Yoga.Edge.Left).value],
-    [1, 2],
-  )
+  assert.deepEqual([projected.getPosition(Yoga.Edge.Top).value, projected.getPosition(Yoga.Edge.Left).value], [1, 2])
   projected.setPosition({ top: 3, left: 4 })
   observeProjection(() => {
     assert.deepEqual([projected.top, projected.left], [3, 4])
-    assert.deepEqual(
-      [projectedNode.getPosition(Yoga.Edge.Top).value, projectedNode.getPosition(Yoga.Edge.Left).value],
-      [3, 4],
-    )
+    assert.deepEqual([projected.getPosition(Yoga.Edge.Top).value, projected.getPosition(Yoga.Edge.Left).value], [3, 4])
   })
   assert.deepEqual([projected.top, projected.left], [3, 4])
 
@@ -320,7 +311,7 @@ try {
   renderer.root.add(right)
   observer.setMeasureProvider(null)
   await renderOnce()
-  assert.equal(scene.getLayout(projectedNode).screenY, 24)
+  assert.equal(scene.getLayout(projected).screenY, 24)
   let owner = right
   const observeTopology = () => {
     assert.equal(projected.parent, owner)
@@ -339,7 +330,7 @@ try {
     assert.equal(projected.parent, owner)
     observer.setMeasureProvider(null)
     await renderOnce()
-    assert.equal(scene.getLayout(projectedNode).screenY, owner === right ? 23 : 3)
+    assert.equal(scene.getLayout(projected).screenY, owner === right ? 23 : 3)
   }
   assert.throws(() => projected.add(left), { status: NativeStatus.InvalidArgument })
   assert.equal(left.parent, renderer.root)

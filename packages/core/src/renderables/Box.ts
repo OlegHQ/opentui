@@ -1,4 +1,4 @@
-import { runRenderableMutation, getYogaNode } from "../lib/renderable-layout.js"
+import { runRenderableMutation } from "../lib/renderable-layout.js"
 import { Gutter } from "../yoga.js"
 import { type RenderableOptions, Renderable } from "../Renderable.js"
 import type { OptimizedBuffer } from "../buffer.js"
@@ -373,38 +373,36 @@ export class BoxRenderable extends Renderable {
   }
 
   private applyYogaGap(options: BoxOptions): void {
-    const node = getYogaNode(this)
-
     if (isGapType(options.gap)) {
-      node.setGap(Gutter.All, options.gap)
+      this.setGap(Gutter.All, options.gap)
     }
 
     if (isGapType(options.rowGap)) {
-      node.setGap(Gutter.Row, options.rowGap)
+      this.setGap(Gutter.Row, options.rowGap)
     }
 
     if (isGapType(options.columnGap)) {
-      node.setGap(Gutter.Column, options.columnGap)
+      this.setGap(Gutter.Column, options.columnGap)
     }
   }
 
   public set gap(gap: number | `${number}%` | undefined) {
     if (isGapType(gap)) {
-      getYogaNode(this).setGap(Gutter.All, gap)
+      this.setGap(Gutter.All, gap)
       this.requestRender()
     }
   }
 
   public set rowGap(rowGap: number | `${number}%` | undefined) {
     if (isGapType(rowGap)) {
-      getYogaNode(this).setGap(Gutter.Row, rowGap)
+      this.setGap(Gutter.Row, rowGap)
       this.requestRender()
     }
   }
 
   public set columnGap(columnGap: number | `${number}%` | undefined) {
     if (isGapType(columnGap)) {
-      getYogaNode(this).setGap(Gutter.Column, columnGap)
+      this.setGap(Gutter.Column, columnGap)
       this.requestRender()
     }
   }

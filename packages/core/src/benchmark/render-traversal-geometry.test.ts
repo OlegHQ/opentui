@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { BoxRenderable } from "../renderables/Box.js"
 import { createTestRenderer, ManualClock } from "../testing.js"
 
@@ -14,7 +13,7 @@ test("unprepared dimensions follow numeric styles until layout publishes geometr
     child.width = 4
     child.height = 2
     await renderOnce()
-    const unprepared = renderer.nativeScene.getLayout(getYogaNode(child))
+    const unprepared = renderer.nativeScene.getLayout(child)
     expect([unprepared.width, unprepared.height]).toEqual([0, 0])
     expect([child.width, child.height]).toEqual([4, 2])
 

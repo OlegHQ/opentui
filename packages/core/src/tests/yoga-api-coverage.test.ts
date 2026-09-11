@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { createTestRenderer } from "../testing/test-renderer.js"
 import Yoga, {
   Align,
@@ -98,7 +97,6 @@ describe("native Yoga API coverage", () => {
 
     root.insertChild(child, 0)
     child.insertChild(grandchild, 0)
-    expect(() => root._invalidateFromOwner()).toThrow("Only native scene Yoga nodes")
     grandchild.setMeasureFunc(() => ({ width: 1, height: 1 }))
     grandchild.setDirtiedFunc(() => {})
     root.calculateLayout()
@@ -115,10 +113,10 @@ describe("native Yoga API coverage", () => {
     config.free()
   })
 
-  test("scene facades expose layout without topology capabilities or implicit flushing", async () => {
+  test("scene-backed renderables expose layout without Yoga topology APIs or implicit flushing", async () => {
     const { renderer } = await createTestRenderer({ width: 20, height: 10 })
     const scene = renderer.nativeScene
-    const node = getYogaNode(renderer.root)
+    const node = renderer.root
     try {
       node.setWidth(12)
       for (const name of ["getChild", "getChildCount", "getParent"]) {

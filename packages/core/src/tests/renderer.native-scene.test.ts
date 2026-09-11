@@ -2,7 +2,6 @@ import { afterEach, spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
 import { setImmediate } from "node:timers/promises"
 import { Renderable, RenderableEvents, RootRenderable } from "../Renderable.js"
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { BoxRenderable } from "../renderables/Box.js"
 import { TextRenderable } from "../renderables/Text.js"
 import { CliRenderEvents } from "../renderer.js"
@@ -174,7 +173,6 @@ test("native scene destroys 10,000 boxes once without invalidating another rende
     }
   }
   for (const node of owned) node.on(RenderableEvents.DESTROYED, () => destroyed++)
-  const layouts = owned.map((node) => getYogaNode(node))
   await target.renderOnce()
   target.renderer.destroy()
   target.renderer.destroy()
@@ -182,7 +180,7 @@ test("native scene destroys 10,000 boxes once without invalidating another rende
   assert.equal(destroyed, 10_001)
   assert.ok(owned.every((node) => node.isDestroyed && node.parent === null))
   assert.ok(owned.every((node) => node.listenerCount(RenderableEvents.DESTROYED) === 0))
-  assert.ok(layouts.every((node) => node.isFreed()))
+  assert.ok(owned.every((node) => node.isFreed()))
   assert.deepEqual(new Set(Renderable.renderablesByNumber.keys()), registered)
   await survivor.renderOnce()
   assert.deepEqual(survivor.captureSpans(), before)

@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { getYogaNode } from "../lib/renderable-layout.js"
 
 // This benchmark targets render/layout bookkeeping in wrapper-heavy trees,
 // scrollbox culling, scrollbar-heavy paths, and dense framebuffer output.
@@ -1102,7 +1101,7 @@ function createYogaLayoutReadScenario(nodeCount: number): ScenarioDefinition {
           flexShrink: 0,
         })
         root.add(node)
-        return getYogaNode(node)
+        return node
       })
 
       await ctx.renderOnce()

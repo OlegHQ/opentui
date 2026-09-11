@@ -1,4 +1,3 @@
-import { getYogaNode } from "../lib/renderable-layout.js"
 import { test, expect, beforeEach, afterEach, describe, spyOn } from "bun:test"
 import { decodePasteBytes } from "../lib/paste.js"
 import {
@@ -182,9 +181,8 @@ describe("Renderable", () => {
           }),
     )
     testRenderer.root.add(box)
-    const node = getYogaNode(box)
-    expect(node.getMinWidth()).toEqual({ unit: Unit.Undefined, value: NaN })
-    expect(node.getFlexGrow()).toBe(0)
+    expect(box.getMinWidth()).toEqual({ unit: Unit.Undefined, value: NaN })
+    expect(box.getFlexGrow()).toBe(0)
     await renderOnce()
     expect([box.x, box.y, box.width, box.height]).toEqual([0, 0, 2, 2])
     expect(
