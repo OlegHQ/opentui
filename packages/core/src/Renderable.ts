@@ -5,6 +5,7 @@ import {
   Edge,
   FlexDirection,
   Gutter,
+  PositionType,
   Unit,
   YogaEnumKind,
   YogaFloatKind,
@@ -38,7 +39,19 @@ import { isVNode, maybeMakeRenderable, type VNode } from "./renderables/composit
 import type { MouseEvent } from "./renderer.js"
 import type { RenderContext } from "./types.js"
 import { RGBA } from "./lib/RGBA.js"
-import type { NativeSceneFrameRequest, NativeSceneLayout, NativeScenePaint, SceneNodeHandle } from "./zig.js"
+import {
+  isNativeScenePaintFrame,
+  NATIVE_EDGE_NONE,
+  NativeBorder,
+  NativeSceneFrame,
+  NativeSceneHook,
+  NativeStyleFlags,
+  NativeStyleGroup,
+  type NativeSceneFrameRequest,
+  type NativeSceneLayout,
+  type NativeScenePaint,
+  type SceneNodeHandle,
+} from "./zig.js"
 import {
   validateOptions,
   isPositionType,
@@ -67,6 +80,14 @@ const nativeSceneMethodDefaults: Partial<Record<(typeof nativeSceneMethodNames)[
   onLifecyclePass: null,
   renderBefore: undefined,
   renderAfter: undefined,
+}
+const nativeSceneHookUpdates = NativeSceneHook.Update | NativeSceneHook.IdleUpdate
+const nativeSceneHookListeners = NativeSceneHook.Resize | NativeSceneHook.LayoutChanged
+const nativeSceneHookBeforeAfter = NativeSceneHook.RenderBefore | NativeSceneHook.RenderAfter
+const nativeSceneHookHostMethods = NativeSceneHook.Update | nativeSceneHookBeforeAfter | NativeSceneHook.RenderSelf
+
+function isRowFlexDirection(direction: FlexDirection): boolean {
+  return direction === FlexDirection.Row || direction === FlexDirection.RowReverse
 }
 
 export enum LayoutEvents {
@@ -479,8 +500,7 @@ export abstract class Renderable extends BaseRenderable {
   }
 
   public get primaryAxis(): "row" | "column" {
-    const dir = this.getFlexDirection()
-    return dir === 2 || dir === 3 ? "row" : "column"
+    return isRowFlexDirection(this.getFlexDirection()) ? "row" : "column"
   }
 
   public set visible(value: boolean) {
@@ -868,8 +888,7 @@ export abstract class Renderable extends BaseRenderable {
   }
 
   public getChildrenSortedByPrimaryAxis(): Renderable[] {
-    const dir = this.getFlexDirection()
-    const axis = dir === 2 || dir === 3 ? "screenX" : "screenY"
+    const axis = isRowFlexDirection(this.getFlexDirection()) ? "screenX" : "screenY"
     if (this._childrenInLayoutOrder.length < 2) return [...this._childrenInLayoutOrder]
     // Selection traverses children in screen order, including ancestor translations.
     const children = this._childrenInLayoutOrder.map((child) => ({ child, coordinate: child[axis] }))
@@ -911,33 +930,33 @@ export abstract class Renderable extends BaseRenderable {
     return this._ctx.nativeScene.driver.renderLib.getYogaHost().runMutation(operation)
   }
 
-  private yogaSetEnum(kind: number, value: number): void {
-    this._ctx.nativeScene.setStyle(this, 0, kind, 0, Unit.Undefined, value)
+  private yogaSetEnum(kind: (typeof YogaEnumKind)[keyof typeof YogaEnumKind], value: number): void {
+    this._ctx.nativeScene.setStyle(this, NativeStyleGroup.Enum, kind, NATIVE_EDGE_NONE, Unit.Undefined, value)
   }
 
-  private yogaGetEnum(kind: number, fallback: number): number {
-    return this._ctx.nativeScene.getStyle(this, 0, kind, 0).value ?? fallback
+  private yogaGetEnum(kind: (typeof YogaEnumKind)[keyof typeof YogaEnumKind], fallback: number): number {
+    return this._ctx.nativeScene.getStyle(this, NativeStyleGroup.Enum, kind, NATIVE_EDGE_NONE).value ?? fallback
   }
 
-  private yogaSetFloat(kind: number, value: number | undefined): void {
-    this._ctx.nativeScene.setStyle(this, 1, kind, 0, Unit.Undefined, value ?? NaN)
+  private yogaSetFloat(kind: (typeof YogaFloatKind)[keyof typeof YogaFloatKind], value: number | undefined): void {
+    this._ctx.nativeScene.setStyle(this, NativeStyleGroup.Float, kind, NATIVE_EDGE_NONE, Unit.Undefined, value ?? NaN)
   }
 
-  private yogaGetFloat(kind: number): number {
-    return this._ctx.nativeScene.getStyle(this, 1, kind, 0).value
+  private yogaGetFloat(kind: (typeof YogaFloatKind)[keyof typeof YogaFloatKind]): number {
+    return this._ctx.nativeScene.getStyle(this, NativeStyleGroup.Float, kind, NATIVE_EDGE_NONE).value
   }
 
   private yogaSetValue(
-    kind: number,
+    kind: (typeof YogaValueKind)[keyof typeof YogaValueKind],
     edge: number,
     valueInput: number | "auto" | `${number}%` | Value | undefined,
   ): void {
     const value = parseYogaValue(valueInput)
-    this._ctx.nativeScene.setStyle(this, 2, kind, edge, value.unit, value.value)
+    this._ctx.nativeScene.setStyle(this, NativeStyleGroup.Value, kind, edge, value.unit, value.value)
   }
 
-  private yogaGetValue(kind: number, edge: number): Value {
-    return this._ctx.nativeScene.getStyle(this, 2, kind, edge)
+  private yogaGetValue(kind: (typeof YogaValueKind)[keyof typeof YogaValueKind], edge: number): Value {
+    return this._ctx.nativeScene.getStyle(this, NativeStyleGroup.Value, kind, edge)
   }
 
   setDisplay(display: Display): void {
@@ -992,40 +1011,40 @@ export abstract class Renderable extends BaseRenderable {
     return this.yogaGetFloat(YogaFloatKind.FlexShrink)
   }
 
-  getPositionType(): number {
-    return this.yogaGetEnum(YogaEnumKind.PositionType, 1)
+  getPositionType(): PositionType {
+    return this.yogaGetEnum(YogaEnumKind.PositionType, PositionType.Relative) as PositionType
   }
 
   setFlexBasis(flexBasis: number | "auto" | `${number}%` | undefined): void {
-    this.yogaSetValue(YogaValueKind.FlexBasis, 0, flexBasis)
+    this.yogaSetValue(YogaValueKind.FlexBasis, NATIVE_EDGE_NONE, flexBasis)
   }
 
   setWidth(width: number | "auto" | `${number}%`): void {
-    this.yogaSetValue(YogaValueKind.Width, 0, width)
+    this.yogaSetValue(YogaValueKind.Width, NATIVE_EDGE_NONE, width)
   }
 
   setHeight(height: number | "auto" | `${number}%`): void {
-    this.yogaSetValue(YogaValueKind.Height, 0, height)
+    this.yogaSetValue(YogaValueKind.Height, NATIVE_EDGE_NONE, height)
   }
 
   setMinWidth(minWidth: number | `${number}%` | undefined): void {
-    this.yogaSetValue(YogaValueKind.MinWidth, 0, minWidth)
+    this.yogaSetValue(YogaValueKind.MinWidth, NATIVE_EDGE_NONE, minWidth)
   }
 
   getMinWidth(): Value {
-    return this.yogaGetValue(YogaValueKind.MinWidth, 0)
+    return this.yogaGetValue(YogaValueKind.MinWidth, NATIVE_EDGE_NONE)
   }
 
   setMaxWidth(maxWidth: number | `${number}%` | undefined): void {
-    this.yogaSetValue(YogaValueKind.MaxWidth, 0, maxWidth)
+    this.yogaSetValue(YogaValueKind.MaxWidth, NATIVE_EDGE_NONE, maxWidth)
   }
 
   setMinHeight(minHeight: number | `${number}%` | undefined): void {
-    this.yogaSetValue(YogaValueKind.MinHeight, 0, minHeight)
+    this.yogaSetValue(YogaValueKind.MinHeight, NATIVE_EDGE_NONE, minHeight)
   }
 
   setMaxHeight(maxHeight: number | `${number}%` | undefined): void {
-    this.yogaSetValue(YogaValueKind.MaxHeight, 0, maxHeight)
+    this.yogaSetValue(YogaValueKind.MaxHeight, NATIVE_EDGE_NONE, maxHeight)
   }
 
   setMargin(edge: Edge, margin: number | "auto" | `${number}%` | undefined): void {
@@ -1049,11 +1068,11 @@ export abstract class Renderable extends BaseRenderable {
   }
 
   getWidth(): Value {
-    return this.yogaGetValue(YogaValueKind.Width, 0)
+    return this.yogaGetValue(YogaValueKind.Width, NATIVE_EDGE_NONE)
   }
 
   getHeight(): Value {
-    return this.yogaGetValue(YogaValueKind.Height, 0)
+    return this.yogaGetValue(YogaValueKind.Height, NATIVE_EDGE_NONE)
   }
 
   yogaSetDimension(
@@ -1062,15 +1081,23 @@ export abstract class Renderable extends BaseRenderable {
     disableFlexShrink: boolean = false,
   ): void {
     const value = parseYogaValue(input)
-    this._ctx.nativeScene.setStyle(this, 4, dimension, 0, value.unit, value.value, disableFlexShrink ? 1 : 0)
+    this._ctx.nativeScene.setStyle(
+      this,
+      NativeStyleGroup.Dimension,
+      dimension,
+      NATIVE_EDGE_NONE,
+      value.unit,
+      value.value,
+      disableFlexShrink ? NativeStyleFlags.DisableFlexShrink : NativeStyleFlags.None,
+    )
   }
 
   setPositions(positions: readonly [unknown, unknown, unknown, unknown]): void {
     this.assertMutable()
-    const units = new Uint32Array(4)
-    const values = new Float32Array(4)
+    const units = new Uint32Array(Edge.Bottom + 1)
+    const values = new Float32Array(Edge.Bottom + 1)
     let mask = 0
-    for (let edge = 0; edge < 4; edge++) {
+    for (let edge = 0; edge <= Edge.Bottom; edge++) {
       if (positions[edge] === undefined) continue
       const value = parseYogaValue(positions[edge] as number | "auto" | `${number}%` | Value | undefined)
       if (!Number.isInteger(value.unit) || value.unit < Unit.Undefined || value.unit > Unit.Auto) {
@@ -1790,7 +1817,7 @@ export abstract class Renderable extends BaseRenderable {
       opacity: this._opacity,
       translateX: this._translateX,
       translateY: this._translateY,
-      border: 0,
+      border: NativeBorder.None,
       shouldFill: false,
       backgroundColor: RGBA.fromValues(0, 0, 0, 0),
       borderColor: RGBA.fromValues(1, 1, 1, 1),
@@ -1975,9 +2002,11 @@ export abstract class Renderable extends BaseRenderable {
 
   private hostUpdateFlags(onUpdate: unknown): number {
     const update = this.nativeIntegration.lifecycle?.update
-    if (update === "host") return 1
-    if (update && onUpdate === update.idle) return update.active(this) ? 1 : 64
-    return onUpdate === nativeSceneMethodDefaults.onUpdate ? 0 : 1
+    if (update === "host") return NativeSceneHook.Update
+    if (update && onUpdate === update.idle) {
+      return update.active(this) ? NativeSceneHook.Update : NativeSceneHook.IdleUpdate
+    }
+    return onUpdate === nativeSceneMethodDefaults.onUpdate ? 0 : NativeSceneHook.Update
   }
 
   private refreshNativeSceneMethods(): void {
@@ -2030,16 +2059,19 @@ export abstract class Renderable extends BaseRenderable {
     const previousGeneration = this._nativeSceneHookGeneration
     const method = (name: keyof typeof overrides) => (name in overrides ? overrides[name] : this[name])
     const onUpdate = method("onUpdate")
-    flags = (flags & ~57) | (method("renderBefore") ? 8 : 0) | (method("renderAfter") ? 16 : 0)
+    flags =
+      (flags & ~nativeSceneHookHostMethods) |
+      (method("renderBefore") ? NativeSceneHook.RenderBefore : 0) |
+      (method("renderAfter") ? NativeSceneHook.RenderAfter : 0)
     const renderSelf = method("renderSelf")
-    if (!this.usesNativeDrawing(renderSelf)) flags |= 32
+    if (!this.usesNativeDrawing(renderSelf)) flags |= NativeSceneHook.RenderSelf
     // A caller getter can accept another hook mutation while these options are read.
     const overridden =
-      ("onUpdate" in overrides ? 65 : 0) |
-      ("onResize" in overrides || "onLayoutResize" in overrides ? 2 : 0) |
-      ("renderBefore" in overrides ? 8 : 0) |
-      ("renderAfter" in overrides ? 16 : 0) |
-      ("renderSelf" in overrides ? 32 : 0)
+      ("onUpdate" in overrides ? nativeSceneHookUpdates : 0) |
+      ("onResize" in overrides || "onLayoutResize" in overrides ? NativeSceneHook.Resize : 0) |
+      ("renderBefore" in overrides ? NativeSceneHook.RenderBefore : 0) |
+      ("renderAfter" in overrides ? NativeSceneHook.RenderAfter : 0) |
+      ("renderSelf" in overrides ? NativeSceneHook.RenderSelf : 0)
     const changed = (previousFlags ^ this._nativeSceneHookFlags) & ~overridden
     flags = (flags & ~changed) | (this._nativeSceneHookFlags & changed)
     const resizeCallbacks = {
@@ -2055,27 +2087,31 @@ export abstract class Renderable extends BaseRenderable {
       resizeCallbacks.onLayoutResize !== Renderable.prototype.onLayoutResize ||
       this.needsHostResize(resizeCallbacks.onResize)
     if (this._nativeSceneResize !== resize)
-      flags = (flags & ~2) | (this._sizeChangeListener || this.listenerCount("resize") ? 2 : 0)
-    if (resize) flags |= 2
+      flags =
+        (flags & ~NativeSceneHook.Resize) |
+        (this._sizeChangeListener || this.listenerCount("resize") ? NativeSceneHook.Resize : 0)
+    if (resize) flags |= NativeSceneHook.Resize
     lineInfo ??= !!this.nativeIntegration.lineInfo && this.listenerCount("line-info-change") > 0
     // Getters can change activity or accept a new implicit hook with the same flags.
     const update =
       "onUpdate" in overrides || previousGeneration === this._nativeSceneHookGeneration
         ? this.hostUpdateFlags(onUpdate)
-        : this._nativeSceneHookFlags & 65
-    flags = (flags & ~65) | update
+        : this._nativeSceneHookFlags & nativeSceneHookUpdates
+    flags = (flags & ~nativeSceneHookUpdates) | update
     const generation = this._nativeSceneHookGeneration + 1n
     if (flags !== 0 || lineInfo || this._nativeSceneHooksRegistered) {
       let nativeFlags = flags
       if (this.nativeIntegration.beforeAfter === false) {
-        nativeFlags &= ~24
+        nativeFlags &= ~nativeSceneHookBeforeAfter
       }
       const nativeResize = this.nativeIntegration.lifecycle?.resize
       if (!resize && nativeResize && nativeResize !== "host") {
-        nativeFlags = (nativeFlags & ~2) | (lineInfo && this.nativeIntegration.lineInfo ? 2 : 0)
+        nativeFlags =
+          (nativeFlags & ~NativeSceneHook.Resize) |
+          (lineInfo && this.nativeIntegration.lineInfo ? NativeSceneHook.Resize : 0)
       }
-      if (this._usesNativeTextController(renderSelf)) nativeFlags |= 128
-      if (nativeFlags & 32) nativeFlags |= 16
+      if (this._usesNativeTextController(renderSelf)) nativeFlags |= NativeSceneHook.ResumeNativeText
+      if (nativeFlags & NativeSceneHook.RenderSelf) nativeFlags |= NativeSceneHook.RenderAfter
       scene.setHooks(this, nativeFlags, generation, this.styledDimension("width"), this.styledDimension("height"))
       this._nativeSceneHooksRegistered = true
     }
@@ -2088,7 +2124,9 @@ export abstract class Renderable extends BaseRenderable {
   /** @internal Refresh only requested host hooks, never walk wrappers to collect layout. */
   _runNativeSceneHook(request: NativeSceneFrameRequest, deltaTime: number, buffer: OptimizedBuffer): void {
     if (
-      (this._isDestroyed && request.kind !== 5 && request.kind !== 7) ||
+      (this._isDestroyed &&
+        request.kind !== NativeSceneFrame.RenderAfter &&
+        request.kind !== NativeSceneFrame.RenderSelf) ||
       request.hookGeneration !== this._nativeSceneHookGeneration
     )
       return
@@ -2099,10 +2137,7 @@ export abstract class Renderable extends BaseRenderable {
     try {
       if (
         !this._isDestroyed &&
-        (request.kind === 4 ||
-          request.kind === 5 ||
-          request.kind === 7 ||
-          (request.kind === 2 && this._nativeSceneResize))
+        (isNativeScenePaintFrame(request.kind) || (request.kind === NativeSceneFrame.Resize && this._nativeSceneResize))
       ) {
         this._nativeSceneHookLayout.paintLayout =
           (currentGeometry && request.paintLayout) || this._ctx.nativeScene.getLayout(this, "paint")
@@ -2113,7 +2148,7 @@ export abstract class Renderable extends BaseRenderable {
         this.nativeIntegration.paintBuffer !== "destination" && this.buffered && this.frameBuffer
           ? this.frameBuffer
           : buffer
-      if (request.kind === 4 || request.kind === 5 || request.kind === 7) {
+      if (isNativeScenePaintFrame(request.kind)) {
         if (this._nativeScenePaintBuffer?.frameId !== request.frameId) {
           this._nativeScenePaintBuffer = { frameId: request.frameId, buffer: renderBuffer }
         }
@@ -2124,7 +2159,7 @@ export abstract class Renderable extends BaseRenderable {
           this._nativeScenePaintBuffer = undefined
           throw error
         } finally {
-          if (request.kind === 5) this._nativeScenePaintBuffer = undefined
+          if (request.kind === NativeSceneFrame.RenderAfter) this._nativeScenePaintBuffer = undefined
         }
       }
       this.runNativeSceneHook(request, deltaTime, buffer, renderBuffer)
@@ -2140,10 +2175,10 @@ export abstract class Renderable extends BaseRenderable {
     renderBuffer: OptimizedBuffer,
   ): void {
     switch (request.kind) {
-      case 1:
+      case NativeSceneFrame.Update:
         this.onUpdate(deltaTime)
         break
-      case 2:
+      case NativeSceneFrame.Resize:
         if (this._nativeSceneResize) this.onLayoutResize(request.width, request.height)
         else {
           const resize = this.nativeIntegration.lifecycle?.resize
@@ -2154,13 +2189,13 @@ export abstract class Renderable extends BaseRenderable {
           if (!this._isDestroyed && this.nativeIntegration.lineInfo) this.emit("line-info-change")
         }
         break
-      case 3:
+      case NativeSceneFrame.LayoutChanged:
         this.emit(LayoutEvents.LAYOUT_CHANGED)
         break
-      case 4:
+      case NativeSceneFrame.RenderBefore:
         this.renderBefore?.call(this, renderBuffer, deltaTime)
         break
-      case 5:
+      case NativeSceneFrame.RenderAfter:
         if (this.nativeIntegration.beforeAfter !== false) {
           this.renderAfter?.call(this, renderBuffer, deltaTime)
           this.markClean()
@@ -2168,7 +2203,7 @@ export abstract class Renderable extends BaseRenderable {
         if (this.nativeIntegration.bufferComposition !== "native" && this.buffered && this.frameBuffer)
           buffer.drawFrameBuffer(Math.trunc(this._screenX), Math.trunc(this._screenY), this.frameBuffer)
         break
-      case 7:
+      case NativeSceneFrame.RenderSelf:
         if (this.nativeIntegration.beforeAfter === false) this.markClean()
         this._invokeNativePaint(renderBuffer, deltaTime)
         break
@@ -2453,7 +2488,9 @@ export abstract class Renderable extends BaseRenderable {
       else layout += delta
     }
     this.setNativeSceneHooks(
-      (this._nativeSceneHookFlags & ~6) | (resize > 0 || this._sizeChangeListener ? 2 : 0) | (layout > 0 ? 4 : 0),
+      (this._nativeSceneHookFlags & ~nativeSceneHookListeners) |
+        (resize > 0 || this._sizeChangeListener ? NativeSceneHook.Resize : 0) |
+        (layout > 0 ? NativeSceneHook.LayoutChanged : 0),
       {},
       lineInfo > 0,
     )
@@ -2463,9 +2500,9 @@ export abstract class Renderable extends BaseRenderable {
       run(() => {
         if (!this._isDestroyed) {
           const flags =
-            (this._nativeSceneHookFlags & ~6) |
-            (this.listenerCount("resize") > 0 || this._sizeChangeListener ? 2 : 0) |
-            (this.listenerCount(LayoutEvents.LAYOUT_CHANGED) > 0 ? 4 : 0)
+            (this._nativeSceneHookFlags & ~nativeSceneHookListeners) |
+            (this.listenerCount("resize") > 0 || this._sizeChangeListener ? NativeSceneHook.Resize : 0) |
+            (this.listenerCount(LayoutEvents.LAYOUT_CHANGED) > 0 ? NativeSceneHook.LayoutChanged : 0)
           this.setNativeSceneHooks(flags)
         }
       })
@@ -2546,8 +2583,8 @@ export abstract class Renderable extends BaseRenderable {
   public set onSizeChange(handler: (() => void) | undefined) {
     if (handler !== this._sizeChangeListener) {
       if (handler != null && typeof handler !== "function") throw new TypeError("Invalid size change hook")
-      const flags = this._nativeSceneHookFlags & ~2
-      this.setNativeSceneHooks(flags | (handler || this.listenerCount("resize") > 0 ? 2 : 0))
+      const flags = this._nativeSceneHookFlags & ~NativeSceneHook.Resize
+      this.setNativeSceneHooks(flags | (handler || this.listenerCount("resize") > 0 ? NativeSceneHook.Resize : 0))
     }
     this._sizeChangeListener = handler
   }

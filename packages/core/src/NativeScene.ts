@@ -8,9 +8,13 @@ import { RendererControlState, type CliRenderer } from "./renderer.js"
 import type { StyledText } from "./lib/styled-text.js"
 import type { RGBA } from "./lib/RGBA.js"
 import type { LocalSelectionBounds } from "./lib/selection.js"
-import { type Value, type MeasureFunction, type YogaHost } from "./yoga.js"
+import { Edge, YogaValueKind, type Value, type MeasureFunction, type YogaHost } from "./yoga.js"
 import {
+  isNativeScenePaintFrame,
+  NativeSceneFrame,
   NativeSessionRenderStatus,
+  NativeStyleFlags,
+  NativeStyleGroup,
   SceneStaging,
   type NativeSceneFrameOptions,
   type NativeSceneFrameRequest,
@@ -377,7 +381,7 @@ export class NativeScene {
     this.driver.renderLib.sceneMarkDirty(this.driver.context, node._getSceneHandle(this))
   }
 
-  /** @internal Masked position edges stage as ordinary Yoga position values (group 2, kind 9).
+  /** @internal Masked position edges stage as ordinary Yoga position values.
    * Every masked value is validated before the first edge is staged so a rejected edge
    * leaves no partial position behind. */
   setPositions(
@@ -386,14 +390,23 @@ export class NativeScene {
     units: Uint32Array,
     values: Float32Array,
   ): void {
-    if (!Number.isInteger(mask) || mask < 0 || mask > 15)
+    const edgeMaskMax = (1 << (Edge.Bottom + 1)) - 1
+    if (!Number.isInteger(mask) || mask < 0 || mask > edgeMaskMax)
       throw new RangeError("Scene position mask must use four edges")
-    for (let edge = 0; edge < 4; edge++) {
-      if ((mask & (1 << edge)) !== 0) SceneStaging.checkStyleValue(2, values[edge])
+    for (let edge = 0; edge <= Edge.Bottom; edge++) {
+      if ((mask & (1 << edge)) !== 0) SceneStaging.checkStyleValue(NativeStyleGroup.Value, values[edge])
     }
-    for (let edge = 0; edge < 4; edge++) {
+    for (let edge = 0; edge <= Edge.Bottom; edge++) {
       if ((mask & (1 << edge)) === 0) continue
-      this.setStyle(node, 2, 9, edge, units[edge], values[edge], 0)
+      this.setStyle(
+        node,
+        NativeStyleGroup.Value,
+        YogaValueKind.Position,
+        edge,
+        units[edge],
+        values[edge],
+        NativeStyleFlags.None,
+      )
     }
   }
 
@@ -696,11 +709,11 @@ export class NativeScene {
           this.workBudget,
         )
         request.geometryRevision = geometryRevision
-        if (request.kind === 0) {
+        if (request.kind === NativeSceneFrame.Done) {
           this.paintedFrame = request
           return
         }
-        if (request.kind === 6) {
+        if (request.kind === NativeSceneFrame.Yield) {
           const wait = Promise.withResolvers<void>()
           const state: PaintContinuation = continuation ?? {
             request,
@@ -727,7 +740,8 @@ export class NativeScene {
         }
         // An entered node finishes self/after even when before destroys it.
         const retained =
-          (request.kind === 5 || request.kind === 7) && currentPaint?.renderable.num === request.num
+          (request.kind === NativeSceneFrame.RenderAfter || request.kind === NativeSceneFrame.RenderSelf) &&
+          currentPaint?.renderable.num === request.num
             ? currentPaint
             : undefined
         currentPaint = undefined
@@ -749,8 +763,10 @@ export class NativeScene {
         ) {
           throw new Error("Native scene returned a stale host request")
         }
-        if (request.kind === 4 || request.kind === 7) currentPaint = { renderable, handle }
-        if (request.kind === 4 || request.kind === 5 || request.kind === 7) {
+        if (request.kind === NativeSceneFrame.RenderBefore || request.kind === NativeSceneFrame.RenderSelf) {
+          currentPaint = { renderable, handle }
+        }
+        if (isNativeScenePaintFrame(request.kind)) {
           this.prefixFrame = request
           this.renderer.root._setCurrentRenderable(renderable)
         }

@@ -328,6 +328,31 @@ export type NativeScenePaintUpdate = Partial<NativeScenePaint> & { resetBorderCh
 
 export const NATIVE_SCENE_MUTATIONS_MAX = nativeConstants.OT_SCENE_MUTATIONS_MAX
 
+export enum NativeStyleGroup {
+  Enum = nativeConstants.OT_STYLE_ENUM,
+  Float = nativeConstants.OT_STYLE_FLOAT,
+  Value = nativeConstants.OT_STYLE_VALUE,
+  Border = nativeConstants.OT_STYLE_BORDER,
+  Dimension = nativeConstants.OT_STYLE_DIMENSION,
+}
+
+export enum NativeStyleFlags {
+  None = nativeConstants.OT_STYLE_FLAGS_NONE,
+  DisableFlexShrink = nativeConstants.OT_STYLE_DISABLE_FLEX_SHRINK,
+}
+
+/** ENUM/FLOAT/DIMENSION writes occupy this unused-edge slot. */
+export const NATIVE_EDGE_NONE = nativeConstants.OT_EDGE_NONE
+
+export enum NativeBorder {
+  None = nativeConstants.OT_BORDER_NONE,
+  Left = nativeConstants.OT_BORDER_LEFT,
+  Bottom = nativeConstants.OT_BORDER_BOTTOM,
+  Right = nativeConstants.OT_BORDER_RIGHT,
+  Top = nativeConstants.OT_BORDER_TOP,
+  All = nativeConstants.OT_BORDER_ALL,
+}
+
 export interface NativeSceneLayout {
   left: number
   top: number
@@ -348,6 +373,37 @@ export interface NativeSceneFrameOptions {
   preserveUnwritten?: boolean
 }
 
+export enum NativeSceneHook {
+  Update = nativeConstants.OT_SCENE_HOOK_UPDATE,
+  Resize = nativeConstants.OT_SCENE_HOOK_RESIZE,
+  LayoutChanged = nativeConstants.OT_SCENE_HOOK_LAYOUT_CHANGED,
+  RenderBefore = nativeConstants.OT_SCENE_HOOK_RENDER_BEFORE,
+  RenderAfter = nativeConstants.OT_SCENE_HOOK_RENDER_AFTER,
+  RenderSelf = nativeConstants.OT_SCENE_HOOK_RENDER_SELF,
+  IdleUpdate = nativeConstants.OT_SCENE_HOOK_IDLE_UPDATE,
+  ResumeNativeText = nativeConstants.OT_SCENE_HOOK_RESUME_NATIVE_TEXT,
+}
+
+export enum NativeSceneFrame {
+  Done = nativeConstants.OT_SCENE_FRAME_DONE,
+  Update = nativeConstants.OT_SCENE_FRAME_UPDATE,
+  Resize = nativeConstants.OT_SCENE_FRAME_RESIZE,
+  LayoutChanged = nativeConstants.OT_SCENE_FRAME_LAYOUT_CHANGED,
+  RenderBefore = nativeConstants.OT_SCENE_FRAME_RENDER_BEFORE,
+  RenderAfter = nativeConstants.OT_SCENE_FRAME_RENDER_AFTER,
+  Yield = nativeConstants.OT_SCENE_FRAME_YIELD,
+  RenderSelf = nativeConstants.OT_SCENE_FRAME_RENDER_SELF,
+}
+
+/** Before, self, and after share the prepared paint destination. */
+export function isNativeScenePaintFrame(kind: NativeSceneFrame): boolean {
+  return (
+    kind === NativeSceneFrame.RenderBefore ||
+    kind === NativeSceneFrame.RenderAfter ||
+    kind === NativeSceneFrame.RenderSelf
+  )
+}
+
 /** An issued request. Pass it back unchanged; geometry is observation, not acknowledgement authority. */
 export interface NativeSceneFrameRequest {
   readonly session: SessionHandle
@@ -357,7 +413,7 @@ export interface NativeSceneFrameRequest {
   readonly requestId: bigint
   readonly layoutEpoch: bigint
   readonly hookGeneration: bigint
-  readonly kind: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+  readonly kind: NativeSceneFrame
   readonly num: number
   readonly width: number
   readonly height: number
