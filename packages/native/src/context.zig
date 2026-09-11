@@ -1259,11 +1259,11 @@ pub const Context = struct {
         try self.beginMutation();
         defer self.mutating = false;
         const value = try self.getEmbeddedTerminal(handle);
-        if (command != 1 and argument != 0) return error.InvalidOptions;
+        if (command != api.OT_EMBEDDED_TERMINAL_SCROLL and argument != 0) return error.InvalidOptions;
         switch (command) {
-            0 => value.invalidate(),
-            1 => value.scroll(argument),
-            2 => value.clearSelection(),
+            api.OT_EMBEDDED_TERMINAL_INVALIDATE => value.invalidate(),
+            api.OT_EMBEDDED_TERMINAL_SCROLL => value.scroll(argument),
+            api.OT_EMBEDDED_TERMINAL_CLEAR_SELECTION => value.clearSelection(),
             else => return error.InvalidOptions,
         }
     }
@@ -1531,8 +1531,8 @@ pub const Context = struct {
         switch (options.operation) {
             .clear => target.clear(background, null),
             .respect_alpha => {
-                if (frame != null or options.packed_options > 1) return error.InvalidOptions;
-                target.respectAlpha = options.packed_options == 1;
+                if (frame != null or options.packed_options > api.OT_BUFFER_RESPECT_ALPHA) return error.InvalidOptions;
+                target.respectAlpha = options.packed_options == api.OT_BUFFER_RESPECT_ALPHA;
             },
             .compose => try drawContextBuffer(target, try self.getBuffer(options.source orelse return error.InvalidOptions), options.x, options.y, options.crop),
             .box => {
@@ -1549,10 +1549,10 @@ pub const Context = struct {
                 try buf.validateTextInput(text);
                 try buf.validateTextInput(bottom_title);
                 try target.drawBoxChecked(options.x, options.y, options.width, options.height, &options.border_chars, .{
-                    .top = options.packed_options & 8 != 0,
-                    .right = options.packed_options & 4 != 0,
-                    .bottom = options.packed_options & 2 != 0,
-                    .left = options.packed_options & 1 != 0,
+                    .top = options.packed_options & api.OT_BORDER_TOP != 0,
+                    .right = options.packed_options & api.OT_BORDER_RIGHT != 0,
+                    .bottom = options.packed_options & api.OT_BORDER_BOTTOM != 0,
+                    .left = options.packed_options & api.OT_BORDER_LEFT != 0,
                 }, options.foreground, background, options.title_color, options.packed_options & 16 != 0, if (text.len == 0) null else text, @intCast((options.packed_options >> 5) & 3), if (bottom_title.len == 0) null else bottom_title, @intCast((options.packed_options >> 7) & 3));
             },
             .text, .fill, .cell, .cell_blend, .char => {
@@ -1582,7 +1582,7 @@ pub const Context = struct {
         defer self.mutating = false;
         const target = try self.bufferDrawTarget(handle, frame);
         // Each paint request starts with exactly one scene-owned clip and opacity.
-        const floor: usize = if (frame) |ticket| @intFromBool(ticket.kind != 0) else 0;
+        const floor: usize = if (frame) |ticket| @intFromBool(ticket.kind != api.OT_SCENE_FRAME_DONE) else 0;
         std.debug.assert(target.scissor_stack.items.len >= floor);
         std.debug.assert(target.opacity_stack.items.len >= floor);
         switch (options.operation) {
@@ -1778,13 +1778,13 @@ pub const Context = struct {
     pub fn sceneCreateNode(self: *Context, session_handle: Handle, kind: u32, num: u32) !Handle {
         try self.beginMutation();
         defer self.mutating = false;
-        if (kind > 8 or num == 0) return error.InvalidOptions;
+        if (kind > api.OT_SCENE_IMAGE or num == 0) return error.InvalidOptions;
         const value = try self.getSession(session_handle);
         try value.checkOpen();
         const attached = value.renderer orelse return error.RendererNotAttached;
         try self.objects.checkCapacity();
         const owned = value.scene orelse blk: {
-            if (kind != 0) return error.SceneNotAttached;
+            if (kind != api.OT_SCENE_ROOT) return error.SceneNotAttached;
             if (value.frame_end_offset != null or attached.renderStats.frameCount != 0) return error.InvalidTerminalState;
             break :blk try scene.Scene.init(self.allocator, &self.yoga_config, session_handle);
         };
@@ -1796,9 +1796,9 @@ pub const Context = struct {
             node.detachMeasure();
             self.releaseNodeStorage(storage);
         }
-        try yoga.check(yoga.yogaNodeStyleSetFloatChecked(node.yoga_node, 2, 1));
-        for (0..4) |edge| try yoga.check(yoga.yogaNodeStyleSetBorderChecked(node.yoga_node, @intCast(edge), 0));
-        const text = if (kind == 2) try self.createTextResource(attached.getNextBuffer().width_method) else null;
+        try yoga.check(yoga.yogaNodeStyleSetFloatChecked(node.yoga_node, api.OT_STYLE_FLOAT_FLEX_SHRINK, 1));
+        for (api.OT_EDGE_LEFT..api.OT_EDGE_START) |edge| try yoga.check(yoga.yogaNodeStyleSetBorderChecked(node.yoga_node, @intCast(edge), 0));
+        const text = if (kind == api.OT_SCENE_TEXT) try self.createTextResource(attached.getNextBuffer().width_method) else null;
         errdefer if (text) |resource| self.destroyTextResource(resource);
         if (text) |resource| {
             resource.view.setWrapMode(.word);
@@ -1921,7 +1921,7 @@ pub const Context = struct {
         try self.beginMutation();
         defer self.mutating = false;
         const node = try self.sceneMutableNode(handle);
-        if (node.scene_node.?.kind != 8) return error.WrongKind;
+        if (node.scene_node.?.kind != api.OT_SCENE_IMAGE) return error.WrongKind;
         try yoga.check(yoga.nodeTeardownStatus(node.yoga_node));
         const source = if (source_handle) |id| try self.getImage(id) else null;
         const target = if (buffer_handle) |id| try self.getBuffer(id) else null;
@@ -1938,7 +1938,7 @@ pub const Context = struct {
         try self.beginMutation();
         defer self.mutating = false;
         const node = try self.sceneMutableNode(handle);
-        if (node.scene_node.?.kind != 6) return error.WrongKind;
+        if (node.scene_node.?.kind != api.OT_SCENE_CUSTOM) return error.WrongKind;
         try yoga.check(yoga.nodeTeardownStatus(node.yoga_node));
         const source = if (buffer_handle) |id| try self.getBuffer(id) else null;
         if (source) |value| try value.retain();
@@ -1947,7 +1947,7 @@ pub const Context = struct {
     }
 
     pub fn sceneSetBoxBorderStyle(self: *Context, handle: Handle, style: u32, sides: u32) !void {
-        return self.scenePatchPaint(handle, 16 | 256 | 4096, .{ .borderStyle = style, .borderSides = sides });
+        return self.scenePatchPaint(handle, api.OT_SCENE_PROPERTY_BORDER | api.OT_SCENE_PROPERTY_BORDER_STYLE | api.OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS, .{ .borderStyle = style, .borderSides = sides });
     }
 
     pub fn sceneSetEditorView(self: *Context, handle: Handle, view_handle: ?Handle) !void {
@@ -1955,7 +1955,7 @@ pub const Context = struct {
         defer self.mutating = false;
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        if (node.kind != 5) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_EDITOR) return error.WrongKind;
         const editor = if (view_handle) |id| try self.getEditorView(id) else null;
         if (editor) |view| {
             if (view.node != null and view.node != value) return error.ContextBusy;
@@ -1973,7 +1973,7 @@ pub const Context = struct {
         defer self.mutating = false;
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        if (node.kind != 5) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_EDITOR) return error.WrongKind;
         if (options.style > 3 or options.mouse_pointer > 6) return error.InvalidOptions;
         try buf.validateColor(options.color);
         node.control = .{ .editor = options };
@@ -1984,7 +1984,7 @@ pub const Context = struct {
         defer self.mutating = false;
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        if (node.kind != 7) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_TEXT_VIEW) return error.WrongKind;
         const text_view = if (view_handle) |id| try self.getTextBufferView(id) else null;
         if (text_view) |view| {
             if (view.node != null and view.node != value) return error.ContextBusy;
@@ -2002,7 +2002,7 @@ pub const Context = struct {
         defer self.mutating = false;
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        if (node.kind != 7) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_TEXT_VIEW) return error.WrongKind;
         node.control.text_view.paint = enabled;
     }
 
@@ -2057,18 +2057,32 @@ pub const Context = struct {
         flags: u32,
     ) !void {
         std.debug.assert(self.mutating);
-        if (group > 4 or group == 3 or (group != 4 and flags != 0) or flags > 1) return error.InvalidOptions;
-        if ((group == 0 or group == 1) and (edge != 0 or unit != 0)) return error.InvalidOptions;
-        if (group == 4 and edge != 0) return error.InvalidOptions;
-        if (group == 0 and (!std.math.isFinite(value) or value < 0 or @as(f64, value) >= 4294967296 or @trunc(value) != value)) return error.InvalidOptions;
+        if (group > api.OT_STYLE_DIMENSION or
+            group == api.OT_STYLE_BORDER or
+            (group != api.OT_STYLE_DIMENSION and flags != api.OT_STYLE_FLAGS_NONE) or
+            flags > api.OT_STYLE_DISABLE_FLEX_SHRINK)
+        {
+            return error.InvalidOptions;
+        }
+        if ((group == api.OT_STYLE_ENUM or group == api.OT_STYLE_FLOAT) and
+            (edge != api.OT_EDGE_NONE or unit != api.OT_UNIT_UNDEFINED))
+        {
+            return error.InvalidOptions;
+        }
+        if (group == api.OT_STYLE_DIMENSION and edge != api.OT_EDGE_NONE) return error.InvalidOptions;
+        if (group == api.OT_STYLE_ENUM and
+            (!std.math.isFinite(value) or value < 0 or @as(f64, value) > std.math.maxInt(u32) or @trunc(value) != value))
+        {
+            return error.InvalidOptions;
+        }
         if (group == api.OT_STYLE_ENUM and
             (kind >= scene_style_enum_maxima.len or value > @as(f32, @floatFromInt(scene_style_enum_maxima[kind])))) return error.InvalidOptions;
         const node = try self.sceneMutableNode(handle);
         try yoga.check(switch (group) {
-            0 => yoga.yogaNodeStyleSetEnumChecked(node.yoga_node, kind, @intFromFloat(value)),
-            1 => yoga.yogaNodeStyleSetFloatChecked(node.yoga_node, kind, value),
-            2 => yoga.yogaNodeStyleSetValueChecked(node.yoga_node, kind, edge, unit, value),
-            4 => yoga.yogaNodeStyleSetDimensionChecked(node.yoga_node, kind, unit, value, flags),
+            api.OT_STYLE_ENUM => yoga.yogaNodeStyleSetEnumChecked(node.yoga_node, kind, @intFromFloat(value)),
+            api.OT_STYLE_FLOAT => yoga.yogaNodeStyleSetFloatChecked(node.yoga_node, kind, value),
+            api.OT_STYLE_VALUE => yoga.yogaNodeStyleSetValueChecked(node.yoga_node, kind, edge, unit, value),
+            api.OT_STYLE_DIMENSION => yoga.yogaNodeStyleSetDimensionChecked(node.yoga_node, kind, unit, value, flags),
             else => unreachable,
         });
         node.scene_node.?.owner.work.clearRetainingCapacity();
@@ -2076,27 +2090,31 @@ pub const Context = struct {
 
     pub fn sceneGetStyle(self: *Context, handle: Handle, group: u32, kind: u32, edge: u32) !scene.StyleValue {
         try self.checkSceneRead();
-        if (group > 4) return error.InvalidOptions;
-        if ((group == 0 or group == 1 or group == 4) and edge != 0) return error.InvalidOptions;
+        if (group > api.OT_STYLE_DIMENSION) return error.InvalidOptions;
+        if ((group == api.OT_STYLE_ENUM or group == api.OT_STYLE_FLOAT or group == api.OT_STYLE_DIMENSION) and
+            edge != api.OT_EDGE_NONE)
+        {
+            return error.InvalidOptions;
+        }
         const node = try self.sceneNode(handle);
-        var result: scene.StyleValue = .{ .unit = 0, .value = 0 };
+        var result: scene.StyleValue = .{ .unit = api.OT_UNIT_UNDEFINED, .value = 0 };
         switch (group) {
-            0 => {
+            api.OT_STYLE_ENUM => {
                 var value: u32 = 0;
                 try yoga.check(yoga.yogaNodeStyleGetEnumChecked(node.yoga_node, kind, &value));
                 result.value = @floatFromInt(value);
             },
-            1 => try yoga.check(yoga.yogaNodeStyleGetFloatChecked(node.yoga_node, kind, &result.value)),
-            2, 4 => {
-                if (group == 4 and kind > 1) return error.InvalidOptions;
+            api.OT_STYLE_FLOAT => try yoga.check(yoga.yogaNodeStyleGetFloatChecked(node.yoga_node, kind, &result.value)),
+            api.OT_STYLE_VALUE, api.OT_STYLE_DIMENSION => {
+                if (group == api.OT_STYLE_DIMENSION and kind > api.OT_DIMENSION_HEIGHT) return error.InvalidOptions;
                 var encoded: u64 = 0;
                 try yoga.check(yoga.yogaNodeStyleGetValueChecked(node.yoga_node, kind, edge, &encoded));
                 result.unit = @truncate(encoded);
                 result.value = @bitCast(@as(u32, @truncate(encoded >> 32)));
             },
-            3 => {
-                if (kind != 0) return error.InvalidOptions;
-                result.unit = 1;
+            api.OT_STYLE_BORDER => {
+                if (kind != api.OT_STYLE_BORDER_WIDTH) return error.InvalidOptions;
+                result.unit = api.OT_UNIT_POINT;
                 try yoga.check(yoga.yogaNodeStyleGetBorderChecked(node.yoga_node, edge, &result.value));
             },
             else => unreachable,
@@ -2125,7 +2143,7 @@ pub const Context = struct {
         try node.scene_node.?.owner.setPaint(node, paint);
     }
 
-    /// Unselected fields retain accepted native state; reset bit 12 requires border style.
+    /// Unselected fields retain accepted native state; reset-border-characters requires border style.
     pub fn scenePatchPaint(self: *Context, handle: Handle, fields: u32, paint: scene.Paint) !void {
         try self.beginMutation();
         defer self.mutating = false;
@@ -2136,10 +2154,10 @@ pub const Context = struct {
         std.debug.assert(self.mutating);
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        const reset = fields & 4096 != 0;
-        if (reset and node.kind != 1) return error.WrongKind;
-        if (reset and fields & 256 == 0) return error.InvalidOptions;
-        const paint_fields = fields & ~@as(u32, 4096);
+        const reset = fields & api.OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS != 0;
+        if (reset and node.kind != api.OT_SCENE_BOX) return error.WrongKind;
+        if (reset and fields & api.OT_SCENE_PROPERTY_BORDER_STYLE == 0) return error.InvalidOptions;
+        const paint_fields = fields & ~@as(u32, api.OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS);
         try node.owner.setPaintPartial(value, paint_fields, paint);
         if (reset) {
             if (node.control.box) |details| details.custom_border_chars = null;
@@ -2161,7 +2179,7 @@ pub const Context = struct {
         var unused: u32 = 0;
         try yoga.check(yoga.yogaNodeIsDirtyChecked(value.yoga_node, &unused));
         const node = value.scene_node.?;
-        if (node.kind != 1 and node.paint.borderSides != 0) return error.InvalidOptions;
+        if (node.kind != api.OT_SCENE_BOX and node.paint.borderSides != api.OT_BORDER_NONE) return error.InvalidOptions;
         if (node.owner.attempt != null) node.owner.work.clearRetainingCapacity();
         node.paint.background = background;
     }
@@ -2171,11 +2189,11 @@ pub const Context = struct {
         defer self.mutating = false;
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        if (node.kind != 1) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_BOX) return error.WrongKind;
         if (viewport_handle) |id| {
             const viewport = try self.sceneNode(id);
             if (viewport.scene_node.?.owner != node.owner) return error.WrongSession;
-            if (viewport.scene_node.?.kind > 1) return error.WrongKind;
+            if (viewport.scene_node.?.kind > api.OT_SCENE_BOX) return error.WrongKind;
         }
         try yoga.check(yoga.nodeTeardownStatus(value.yoga_node));
         var dirty: u32 = 0;
@@ -2217,7 +2235,7 @@ pub const Context = struct {
         defer self.mutating = false;
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        if (node.kind != 3) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_SLIDER) return error.WrongKind;
         try buf.validateColor(options.foreground);
         try buf.validateColor(options.background);
         try yoga.check(yoga.nodeTeardownStatus(value.yoga_node));
@@ -2233,7 +2251,7 @@ pub const Context = struct {
         try self.beginMutation();
         defer self.mutating = false;
         const node = (try self.sceneNode(handle)).scene_node.?;
-        if (node.kind != 3) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_SLIDER) return error.WrongKind;
         return scene.sliderThumb(node.control.slider, node.resize_width, node.resize_height);
     }
 
@@ -2242,7 +2260,7 @@ pub const Context = struct {
         defer self.mutating = false;
         const value = try self.sceneMutableNode(handle);
         const node = value.scene_node.?;
-        if (node.kind != 4) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_ARROW) return error.WrongKind;
         if (options.direction > 3 or options.attributes & ~@import("ansi.zig").TextAttributes.ATTRIBUTE_BASE_MASK != 0) return error.InvalidOptions;
         try buf.validateColor(options.foreground);
         try buf.validateColor(options.background);
@@ -2433,10 +2451,10 @@ pub const Context = struct {
             // style changes keep this viewport until native layout resizes it.
             for ([_]*u32{ &initial.width, &initial.height }, 0..) |dimension, kind| {
                 var encoded: u64 = 0;
-                try yoga.check(yoga.yogaNodeStyleGetValueChecked(node.yoga_node, @intCast(kind), 0, &encoded));
+                try yoga.check(yoga.yogaNodeStyleGetValueChecked(node.yoga_node, @intCast(kind), api.OT_EDGE_NONE, &encoded));
                 const unit: u32 = @truncate(encoded);
                 const value: f32 = @bitCast(@as(u32, @truncate(encoded >> 32)));
-                if (unit == 1 and value >= 0) {
+                if (unit == api.OT_UNIT_POINT and value >= 0) {
                     if (!std.math.isFinite(value) or @as(f64, value) > std.math.maxInt(i32)) return error.InvalidDimensions;
                     dimension.* = @intFromFloat(value);
                     if (value == 0) has_viewport = false;
@@ -2483,15 +2501,15 @@ pub const Context = struct {
     pub fn sceneSetTextSelection(self: *Context, handle: Handle, options: SceneTextSelectionOptions) !bool {
         try self.beginMutation();
         defer self.mutating = false;
-        if (options.operation > 2 or options.behavior > 2) return error.InvalidOptions;
+        if (options.operation > api.OT_SCENE_TEXT_SELECTION_UPDATE or options.behavior > api.OT_SCENE_TEXT_SELECTION_LINE) return error.InvalidOptions;
         for ([_]?buf.RGBA{ options.background, options.foreground }) |color| {
             if (color) |rgba| try buf.validateColor(rgba);
         }
         // Reset participates in wrapper cleanup after Session cancellation and
         // must not depend on Yoga health or allocate view caches.
-        const node = if (options.operation == 0) try self.sceneNode(handle) else try self.sceneMutableNode(handle);
+        const node = if (options.operation == api.OT_SCENE_TEXT_SELECTION_RESET) try self.sceneNode(handle) else try self.sceneMutableNode(handle);
         const text = node.scene_node.?.text orelse return error.WrongKind;
-        const changed = if (options.operation == 0) reset: {
+        const changed = if (options.operation == api.OT_SCENE_TEXT_SELECTION_RESET) reset: {
             const had_selection = text.view.getSelection() != null;
             text.view.resetLocalSelection();
             break :reset had_selection;
@@ -2514,7 +2532,7 @@ pub const Context = struct {
             try text.prepareView();
             if (text.view.virtual_lines.items.len > std.math.maxInt(i32)) return error.InvalidOptions;
             const behavior: text_buffer_view.SelectionBehavior = @enumFromInt(options.behavior);
-            break :selection if (options.operation == 1)
+            break :selection if (options.operation == api.OT_SCENE_TEXT_SELECTION_SET)
                 text.view.setLocalSelectionBehavior(options.anchor_x, options.anchor_y, options.focus_x, options.focus_y, options.background, options.foreground, behavior)
             else
                 text.view.updateLocalSelectionBehavior(options.anchor_x, options.anchor_y, options.focus_x, options.focus_y, options.background, options.foreground, behavior);
@@ -2699,7 +2717,7 @@ pub const Context = struct {
             .max_layout_rounds = 8,
             .max_host_requests = 65536,
         }, false);
-        std.debug.assert(result.kind == 0);
+        std.debug.assert(result.kind == api.OT_SCENE_FRAME_DONE);
         return result;
     }
 
@@ -3728,7 +3746,7 @@ pub const Context = struct {
                 const state = value.scene_node.?;
                 const text = state.text;
                 if (state.editor) |editor| editor.node = null;
-                if (state.kind == 7) {
+                if (state.kind == api.OT_SCENE_TEXT_VIEW) {
                     if (state.control.text_view.view) |view| view.node = null;
                 }
                 const storage = state.owner.remove(value);

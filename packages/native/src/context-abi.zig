@@ -1452,7 +1452,7 @@ pub fn ot_session_control(
             if (bytes.len != @sizeOf(c.ot_session_cursor_update)) return sessionError(owner, error.InvalidOptions);
             var update: c.ot_session_cursor_update = undefined;
             @memcpy(std.mem.asBytes(&update), bytes);
-            if (update.fields & ~@as(u32, 31) != 0 or update.visible > 1 or update.style > 3 or
+            if (update.fields & ~@as(u32, c.OT_CURSOR_POSITION | c.OT_CURSOR_STYLE | c.OT_CURSOR_BLINKING | c.OT_CURSOR_COLOR | c.OT_CURSOR_MOUSE_POINTER) != 0 or update.visible > 1 or update.style > 3 or
                 update.blinking > 1 or update.mouse_pointer > 5) return sessionError(owner, error.InvalidOptions);
             if (update.fields & c.OT_CURSOR_POSITION == 0 and (update.x != 0 or update.y != 0 or update.visible != 0)) {
                 return sessionError(owner, error.InvalidOptions);

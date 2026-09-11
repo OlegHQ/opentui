@@ -67,11 +67,14 @@ The encoder clears the next buffer after encoding.
 
 An unchanged frame can emit no terminal bytes. A forced repaint, palette change, resize, or image transition can require broader output.
 
-The Session owns the ordered output queue. Core copies output into a host-owned byte buffer and writes it to the configured `Writable`.
+The Session owns the ordered output queue. Core delivers ordinary main-process stdout natively.
+Custom streams, Node worker stdout, and unsupported native stdout handles use copied output through a `Writable`.
+Before native delivery, an empty, ticketless write waits for earlier queued or corked JavaScript writes.
 
 ## 6. Output completion publishes the frame
 
-The write callback acknowledges delivery of the copied output ticket.
+Native stdout writes record completion directly. On the copied path, the `Writable` callback acknowledges each output ticket.
+Both paths use the same presentation endpoint.
 When completed output reaches the frame's endpoint, native code publishes pending hit data, image metadata, and frame statistics.
 
 Core then reconciles hover and emits its `frame` event.

@@ -251,12 +251,20 @@ They share resource ownership, not scene or frame state.
 ## Complete output and release resources
 
 After scene painting, Core runs whole-frame post-processing and draws the console overlay.
-It commits the draft and delivers copied Session output to the configured `Writable`.
+It commits the draft and queues Session output.
 Core treats issued frame-authority fields as readonly. Geometry remains a separate observation.
 The driver clears a consumed draft for `PRESENTED`, `PENDING`, `SKIPPED`, and `FAILED` results.
-The write callback acknowledges delivery. The `write()` return value and `drain` event control backpressure, not ticket completion.
 
-`NativeSession.whenPresented()` waits for the frame's endpoint, not later output or a later drain event.
+For ordinary main-process `process.stdout`, Core calls `sessionDrainStdout()` to deliver bytes and record completion in native code.
+Earlier queued or corked JavaScript writes delay native delivery through an empty, ticketless `Writable` write.
+
+Custom streams and Node worker stdout use copied output tickets.
+Core also uses this path when native stdout reports `OT_UNSUPPORTED_RESOURCE`.
+The `Writable` callback acknowledges each copied ticket. The `write()` return value and `drain` event control backpressure, not ticket completion.
+Read [Host I/O and time](/docs/native/host-io-time#output-without-a-host-copy) for native delivery limits and writer rules.
+
+Both paths use the same presentation endpoint.
+`NativeSession.whenPresented()` waits for that endpoint, not later output or a later drain event.
 Core then reconciles hover and emits `frame`.
 Core does not use the TypeScript `NativeSpanFeed` wrapper for this output path.
 

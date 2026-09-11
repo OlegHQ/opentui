@@ -184,7 +184,7 @@ test "Context terminal ABI copies controller output and rejects stale handles" {
     if (!@import("ghostty_vt_options").available) return error.SkipZigTest;
     const context: ?*abi.ContextHandle = try abi.createTestContext(.{ .object_capacity = 16, .render_cells_max = 16 });
     defer std.testing.expectEqual(c.OT_OK, abi.ot_context_destroy(context)) catch unreachable;
-    const config: c.ot_embedded_terminal_options = .{ .struct_size = 24, .abi_version = 1, .cols = 4, .rows = 2, .max_scrollback = 0, .reserved = 0 };
+    const config: c.ot_embedded_terminal_options = .{ .struct_size = 24, .abi_version = c.OT_CONTEXT_ABI_VERSION, .cols = 4, .rows = 2, .max_scrollback = 0, .reserved = 0 };
     var id = std.mem.zeroes(c.ot_handle);
     try std.testing.expectEqual(c.OT_OK, ot_embedded_terminal_create(context, &config, &id));
     const target = abi.handleToC(try context.?.core.createBuffer(4, 2, .{}));
@@ -207,7 +207,7 @@ test "Context terminal ABI copies controller output and rejects stale handles" {
     try std.testing.expectEqual(c.OT_OK, ot_embedded_terminal_compose(context, &id, &target, null, 0, 0));
     var cursor = std.mem.zeroes(c.ot_embedded_terminal_cursor);
     cursor.struct_size = 56;
-    cursor.abi_version = 1;
+    cursor.abi_version = c.OT_CONTEXT_ABI_VERSION;
     try std.testing.expectEqual(c.OT_OK, ot_embedded_terminal_cursor_get(context, &id, &cursor));
     try std.testing.expectEqual(3, cursor.x);
     try std.testing.expectEqual(1, cursor.has_value);
@@ -215,7 +215,7 @@ test "Context terminal ABI copies controller output and rejects stale handles" {
     try std.testing.expectEqualStrings("\x1b[I", bytes[0..count]);
     var key = std.mem.zeroes(c.ot_embedded_terminal_key);
     key.struct_size = 32;
-    key.abi_version = 1;
+    key.abi_version = c.OT_CONTEXT_ABI_VERSION;
     key.action = 1;
     try std.testing.expectEqual(c.OT_OK, ot_embedded_terminal_encode_key(context, &id, &key, "Enter", 5, null, 0, &bytes, bytes.len, &count));
     try std.testing.expectEqualStrings("\r", bytes[0..count]);
@@ -227,7 +227,7 @@ test "Context terminal ABI copies controller output and rejects stale handles" {
     try std.testing.expectEqualStrings("\x1b[0n", bytes[0..count]);
     try std.testing.expectEqual(c.OT_OK, ot_embedded_terminal_encode_paste(context, &id, "xy", 2, &bytes, bytes.len, &count));
     try std.testing.expectEqualStrings("\x1b[200~xy\x1b[201~", bytes[0..count]);
-    var mouse: c.ot_embedded_terminal_mouse = .{ .struct_size = 32, .abi_version = 1, .action = 2, .button = -1, .mods = 0, .any_button_pressed = 0, .x = 1, .y = 0 };
+    var mouse: c.ot_embedded_terminal_mouse = .{ .struct_size = 32, .abi_version = c.OT_CONTEXT_ABI_VERSION, .action = 2, .button = -1, .mods = 0, .any_button_pressed = 0, .x = 1, .y = 0 };
     try std.testing.expectEqual(c.OT_OK, ot_embedded_terminal_encode_mouse(context, &id, &mouse, null, 0, &count));
     const required = count;
     try std.testing.expect(required > 1);

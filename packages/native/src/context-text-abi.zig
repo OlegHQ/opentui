@@ -148,7 +148,7 @@ pub fn ot_text_buffer_get_info(context: ?*Owner, id: ?*const c.ot_handle, out: ?
     if (info.reserved != 0) return fail(owner, error.InvalidOptions);
     const value = text(owner, id) catch |err| return fail(owner, err);
     const buffer = value.buffer;
-    out.?.* = .{ .struct_size = @sizeOf(c.ot_text_buffer_info), .abi_version = 1, .content_epoch = buffer.getContentEpoch(), .byte_count = buffer.getByteSize(), .text_length = buffer.getLength(), .line_count = buffer.lineCount(), .highlight_count = buffer.getHighlightCount(), .tab_width = buffer.getTabWidth(), .reserved = 0 };
+    out.?.* = .{ .struct_size = @sizeOf(c.ot_text_buffer_info), .abi_version = c.OT_CONTEXT_ABI_VERSION, .content_epoch = buffer.getContentEpoch(), .byte_count = buffer.getByteSize(), .text_length = buffer.getLength(), .line_count = buffer.lineCount(), .highlight_count = buffer.getHighlightCount(), .tab_width = buffer.getTabWidth(), .reserved = 0 };
     return c.OT_OK;
 }
 
@@ -217,7 +217,7 @@ pub fn ot_text_buffer_view_set_viewport(context: ?*Owner, id: ?*const c.ot_handl
 pub fn ot_text_buffer_view_command(context: ?*Owner, id: ?*const c.ot_handle, command: u32, argument: u32) callconv(.c) c.ot_status {
     const owner = admit(context, false) catch |err| return fail(context, err);
     if (id == null or command > c.OT_TEXT_VIEW_TRUNCATE or
-        (command == c.OT_TEXT_VIEW_WRAP_MODE and argument > 2) or (command == c.OT_TEXT_VIEW_TRUNCATE and argument > 1)) return fail(owner, error.InvalidOptions);
+        (command == c.OT_TEXT_VIEW_WRAP_MODE and argument > c.OT_SCENE_WRAP_WORD) or (command == c.OT_TEXT_VIEW_TRUNCATE and argument > 1)) return fail(owner, error.InvalidOptions);
     const operation: ctx.TextViewCommand = switch (command) {
         c.OT_TEXT_VIEW_WRAP_WIDTH => .{ .wrap_width = if (argument == 0) null else argument },
         c.OT_TEXT_VIEW_WRAP_MODE => .{ .wrap_mode = @enumFromInt(argument) },
@@ -253,7 +253,7 @@ pub fn ot_text_buffer_view_get_info(context: ?*Owner, id: ?*const c.ot_handle, o
     const selection = value.view.packSelectionInfo();
     const present = selection != std.math.maxInt(u64);
     const count = value.view.getVirtualLineCount();
-    out.?.* = .{ .struct_size = @sizeOf(c.ot_editor_view_info), .abi_version = 1, .virtual_line_count = count, .total_virtual_line_count = count, .selection_present = @intFromBool(present), .selection_start = if (present) @intCast(selection >> 32) else 0, .selection_end = if (present) @truncate(selection) else 0, .selection_occupancy = @intFromEnum(value.view.getSelectionOccupancy()) };
+    out.?.* = .{ .struct_size = @sizeOf(c.ot_editor_view_info), .abi_version = c.OT_CONTEXT_ABI_VERSION, .virtual_line_count = count, .total_virtual_line_count = count, .selection_present = @intFromBool(present), .selection_start = if (present) @intCast(selection >> 32) else 0, .selection_end = if (present) @truncate(selection) else 0, .selection_occupancy = @intFromEnum(value.view.getSelectionOccupancy()) };
     return c.OT_OK;
 }
 
@@ -276,7 +276,7 @@ pub fn ot_text_buffer_view_get_lines(context: ?*Owner, id: ?*const c.ot_handle, 
     if (capacity != 0) for (0..count) |index| {
         lines.?[index] = .{ .start_cols = info.line_start_cols[index], .width_cols = info.line_width_cols[index], .source_line = info.line_sources[index], .wrap_index = info.line_wraps[index] };
     };
-    out.?.* = .{ .struct_size = @sizeOf(c.ot_editor_measure), .abi_version = 1, .line_count = @intCast(count), .width_cols_max = info.line_width_cols_max };
+    out.?.* = .{ .struct_size = @sizeOf(c.ot_editor_measure), .abi_version = c.OT_CONTEXT_ABI_VERSION, .line_count = @intCast(count), .width_cols_max = info.line_width_cols_max };
     return c.OT_OK;
 }
 
@@ -287,7 +287,7 @@ pub fn ot_text_buffer_view_measure(context: ?*Owner, id: ?*const c.ot_handle, wi
     const value = view(owner, id) catch |err| return fail(owner, err);
     editor.prepareBuffer(value.text.buffer) catch |err| return fail(owner, err);
     const measured = value.view.measureForDimensions(width, height) catch |err| return fail(owner, err);
-    out.?.* = .{ .struct_size = @sizeOf(c.ot_editor_measure), .abi_version = 1, .line_count = measured.line_count, .width_cols_max = measured.width_cols_max };
+    out.?.* = .{ .struct_size = @sizeOf(c.ot_editor_measure), .abi_version = c.OT_CONTEXT_ABI_VERSION, .line_count = measured.line_count, .width_cols_max = measured.width_cols_max };
     return c.OT_OK;
 }
 
@@ -407,7 +407,7 @@ test "Context shared text ABI rejects malformed replacement and preserves short-
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, "kept", 4));
     var output: [4]u8 = undefined;
     var count: u32 = 99;
-    const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = 1, .byte_count = 4, .flags = 4, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 1, .link_byte_count = 4 };
+    const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = c.OT_CONTEXT_ABI_VERSION, .byte_count = 4, .flags = c.OT_SCENE_TEXT_LINK, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 1, .link_byte_count = 4 };
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_text_buffer_set_styled_text(&owner, &text_id, "next", 4, &.{chunk}, 1, "url", 3));
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_get_text(&owner, &text_id, &output, output.len, &count));
     try std.testing.expectEqualStrings("kept", &output);
@@ -427,10 +427,10 @@ test "Context shared text ABI rejects cursor updates without changing selection"
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, "ab\ncd", 5));
     var info = std.mem.zeroes(c.ot_editor_view_info);
     info.struct_size = @sizeOf(c.ot_editor_view_info);
-    info.abi_version = 1;
+    info.abi_version = c.OT_CONTEXT_ABI_VERSION;
     var selection = std.mem.zeroes(c.ot_editor_selection);
     selection.struct_size = @sizeOf(c.ot_editor_selection);
-    selection.abi_version = 1;
+    selection.abi_version = c.OT_CONTEXT_ABI_VERSION;
     selection.operation = c.OT_EDITOR_SELECT_SET;
     selection.start = 1;
     selection.end = 1;
@@ -464,7 +464,7 @@ test "Context shared text ABI releases provisional linked replacement on allocat
         _ = try owner.core.createTextBufferView(abi.handleFromC(text_id));
         const resource = try owner.core.raw().getTextBuffer(abi.handleFromC(text_id));
         const epoch = resource.buffer.getContentEpoch();
-        const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = 1, .byte_count = 4, .flags = 4, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 0, .link_byte_count = 19 };
+        const chunk: c.ot_styled_text_chunk = .{ .struct_size = @sizeOf(c.ot_styled_text_chunk), .abi_version = c.OT_CONTEXT_ABI_VERSION, .byte_count = 4, .flags = c.OT_SCENE_TEXT_LINK, .foreground = @splat(0), .background = @splat(0), .attributes = 0, .reserved = 0, .link_offset = 0, .link_byte_count = 19 };
         failing.fail_index = failing.alloc_index + failure_offset;
         failing.resize_fail_index = failing.resize_index;
         const status = ot_text_buffer_set_styled_text(&owner, &text_id, "next", 4, &.{chunk}, 1, "https://example.com", 19);
@@ -504,7 +504,7 @@ test "Context shared text batch rejects every allocation failure including the f
         var epochs: [2]u64 = undefined;
         var chunk = std.mem.zeroes(c.ot_styled_text_chunk);
         chunk.struct_size = @sizeOf(c.ot_styled_text_chunk);
-        chunk.abi_version = 1;
+        chunk.abi_version = c.OT_CONTEXT_ABI_VERSION;
         chunk.byte_count = 4;
         chunk.flags = c.OT_SCENE_TEXT_LINK;
         chunk.link_byte_count = 25;
@@ -518,7 +518,7 @@ test "Context shared text batch rejects every allocation failure including the f
             styles[index] = value.buffer.getSyntaxStyle().?;
             epochs[index] = value.buffer.getContentEpoch();
             (try owner.core.raw().getTextBufferView(view_id)).view.setSelection(0, 1, null, null);
-            replacement.* = .{ .struct_size = @sizeOf(c.ot_text_buffer_replacement), .abi_version = 1, .buffer = handle, .view = abi.handleToC(view_id), .byte_offset = @intCast(index * 4), .byte_count = 4, .chunk_offset = @intCast(index), .chunk_count = 1 };
+            replacement.* = .{ .struct_size = @sizeOf(c.ot_text_buffer_replacement), .abi_version = c.OT_CONTEXT_ABI_VERSION, .buffer = handle, .view = abi.handleToC(view_id), .byte_offset = @intCast(index * 4), .byte_count = 4, .chunk_offset = @intCast(index), .chunk_count = 1 };
         }
         var output = [_]c.ot_text_buffer_replacement_info{.{ .text_length = 99, .byte_count = 99 }} ** 2;
         failing.fail_index = failing.alloc_index + failure_offset;
@@ -572,7 +572,7 @@ test "Context shared text batch validates identities limits admission and owned 
         const buffer = try owner.core.createTextBuffer(.unicode);
         const dependent = try owner.core.createTextBufferView(buffer);
         try owner.core.textBufferSetText(buffer, "kept");
-        replacement.* = .{ .struct_size = @sizeOf(c.ot_text_buffer_replacement), .abi_version = 1, .buffer = abi.handleToC(buffer), .view = abi.handleToC(dependent), .byte_offset = 0, .byte_count = 0, .chunk_offset = 0, .chunk_count = 0 };
+        replacement.* = .{ .struct_size = @sizeOf(c.ot_text_buffer_replacement), .abi_version = c.OT_CONTEXT_ABI_VERSION, .buffer = abi.handleToC(buffer), .view = abi.handleToC(dependent), .byte_offset = 0, .byte_count = 0, .chunk_offset = 0, .chunk_count = 0 };
     }
     var output = [_]c.ot_text_buffer_replacement_info{.{ .text_length = 99, .byte_count = 99 }} ** 2;
     for (0..9) |case| {
@@ -691,7 +691,7 @@ test "Context shared text ABI rejects cold selection marker allocation before pu
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, line, line.len));
     var selection = std.mem.zeroes(c.ot_editor_selection);
     selection.struct_size = @sizeOf(c.ot_editor_selection);
-    selection.abi_version = 1;
+    selection.abi_version = c.OT_CONTEXT_ABI_VERSION;
     selection.operation = c.OT_EDITOR_SELECT_SET;
     selection.end = 1;
     var changed: u32 = 99;
@@ -702,7 +702,7 @@ test "Context shared text ABI rejects cold selection marker allocation before pu
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_set_text(&owner, &text_id, input, input.len));
     var info = std.mem.zeroes(c.ot_editor_view_info);
     info.struct_size = @sizeOf(c.ot_editor_view_info);
-    info.abi_version = 1;
+    info.abi_version = c.OT_CONTEXT_ABI_VERSION;
     try std.testing.expectEqual(c.OT_OK, ot_text_buffer_view_get_info(&owner, &view_id, &info));
     try std.testing.expectEqual(@as(u32, 3), info.virtual_line_count);
     const rope = resource.text.buffer.rope();
@@ -741,7 +741,7 @@ test "Context shared text ABI preserves empty chunk ordinals" {
     try owner.core.textBufferSetSyntaxStyle(abi.handleFromC(text_id), style_id);
     var chunk = std.mem.zeroes(c.ot_styled_text_chunk);
     chunk.struct_size = @sizeOf(c.ot_styled_text_chunk);
-    chunk.abi_version = 1;
+    chunk.abi_version = c.OT_CONTEXT_ABI_VERSION;
     var chunks = [_]c.ot_styled_text_chunk{chunk} ** 5;
     chunks[1].byte_count = 1;
     chunks[1].flags = c.OT_SCENE_TEXT_FOREGROUND;
@@ -775,10 +775,10 @@ test "Context shared text ABI selects native paint only for an exact self reques
     try owner.core.sceneSetStyle(node_id, 4, 0, 0, 1, 4, 1);
     try owner.core.sceneSetStyle(node_id, 4, 1, 0, 1, 1, 1);
     try owner.core.sceneSetHooks(node_id, c.OT_SCENE_HOOK_RENDER_SELF | c.OT_SCENE_HOOK_RESUME_NATIVE_TEXT, 1, 4, 1);
-    const config: c.ot_scene_frame_options = .{ .struct_size = @sizeOf(c.ot_scene_frame_options), .abi_version = 1, .background = .{ 0, 0, 0, 255 }, .use_mouse = 0, .excluded_hit_num = 0, .max_layout_rounds = 8, .max_host_requests = 64, .preserve_unwritten = 0 };
+    const config: c.ot_scene_frame_options = .{ .struct_size = @sizeOf(c.ot_scene_frame_options), .abi_version = c.OT_CONTEXT_ABI_VERSION, .background = .{ 0, 0, 0, 255 }, .use_mouse = 0, .excluded_hit_num = 0, .max_layout_rounds = 8, .max_host_requests = 64, .preserve_unwritten = 0 };
     var frame = std.mem.zeroes(c.ot_scene_frame_request);
     frame.struct_size = @sizeOf(c.ot_scene_frame_request);
-    frame.abi_version = 1;
+    frame.abi_version = c.OT_CONTEXT_ABI_VERSION;
     var geometry = std.mem.zeroes(c.ot_scene_frame_geometry);
     geometry.struct_size = @sizeOf(c.ot_scene_frame_geometry);
     geometry.abi_version = c.OT_CONTEXT_ABI_VERSION;
@@ -792,7 +792,7 @@ test "Context shared text ABI selects native paint only for an exact self reques
     frame.reserved[0] = 0;
     frame.abi_version = 2;
     try std.testing.expectEqual(c.OT_UNSUPPORTED_VERSION, ot_scene_select_text_view_paint(&owner, &node, &frame, 1));
-    frame.abi_version = 1;
+    frame.abi_version = c.OT_CONTEXT_ABI_VERSION;
     frame.request_id += 1;
     try std.testing.expectEqual(c.OT_STALE_FRAME, ot_scene_select_text_view_paint(&owner, &node, &frame, 1));
     frame.request_id -= 1;

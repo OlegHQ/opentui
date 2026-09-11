@@ -66,7 +66,7 @@ pub fn rgba(color: [4]u16) !void {
 
 pub fn styleRecord(ptr: ?*const c.ot_editor_style) !*const c.ot_editor_style {
     const value = try record(c.ot_editor_style, ptr);
-    if (value.flags & ~@as(u32, 7) != 0) return error.InvalidOptions;
+    if (value.flags & ~@as(u32, c.OT_EDITOR_STYLE_FOREGROUND | c.OT_EDITOR_STYLE_BACKGROUND | c.OT_EDITOR_STYLE_ATTRIBUTES) != 0) return error.InvalidOptions;
     if (value.flags & c.OT_EDITOR_STYLE_ATTRIBUTES == 0 and value.attributes != 0) return error.InvalidOptions;
     if (value.flags & c.OT_EDITOR_STYLE_FOREGROUND == 0) for (value.foreground) |v| {
         if (v != 0) return error.InvalidOptions;
@@ -167,8 +167,8 @@ pub fn ot_syntax_style_register(context: ?*Owner, id: ?*const c.ot_handle, bytes
     if (id == null or (count != 0 and bytes == null) or out == null) return fail(owner, error.InvalidOptions);
     const name = if (bytes) |p| p[0..count] else &.{};
     out.?.* = owner.core.syntaxStyleRegister(abi.handleFromC(id.?.*), name, .{
-        .fg = if (style.flags & 1 != 0) style.foreground else null,
-        .bg = if (style.flags & 2 != 0) style.background else null,
+        .fg = if (style.flags & c.OT_EDITOR_STYLE_FOREGROUND != 0) style.foreground else null,
+        .bg = if (style.flags & c.OT_EDITOR_STYLE_BACKGROUND != 0) style.background else null,
         .attributes = style.attributes,
     }) catch |err| return fail(owner, err);
     return c.OT_OK;
@@ -201,7 +201,7 @@ pub fn ot_editor_view_set_scroll_margin(context: ?*Owner, id: ?*const c.ot_handl
 pub fn ot_editor_view_command(context: ?*Owner, id: ?*const c.ot_handle, command: u32, argument: u32) callconv(.c) c.ot_status {
     const owner = admit(context, false) catch |err| return fail(context, err);
     if (id == null or command > c.OT_EDITOR_TAB_INDICATOR or (command < c.OT_EDITOR_CURSOR_OFFSET and argument != 0) or
-        (command == c.OT_EDITOR_WRAP_MODE and argument > 2)) return fail(owner, error.InvalidOptions);
+        (command == c.OT_EDITOR_WRAP_MODE and argument > c.OT_SCENE_WRAP_WORD)) return fail(owner, error.InvalidOptions);
     const operation: ctx.EditorCommand = switch (command) {
         c.OT_EDITOR_MOVE_UP => .move_up,
         c.OT_EDITOR_MOVE_DOWN => .move_down,
@@ -236,18 +236,19 @@ pub fn selectionFromC(options: ?*const c.ot_editor_selection, is_editor: bool) !
     const local = s.operation == c.OT_EDITOR_SELECT_LOCAL or s.operation == c.OT_EDITOR_SELECT_LOCAL_UPDATE;
     const offsets = s.operation == c.OT_EDITOR_SELECT_SET or s.operation == c.OT_EDITOR_SELECT_INCLUSIVE;
     const colors = local or offsets or s.operation == c.OT_EDITOR_SELECT_UPDATE or s.operation == c.OT_EDITOR_SELECT_COLORS;
-    if (s.reserved != 0 or s.operation > c.OT_EDITOR_SELECT_COLORS or s.flags & ~@as(u32, 3) != 0 or
+    if (s.reserved != 0 or s.operation > c.OT_EDITOR_SELECT_COLORS or
+        s.flags & ~@as(u32, c.OT_SCENE_TEXT_FOREGROUND | c.OT_SCENE_TEXT_BACKGROUND) != 0 or
         s.update_cursor > 1 or s.follow_cursor > 1 or
         (!is_editor and (s.update_cursor != 0 or s.follow_cursor != 0)) or
         (!local and (s.anchor_x != 0 or s.anchor_y != 0 or s.focus_x != 0 or s.focus_y != 0 or s.update_cursor != 0 or s.follow_cursor != 0)) or
         (!offsets and s.start != 0) or (!offsets and s.operation != c.OT_EDITOR_SELECT_UPDATE and s.end != 0) or
-        (!colors and s.flags != 0) or (local and s.behavior > 2) or
-        (s.operation == c.OT_EDITOR_SELECT_OCCUPANCY and s.behavior > 1) or
+        (!colors and s.flags != 0) or (local and s.behavior > c.OT_SELECTION_LINE) or
+        (s.operation == c.OT_EDITOR_SELECT_OCCUPANCY and s.behavior > c.OT_SELECTION_OCCUPANCY_BOUNDARY) or
         (!local and s.operation != c.OT_EDITOR_SELECT_OCCUPANCY and s.behavior != 0)) return error.InvalidOptions;
-    if (s.flags & 1 == 0) for (s.foreground) |v| {
+    if (s.flags & c.OT_SCENE_TEXT_FOREGROUND == 0) for (s.foreground) |v| {
         if (v != 0) return error.InvalidOptions;
     };
-    if (s.flags & 2 == 0) for (s.background) |v| {
+    if (s.flags & c.OT_SCENE_TEXT_BACKGROUND == 0) for (s.background) |v| {
         if (v != 0) return error.InvalidOptions;
     };
     return .{
@@ -258,8 +259,8 @@ pub fn selectionFromC(options: ?*const c.ot_editor_selection, is_editor: bool) !
         .anchor_y = s.anchor_y,
         .focus_x = s.focus_x,
         .focus_y = s.focus_y,
-        .foreground = if (s.flags & 1 != 0) s.foreground else null,
-        .background = if (s.flags & 2 != 0) s.background else null,
+        .foreground = if (s.flags & c.OT_SCENE_TEXT_FOREGROUND != 0) s.foreground else null,
+        .background = if (s.flags & c.OT_SCENE_TEXT_BACKGROUND != 0) s.background else null,
         .behavior = if (local) @enumFromInt(s.behavior) else .cell,
         .occupancy = if (s.operation == c.OT_EDITOR_SELECT_OCCUPANCY) @enumFromInt(s.behavior) else .cell,
         .update_cursor = s.update_cursor == 1,
@@ -506,12 +507,14 @@ pub fn ot_editor_view_replace_selection(context: ?*Owner, id: ?*const c.ot_handl
 
 pub fn defaultsFromC(mask: u32, options: ?*const c.ot_editor_style) !ctx.TextDefaults {
     const style = try styleRecord(options);
-    if (mask == 0 or mask & ~@as(u32, 7) != 0 or style.flags & ~mask != 0) return error.InvalidOptions;
+    if (mask == 0 or
+        mask & ~@as(u32, c.OT_EDITOR_STYLE_FOREGROUND | c.OT_EDITOR_STYLE_BACKGROUND | c.OT_EDITOR_STYLE_ATTRIBUTES) != 0 or
+        style.flags & ~mask != 0) return error.InvalidOptions;
     return .{
         .fields = @bitCast(@as(u3, @intCast(mask))),
-        .foreground = if (style.flags & 1 != 0) style.foreground else null,
-        .background = if (style.flags & 2 != 0) style.background else null,
-        .attributes = if (style.flags & 4 != 0) style.attributes else null,
+        .foreground = if (style.flags & c.OT_EDITOR_STYLE_FOREGROUND != 0) style.foreground else null,
+        .background = if (style.flags & c.OT_EDITOR_STYLE_BACKGROUND != 0) style.background else null,
+        .attributes = if (style.flags & c.OT_EDITOR_STYLE_ATTRIBUTES != 0) style.attributes else null,
     };
 }
 

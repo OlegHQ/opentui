@@ -8,6 +8,7 @@ const terminal = @import("terminal.zig");
 const scene = @import("scene.zig");
 const buffer = @import("buffer.zig");
 const Context = @import("context.zig").Context;
+const api = @import("context_abi_c");
 
 test {
     _ = @import("tests/session-split_test.zig");
@@ -115,8 +116,8 @@ pub const RendererOptions = struct {
 
 pub const EnvironmentEntry = struct { key: []const u8, value: []const u8 };
 // Initialization budgets include the two u32 lengths encoded for each entry.
-pub const environment_entries_max: u32 = 256;
-pub const environment_bytes_max: u32 = 65_536;
+pub const environment_entries_max: u32 = api.OT_SESSION_ENV_ENTRIES_MAX;
+pub const environment_bytes_max: u32 = api.OT_SESSION_ENV_BYTES_MAX;
 
 pub const TerminalOptions = struct {
     use_alternate_screen: bool = true,

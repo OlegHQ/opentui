@@ -13,6 +13,7 @@ const text_buffer_view = @import("text-buffer-view.zig");
 const utf8 = @import("utf8.zig");
 const image = @import("image.zig");
 const Context = @import("context.zig").Context;
+const api = @import("context_abi_c");
 
 pub const StyleValue = struct { unit: u32, value: f32 };
 
@@ -128,6 +129,9 @@ pub const Paint = struct {
 // Field order is the partial-property wire order; bool occupies a u32 on the wire.
 pub const paint_fields = .{ "zIndex", "opacity", "translateX", "translateY", "borderSides", "shouldFill", "background", "borderColor", "borderStyle", "focusable", "focusedBorderColor" };
 pub const paint_fields_all: u32 = (1 << paint_fields.len) - 1;
+const scene_hook_flags_all: u32 = api.OT_SCENE_HOOK_UPDATE | api.OT_SCENE_HOOK_RESIZE | api.OT_SCENE_HOOK_LAYOUT_CHANGED | api.OT_SCENE_HOOK_RENDER_BEFORE | api.OT_SCENE_HOOK_RENDER_AFTER | api.OT_SCENE_HOOK_RENDER_SELF | api.OT_SCENE_HOOK_IDLE_UPDATE | api.OT_SCENE_HOOK_RESUME_NATIVE_TEXT;
+const scene_layout_hook_flags: u32 = api.OT_SCENE_HOOK_UPDATE | api.OT_SCENE_HOOK_RESIZE | api.OT_SCENE_HOOK_LAYOUT_CHANGED;
+const scene_paint_hook_flags: u32 = api.OT_SCENE_HOOK_RENDER_BEFORE | api.OT_SCENE_HOOK_RENDER_AFTER | api.OT_SCENE_HOOK_RENDER_SELF;
 
 pub const FrameOptions = struct {
     background: ansi.RGBA,
@@ -215,9 +219,9 @@ const Control = union {
 
     fn deinit(self: Control, kind: u32, allocator: std.mem.Allocator) void {
         switch (kind) {
-            1 => if (self.box) |details| details.destroy(allocator),
-            4 => self.arrow.deinit(allocator),
-            8 => self.image.deinit(),
+            api.OT_SCENE_BOX => if (self.box) |details| details.destroy(allocator),
+            api.OT_SCENE_ARROW => self.arrow.deinit(allocator),
+            api.OT_SCENE_IMAGE => self.image.deinit(),
             else => {},
         }
     }
@@ -407,8 +411,8 @@ pub const Scene = struct {
     }
 
     pub fn prepareInsert(self: *Scene, kind: u32, num: u32) !void {
-        if (kind > 8 or num == 0) return error.InvalidOptions;
-        if (kind == 0 and self.root != null) return error.SceneAlreadyAttached;
+        if (kind > api.OT_SCENE_IMAGE or num == 0) return error.InvalidOptions;
+        if (kind == api.OT_SCENE_ROOT and self.root != null) return error.SceneAlreadyAttached;
         if (self.last_token == std.math.maxInt(u32)) return error.ObjectLimit;
         try self.tokens.ensureUnusedCapacity(self.allocator, 1);
     }
@@ -428,23 +432,23 @@ pub const Scene = struct {
             .paint_children = storage.paint_children,
         };
         value.scene_node = node_ptr;
-        if (kind == 1) value.scene_node.?.control = .{ .box = null };
-        if (kind == 4) value.scene_node.?.control = .{ .arrow = .{} };
-        if (kind == 5) value.scene_node.?.control = .{ .editor = .{} };
-        if (kind == 7) value.scene_node.?.control = .{ .text_view = .{} };
-        if (kind == 8) value.scene_node.?.control = .{ .image = .{} };
+        if (kind == api.OT_SCENE_BOX) value.scene_node.?.control = .{ .box = null };
+        if (kind == api.OT_SCENE_ARROW) value.scene_node.?.control = .{ .arrow = .{} };
+        if (kind == api.OT_SCENE_EDITOR) value.scene_node.?.control = .{ .editor = .{} };
+        if (kind == api.OT_SCENE_TEXT_VIEW) value.scene_node.?.control = .{ .text_view = .{} };
+        if (kind == api.OT_SCENE_IMAGE) value.scene_node.?.control = .{ .image = .{} };
         if (self.head) |head| head.scene_node.?.previous = value;
         self.head = value;
         self.count += 1;
         self.tokens.putAssumeCapacity(self.last_token, handle);
-        if (kind == 0) self.root = value;
+        if (kind == api.OT_SCENE_ROOT) self.root = value;
         self.preparation_dirty = true;
         self.work.clearRetainingCapacity();
     }
 
     pub fn move(self: *Scene, value: *native.NativeRenderable, destination: ?*native.NativeRenderable, index: u32) !void {
         const node = value.scene_node.?;
-        if (node.kind == 0) return error.YogaInvalidArgument;
+        if (node.kind == api.OT_SCENE_ROOT) return error.YogaInvalidArgument;
         const reparented = node.parent != destination;
         const new_placement = destination != null and (reparented or node.placement == 0);
         if (new_placement and self.last_placement == std.math.maxInt(u64)) return error.ObjectLimit;
@@ -507,7 +511,7 @@ pub const Scene = struct {
         if (self.prefix) |*prefix| {
             // Future destroyed entries skip; an entered node finishes its paint phases.
             if (prefix.phase != .before and std.meta.eql(self.paint_members.items[prefix.cursor].node, node.handle)) {
-                std.debug.assert(node.kind != 0);
+                std.debug.assert(node.kind != api.OT_SCENE_ROOT);
                 prefix.removed = .{
                     .kind = node.kind,
                     .layout = node.layout,
@@ -519,9 +523,9 @@ pub const Scene = struct {
                     .token = node.token,
                 };
                 // The entered render() continuation now owns the copied title bytes.
-                if (node.kind == 1) node.control.box = null;
-                if (node.kind == 4) node.control.arrow.text = null;
-                if (node.kind == 8) node.control.image = .{};
+                if (node.kind == api.OT_SCENE_BOX) node.control.box = null;
+                if (node.kind == api.OT_SCENE_ARROW) node.control.arrow.text = null;
+                if (node.kind == api.OT_SCENE_IMAGE) node.control.image = .{};
             }
         }
         node.control.deinit(node.kind, self.allocator);
@@ -549,8 +553,8 @@ pub const Scene = struct {
         const removed = self.tokens.remove(node.token);
         std.debug.assert(removed);
         self.count -= 1;
-        self.hook_count -= @intFromBool(node.hook_flags & ~@as(u32, 64) != 0);
-        self.layout_hook_count -= @intFromBool(node.hook_flags & 7 != 0);
+        self.hook_count -= @intFromBool(node.hook_flags & ~@as(u32, api.OT_SCENE_HOOK_IDLE_UPDATE) != 0);
+        self.layout_hook_count -= @intFromBool(node.hook_flags & scene_layout_hook_flags != 0);
         self.filter_count -= @intFromBool(node.viewport != null);
         if (self.focus) |focused| {
             if (std.meta.eql(focused, node.handle)) self.focus = null;
@@ -588,15 +592,15 @@ pub const Scene = struct {
 
     pub fn setPaintPartial(self: *Scene, value: *native.NativeRenderable, fields: u32, patch: Paint) !void {
         if (fields == 0 or fields & ~paint_fields_all != 0) return error.InvalidOptions;
-        if (fields & 64 != 0) try buffer.validateColor(patch.background);
-        if (fields & 128 != 0) try buffer.validateColor(patch.borderColor);
-        if (fields & 1024 != 0) try buffer.validateColor(patch.focusedBorderColor);
-        if ((fields & 2 != 0 and (!std.math.isFinite(patch.opacity) or patch.opacity < 0 or patch.opacity > 1)) or
-            (fields & 4 != 0 and !std.math.isFinite(patch.translateX)) or
-            (fields & 8 != 0 and !std.math.isFinite(patch.translateY)) or
-            (fields & 16 != 0 and patch.borderSides > 15) or
-            (fields & 32 != 0 and patch.shouldFill > 1) or
-            (fields & 256 != 0 and patch.borderStyle > 3))
+        if (fields & api.OT_SCENE_PROPERTY_BACKGROUND != 0) try buffer.validateColor(patch.background);
+        if (fields & api.OT_SCENE_PROPERTY_BORDER_COLOR != 0) try buffer.validateColor(patch.borderColor);
+        if (fields & api.OT_SCENE_PROPERTY_FOCUSED_BORDER_COLOR != 0) try buffer.validateColor(patch.focusedBorderColor);
+        if ((fields & api.OT_SCENE_PROPERTY_OPACITY != 0 and (!std.math.isFinite(patch.opacity) or patch.opacity < 0 or patch.opacity > 1)) or
+            (fields & api.OT_SCENE_PROPERTY_TRANSLATE_X != 0 and !std.math.isFinite(patch.translateX)) or
+            (fields & api.OT_SCENE_PROPERTY_TRANSLATE_Y != 0 and !std.math.isFinite(patch.translateY)) or
+            (fields & api.OT_SCENE_PROPERTY_BORDER != 0 and patch.borderSides > api.OT_BORDER_ALL) or
+            (fields & api.OT_SCENE_PROPERTY_SHOULD_FILL != 0 and patch.shouldFill > 1) or
+            (fields & api.OT_SCENE_PROPERTY_BORDER_STYLE != 0 and patch.borderStyle > api.OT_BORDER_HEAVY))
         {
             return error.InvalidOptions;
         }
@@ -608,7 +612,7 @@ pub const Scene = struct {
                 if (fields & (@as(u32, 1) << index) != 0) @field(paint, name) = @field(patch, name);
             }
         }
-        if (node.kind != 1 and paint.borderSides != 0) return error.InvalidOptions;
+        if (node.kind != api.OT_SCENE_BOX and paint.borderSides != api.OT_BORDER_NONE) return error.InvalidOptions;
         // Check even a paint-only change against a poisoned/active Yoga owner.
         try yoga.check(yoga.nodeTeardownStatus(value.yoga_node));
         var unused: u32 = 0;
@@ -616,7 +620,7 @@ pub const Scene = struct {
         if (node.paint.borderSides != paint.borderSides) {
             // Only the final copy publishes; rejected preparation changes scratch style alone.
             try yoga.check(yoga.yogaNodeCopyStyleChecked(self.style_node, value.yoga_node));
-            for ([_]u32{ 1, 8, 4, 2 }, 0..) |side, edge| {
+            for ([_]u32{ api.OT_BORDER_LEFT, api.OT_BORDER_TOP, api.OT_BORDER_RIGHT, api.OT_BORDER_BOTTOM }, api.OT_EDGE_LEFT..) |side, edge| {
                 try yoga.check(yoga.yogaNodeStyleSetBorderChecked(self.style_node, @intCast(edge), if (paint.borderSides & side != 0) 1 else 0));
             }
             try yoga.check(yoga.yogaNodeCopyStyleChecked(value.yoga_node, self.style_node));
@@ -653,7 +657,7 @@ pub const Scene = struct {
     pub fn setBoxDetails(self: *Scene, value: *native.NativeRenderable, options: BoxDetails) !void {
         const node = value.scene_node orelse return error.WrongKind;
         if (node.owner != self) return error.WrongSession;
-        if (node.kind != 1) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_BOX) return error.WrongKind;
         if (options.title_alignment > 2 or options.bottom_title_alignment > 2) return error.InvalidOptions;
         if (options.title_color) |rgba| try buffer.validateColor(rgba);
         try buffer.validateTextInput(options.title);
@@ -686,24 +690,26 @@ pub const Scene = struct {
 
     pub fn setHooks(self: *Scene, value: *native.NativeRenderable, flags: u32, generation: u64, initial_width: f64, initial_height: f64) !void {
         const node = value.scene_node.?;
-        if (flags & ~@as(u32, 255) != 0 or generation == 0 or flags & 65 == 65 or
-            (flags & 184 != 0 and node.kind == 0) or
-            (flags & 128 != 0 and (flags & 32 == 0 or node.kind != 7)) or
-            (flags & 8 != 0 and flags & 32 == 0 and (node.kind == 2 or node.kind == 5 or node.kind == 7)) or
-            (flags & 4 != 0 and node.kind != 0)) return error.InvalidOptions;
+        if (flags & ~scene_hook_flags_all != 0 or generation == 0 or
+            flags & (api.OT_SCENE_HOOK_UPDATE | api.OT_SCENE_HOOK_IDLE_UPDATE) == api.OT_SCENE_HOOK_UPDATE | api.OT_SCENE_HOOK_IDLE_UPDATE or
+            (flags & (scene_paint_hook_flags | api.OT_SCENE_HOOK_RESUME_NATIVE_TEXT) != 0 and node.kind == api.OT_SCENE_ROOT) or
+            (flags & api.OT_SCENE_HOOK_RESUME_NATIVE_TEXT != 0 and (flags & api.OT_SCENE_HOOK_RENDER_SELF == 0 or node.kind != api.OT_SCENE_TEXT_VIEW)) or
+            (flags & api.OT_SCENE_HOOK_RENDER_BEFORE != 0 and flags & api.OT_SCENE_HOOK_RENDER_SELF == 0 and
+                (node.kind == api.OT_SCENE_TEXT or node.kind == api.OT_SCENE_EDITOR or node.kind == api.OT_SCENE_TEXT_VIEW)) or
+            (flags & api.OT_SCENE_HOOK_LAYOUT_CHANGED != 0 and node.kind != api.OT_SCENE_ROOT)) return error.InvalidOptions;
         for ([_]f64{ initial_width, initial_height }) |dimension| {
             if (!std.math.isFinite(dimension) or dimension < 0 or dimension > std.math.maxInt(i32)) return error.InvalidDimensions;
         }
         if (generation <= node.hook_generation) return error.StaleFrame;
         if (node.observed_frame == 0) {
-            if (node.kind == 3) _ = try sliderThumb(node.control.slider, initial_width, initial_height);
+            if (node.kind == api.OT_SCENE_SLIDER) _ = try sliderThumb(node.control.slider, initial_width, initial_height);
             node.resize_width = initial_width;
             node.resize_height = initial_height;
         }
-        self.hook_count -= @intFromBool(node.hook_flags & ~@as(u32, 64) != 0);
-        self.hook_count += @intFromBool(flags & ~@as(u32, 64) != 0);
-        self.layout_hook_count -= @intFromBool(node.hook_flags & 7 != 0);
-        self.layout_hook_count += @intFromBool(flags & 7 != 0);
+        self.hook_count -= @intFromBool(node.hook_flags & ~@as(u32, api.OT_SCENE_HOOK_IDLE_UPDATE) != 0);
+        self.hook_count += @intFromBool(flags & ~@as(u32, api.OT_SCENE_HOOK_IDLE_UPDATE) != 0);
+        self.layout_hook_count -= @intFromBool(node.hook_flags & scene_layout_hook_flags != 0);
+        self.layout_hook_count += @intFromBool(flags & scene_layout_hook_flags != 0);
         node.hook_flags = flags;
         node.hook_generation = generation;
         self.preparation_dirty = true;
@@ -738,21 +744,21 @@ pub const Scene = struct {
     /// Lease authority follows the issued request, not the node's current hooks.
     /// Context additionally checks the destination and releases scopes before resume.
     pub fn checkFrameAccess(self: *Scene, ticket: FrameRequest) error{ WrongContext, WrongSession, StaleFrame }!Painted {
-        if (ticket.kind == 0) return (try self.checkPainted(ticket)).*;
+        if (ticket.kind == api.OT_SCENE_FRAME_DONE) return (try self.checkPainted(ticket)).*;
         if (ticket.session.context_id != self.session.context_id) return error.WrongContext;
         if (!std.meta.eql(ticket.session, self.session)) return error.WrongSession;
         const prefix = self.prefix orelse return error.StaleFrame;
         const pending = (self.attempt orelse return error.StaleFrame).pending orelse return error.StaleFrame;
         if (!std.meta.eql(ticket, pending)) return error.StaleFrame;
-        if (ticket.kind != 4 and ticket.kind != 5 and ticket.kind != 7) return error.StaleFrame;
+        if (ticket.kind != api.OT_SCENE_FRAME_RENDER_BEFORE and ticket.kind != api.OT_SCENE_FRAME_RENDER_AFTER and ticket.kind != api.OT_SCENE_FRAME_RENDER_SELF) return error.StaleFrame;
         return .{ .ticket = ticket, .membership_epoch = prefix.membership_epoch, .destination = prefix.destination };
     }
 
     pub fn selectTextViewPaint(self: *Scene, value: *native.NativeRenderable, ticket: FrameRequest, enabled: bool) !void {
         const node = value.scene_node.?;
-        if (node.kind != 7) return error.WrongKind;
+        if (node.kind != api.OT_SCENE_TEXT_VIEW) return error.WrongKind;
         _ = try self.checkFrameAccess(ticket);
-        if (ticket.kind != 7 or !std.meta.eql(ticket.node, node.handle)) return error.StaleFrame;
+        if (ticket.kind != api.OT_SCENE_FRAME_RENDER_SELF or !std.meta.eql(ticket.node, node.handle)) return error.StaleFrame;
         const prefix = &self.prefix.?;
         if (prefix.phase != .after or prefix.removed != null or prefix.text_paint_selected) return error.StaleFrame;
         prefix.text_paint_pending = enabled;
@@ -771,7 +777,7 @@ pub const Scene = struct {
     pub fn isYielded(self: *const Scene) bool {
         const active = self.attempt orelse return false;
         const pending = active.pending orelse return false;
-        return pending.kind == 6;
+        return pending.kind == api.OT_SCENE_FRAME_YIELD;
     }
 
     /// Limits stay fixed; paint options can change on a checked acknowledgement.
@@ -795,10 +801,10 @@ pub const Scene = struct {
             if (options.max_layout_rounds != active.options.max_layout_rounds or
                 options.max_host_requests != active.options.max_host_requests) return error.InvalidOptions;
             if (self.prefix) |*prefix| {
-                prefix.remaining = if (reply.kind == 6) max_paint_members else @min(prefix.remaining, max_paint_members);
+                prefix.remaining = if (reply.kind == api.OT_SCENE_FRAME_YIELD) max_paint_members else @min(prefix.remaining, max_paint_members);
             }
-            self.attempt.?.remaining_work = if (reply.kind == 6) max_work_items else @min(active.remaining_work, max_work_items);
-            self.attempt.?.bounded_work = max_work_items != std.math.maxInt(u32) or (reply.kind != 6 and active.bounded_work);
+            self.attempt.?.remaining_work = if (reply.kind == api.OT_SCENE_FRAME_YIELD) max_work_items else @min(active.remaining_work, max_work_items);
+            self.attempt.?.bounded_work = max_work_items != std.math.maxInt(u32) or (reply.kind != api.OT_SCENE_FRAME_YIELD and active.bounded_work);
             self.attempt.?.options = options;
             self.attempt.?.pending = null;
         } else {
@@ -840,17 +846,17 @@ pub const Scene = struct {
             if (try self.continuePaint(objects, cli)) |request_value| return request_value;
             return self.finishPaint(cli, prefix.membership_epoch, false);
         }
-        const restart_feedback = previous != null and previous.?.kind == 6 and
+        const restart_feedback = previous != null and previous.?.kind == api.OT_SCENE_FRAME_YIELD and
             active.preparing == .none and active.feedback_work_remaining == 0 and
             (self.preparation_dirty or try self.needsSolve(cli, root));
         if (active.rounds == 0 or active.preparing != .none or restart_feedback) {
-            if (!try self.prepareRound(objects, cli, root, reusable_work)) return self.request(root.?.scene_node.?, 6);
+            if (!try self.prepareRound(objects, cli, root, reusable_work)) return self.request(root.?.scene_node.?, api.OT_SCENE_FRAME_YIELD);
         }
         while (true) {
             if (self.layout_pending) {
                 if (root) |value| {
-                    if (value.scene_node.?.hook_flags & 4 != 0 and try self.isVisibleMember(value)) {
-                        const result = try self.request(value.scene_node.?, 3);
+                    if (value.scene_node.?.hook_flags & api.OT_SCENE_HOOK_LAYOUT_CHANGED != 0 and try self.isVisibleMember(value)) {
+                        const result = try self.request(value.scene_node.?, api.OT_SCENE_FRAME_LAYOUT_CHANGED);
                         self.layout_pending = false;
                         return result;
                     }
@@ -860,7 +866,7 @@ pub const Scene = struct {
             // No host call or scene mutation intervenes while this proof is reused.
             var visible_member: ?*native.NativeRenderable = null;
             while (self.feedback.items.len != 0) {
-                if (active.remaining_work == 0) return self.request(root.?.scene_node.?, 6);
+                if (active.remaining_work == 0) return self.request(root.?.scene_node.?, api.OT_SCENE_FRAME_YIELD);
                 active.remaining_work -= 1;
                 active.feedback_work_remaining -|= 1;
                 const operation = self.feedback.pop().?;
@@ -888,8 +894,8 @@ pub const Scene = struct {
                         self.feedback.appendAssumeCapacity(.{ .node = node.handle, .kind = .children });
                         self.feedback.appendAssumeCapacity(.{ .node = node.handle, .kind = .prepass });
                         self.feedback.appendAssumeCapacity(.{ .node = node.handle, .kind = .refresh });
-                        if (node.hook_flags & 65 != 0 and node.update_frame != active.frame_id) {
-                            if (node.hook_flags & 1 != 0) result = try self.request(node, 1);
+                        if (node.hook_flags & (api.OT_SCENE_HOOK_UPDATE | api.OT_SCENE_HOOK_IDLE_UPDATE) != 0 and node.update_frame != active.frame_id) {
+                            if (node.hook_flags & api.OT_SCENE_HOOK_UPDATE != 0) result = try self.request(node, api.OT_SCENE_FRAME_UPDATE);
                             node.update_frame = active.frame_id;
                         }
                     },
@@ -965,7 +971,7 @@ pub const Scene = struct {
                 if (result) |request_value| return request_value;
             }
             if (self.preparation_dirty or try self.needsSolve(cli, root)) {
-                if (!try self.prepareRound(objects, cli, root, reusable_work)) return self.request(root.?.scene_node.?, 6);
+                if (!try self.prepareRound(objects, cli, root, reusable_work)) return self.request(root.?.scene_node.?, api.OT_SCENE_FRAME_YIELD);
                 continue;
             }
             // Resumed calls rebuild transient paint pointers from current accepted topology.
@@ -986,9 +992,9 @@ pub const Scene = struct {
             var paint_hooks = false;
             if (self.hook_count != 0 or self.work.items.len > max_paint_members) {
                 for (self.work.items) |entry| {
-                    if (!entry.visible or entry.node.scene_node.?.kind == 0) continue;
+                    if (!entry.visible or entry.node.scene_node.?.kind == api.OT_SCENE_ROOT) continue;
                     paint_count += 1;
-                    paint_hooks = paint_hooks or entry.node.scene_node.?.hook_flags & 56 != 0;
+                    paint_hooks = paint_hooks or entry.node.scene_node.?.hook_flags & scene_paint_hook_flags != 0;
                 }
             }
             if (paint_hooks or paint_count > max_paint_members) {
@@ -997,7 +1003,7 @@ pub const Scene = struct {
                 for (self.work.items) |member| {
                     member.node.scene_node.?.layout.screenX = member.layout.screenX;
                     member.node.scene_node.?.layout.screenY = member.layout.screenY;
-                    if (!member.visible or member.node.scene_node.?.kind == 0) continue;
+                    if (!member.visible or member.node.scene_node.?.kind == api.OT_SCENE_ROOT) continue;
                     self.paint_members.appendAssumeCapacity(.{
                         .node = member.node.scene_node.?.handle,
                         .clip = member.clip,
@@ -1052,7 +1058,7 @@ pub const Scene = struct {
 
     fn request(self: *Scene, node: *Node, kind: u32) !FrameRequest {
         const active = &self.attempt.?;
-        if (kind != 6) {
+        if (kind != api.OT_SCENE_FRAME_YIELD) {
             if (active.requests == active.options.max_host_requests) return error.FrameRequestLimit;
             active.requests += 1;
         }
@@ -1064,11 +1070,11 @@ pub const Scene = struct {
             .frame_id = active.frame_id,
             .request_id = active.request_id,
             .layout_epoch = self.layout_epoch,
-            .hook_generation = if (kind == 6) 0 else node.hook_generation,
+            .hook_generation = if (kind == api.OT_SCENE_FRAME_YIELD) 0 else node.hook_generation,
             .kind = kind,
-            .num = if (kind == 6) 0 else node.num,
-            .width = if (kind == 6) 0 else @intFromFloat(node.layout.width),
-            .height = if (kind == 6) 0 else @intFromFloat(node.layout.height),
+            .num = if (kind == api.OT_SCENE_FRAME_YIELD) 0 else node.num,
+            .width = if (kind == api.OT_SCENE_FRAME_YIELD) 0 else @intFromFloat(node.layout.width),
+            .height = if (kind == api.OT_SCENE_FRAME_YIELD) 0 else @intFromFloat(node.layout.height),
         };
         active.pending = result;
         return result;
@@ -1080,15 +1086,15 @@ pub const Scene = struct {
         if (node.observed_frame == active.frame_id and node.observed_round == active.rounds) return null;
         const changed = node.resize_width != node.layout.width or node.resize_height != node.layout.height;
         var visible = true;
-        if (check_display and (node.text != null or node.editor != null or node.kind == 7 or (changed and node.hook_flags & 2 != 0))) {
+        if (check_display and (node.text != null or node.editor != null or node.kind == api.OT_SCENE_TEXT_VIEW or (changed and node.hook_flags & api.OT_SCENE_HOOK_RESIZE != 0))) {
             // Placement and filtered refresh already checked the parent's membership.
             var display: u32 = 0;
-            try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, 9, &display));
-            visible = display != 1;
+            try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, api.OT_STYLE_ENUM_DISPLAY, &display));
+            visible = display != api.OT_DISPLAY_NONE;
         }
         if (visible) try prepareView(node, node.layout);
-        const result = if (changed and node.hook_flags & 2 != 0 and visible)
-            try self.request(node, 2)
+        const result = if (changed and node.hook_flags & api.OT_SCENE_HOOK_RESIZE != 0 and visible)
+            try self.request(node, api.OT_SCENE_FRAME_RESIZE)
         else
             null;
         node.observed_layout = node.layout;
@@ -1108,8 +1114,8 @@ pub const Scene = struct {
             depth += 1;
             if (builtin.is_test) self.test_visibility_steps += 1;
             var display: u32 = 0;
-            try yoga.check(yoga.yogaNodeStyleGetEnumChecked(current.yoga_node, 9, &display));
-            if (display == 1) return false;
+            try yoga.check(yoga.yogaNodeStyleGetEnumChecked(current.yoga_node, api.OT_STYLE_ENUM_DISPLAY, &display));
+            if (display == api.OT_DISPLAY_NONE) return false;
             if (current == self.root) return true;
         }
         return false;
@@ -1226,7 +1232,7 @@ pub const Scene = struct {
             node.prepared_round = active.rounds;
             node.feedback_state = .unseen;
             if (!phases) {
-                if (entry.visible and node.hook_flags & 64 != 0) node.update_frame = active.frame_id;
+                if (entry.visible and node.hook_flags & api.OT_SCENE_HOOK_IDLE_UPDATE != 0) node.update_frame = active.frame_id;
                 // With hooks, hidden roots never enter refresh; placed hidden children still do.
                 if (self.hook_count != 0 and !entry.visible and node.parent == null) continue;
                 node.observed_layout = entry.layout;
@@ -1277,15 +1283,15 @@ pub const Scene = struct {
         try self.beginPaint(cli, options);
         for (self.work.items) |entry| {
             const node = entry.node.scene_node.?;
-            if (node.kind == 0 or !entry.visible) continue;
-            if (node.kind != 1 or hasBoxPaint(&node.paint)) {
+            if (node.kind == api.OT_SCENE_ROOT or !entry.visible) continue;
+            if (node.kind != api.OT_SCENE_BOX or hasBoxPaint(&node.paint)) {
                 if (builtin.is_test) self.test_paint_setups += 1;
                 try target.pushScissorRect(entry.clip.x, entry.clip.y, entry.clip.width, entry.clip.height);
                 try target.pushOpacity(entry.opacity);
-                if (node.kind == 8) try beginImagePaint(node.control.image, entry.layout);
+                if (node.kind == api.OT_SCENE_IMAGE) try beginImagePaint(node.control.image, entry.layout);
                 try self.paintNode(cli, entry);
-                if (node.kind == 8) try finishImagePaint(target, node.control.image, entry.layout);
-                if (node.kind == 5) try self.paintEditorCursor(cli, node, entry.layout);
+                if (node.kind == api.OT_SCENE_IMAGE) try finishImagePaint(target, node.control.image, entry.layout);
+                if (node.kind == api.OT_SCENE_EDITOR) try self.paintEditorCursor(cli, node, entry.layout);
                 target.popOpacity();
                 target.popScissorRect();
             }
@@ -1301,7 +1307,7 @@ pub const Scene = struct {
                 std.debug.assert(prefix.phase == .before and prefix.removed == null and !prefix.editor_cursor_pending and !prefix.text_paint_pending);
                 target.clearScissorRects();
                 target.clearOpacity();
-                return try self.request(self.root.?.scene_node.?, 6);
+                return try self.request(self.root.?.scene_node.?, api.OT_SCENE_FRAME_YIELD);
             }
             // Charge once on completion or skip, so hook replies cannot replenish the run.
             const member = self.paint_members.items[prefix.cursor];
@@ -1315,8 +1321,8 @@ pub const Scene = struct {
                 var node: Node = .{ .owner = self, .handle = member.node, .kind = removed.kind, .num = removed.num, .token = removed.token, .layout = layout, .hook_generation = removed.hook_generation };
                 if (prefix.phase == .self) {
                     prefix.phase = .after;
-                    if (removed.hook_flags & 32 != 0) return try self.request(&node, 7);
-                    if (removed.kind == 8) {
+                    if (removed.hook_flags & api.OT_SCENE_HOOK_RENDER_SELF != 0) return try self.request(&node, api.OT_SCENE_FRAME_RENDER_SELF);
+                    if (removed.kind == api.OT_SCENE_IMAGE) {
                         try paintImage(cli, removed.control.image, layout);
                     } else try paintControl(target, removed.kind, removed.control, removed.paint, layout, member.clip, false);
                 }
@@ -1324,8 +1330,8 @@ pub const Scene = struct {
                     prefix.editor_cursor_pending = false;
                     prefix.text_paint_pending = false;
                     prefix.phase = .hit;
-                    if (removed.hook_flags & 16 != 0) {
-                        return try self.request(&node, 5);
+                    if (removed.hook_flags & api.OT_SCENE_HOOK_RENDER_AFTER != 0) {
+                        return try self.request(&node, api.OT_SCENE_FRAME_RENDER_AFTER);
                     }
                 }
                 std.debug.assert(prefix.phase == .hit);
@@ -1354,17 +1360,17 @@ pub const Scene = struct {
             const layout = node.layout;
             try validateLayout(layout);
             if (prefix.phase == .before) {
-                prefix.image_native_pending = node.kind == 8;
+                prefix.image_native_pending = node.kind == api.OT_SCENE_IMAGE;
                 if (prefix.image_native_pending) try beginImagePaint(node.control.image, layout);
                 prefix.phase = .self;
-                if (node.hook_flags & 8 != 0) return try self.request(node, 4);
+                if (node.hook_flags & api.OT_SCENE_HOOK_RENDER_BEFORE != 0) return try self.request(node, api.OT_SCENE_FRAME_RENDER_BEFORE);
             }
             if (prefix.phase == .self) {
-                prefix.editor_cursor_pending = node.kind == 5;
-                prefix.text_paint_pending = node.hook_flags & 128 != 0;
+                prefix.editor_cursor_pending = node.kind == api.OT_SCENE_EDITOR;
+                prefix.text_paint_pending = node.hook_flags & api.OT_SCENE_HOOK_RESUME_NATIVE_TEXT != 0;
                 prefix.text_paint_selected = false;
                 prefix.phase = .after;
-                if (node.hook_flags & 32 != 0) return try self.request(node, 7);
+                if (node.hook_flags & api.OT_SCENE_HOOK_RENDER_SELF != 0) return try self.request(node, api.OT_SCENE_FRAME_RENDER_SELF);
                 if (node.paint.focusable) {
                     node.focus_frame = 0;
                     var focused = if (self.focus) |handle| try objects.get(handle, .native_renderable, native.NativeRenderable) else null;
@@ -1391,7 +1397,7 @@ pub const Scene = struct {
                     try self.paintEditorCursor(cli, node, layout);
                 }
                 prefix.phase = .hit;
-                if (node.hook_flags & 16 != 0) return try self.request(node, 5);
+                if (node.hook_flags & api.OT_SCENE_HOOK_RENDER_AFTER != 0) return try self.request(node, api.OT_SCENE_FRAME_RENDER_AFTER);
             }
             std.debug.assert(prefix.phase == .hit);
             if (prefix.image_native_pending) try finishImagePaint(target, node.control.image, layout);
@@ -1417,24 +1423,24 @@ pub const Scene = struct {
             if (entry.filtered) try prepareView(node, entry.layout);
             const hit = intersection(.{ .x = x, .y = y, .width = width, .height = height }, entry.clip);
             if (hit.width != 0 and hit.height != 0) try target.drawTextBufferChecked(text.view, x, y);
-        } else if (node.kind == 7) {
+        } else if (node.kind == api.OT_SCENE_TEXT_VIEW) {
             const view = node.control.text_view.view orelse return;
             if (entry.filtered or self.preparation_dirty) try prepareView(node, entry.layout);
             if (!node.control.text_view.paint) return;
             const hit = intersection(.{ .x = x, .y = y, .width = width, .height = height }, entry.clip);
             if (hit.width != 0 and hit.height != 0) try target.drawTextBufferChecked(view.view, x, y);
-        } else if (node.kind == 5) {
+        } else if (node.kind == api.OT_SCENE_EDITOR) {
             const editor = node.editor orelse return;
             // A budgeted prefix may resume with a newly bound view and saved geometry.
             if (entry.filtered or self.preparation_dirty) try prepareView(node, entry.layout);
             const hit = intersection(.{ .x = x, .y = y, .width = width, .height = height }, entry.clip);
             if (hit.width != 0 and hit.height != 0) try target.drawEditorViewChecked(editor.view, x, y);
-        } else if (node.kind == 8) {
+        } else if (node.kind == api.OT_SCENE_IMAGE) {
             try paintImage(cli, node.control.image, entry.layout);
         } else if (entry.node.surface) |source| {
             var display: u32 = 0;
-            try yoga.check(yoga.yogaNodeStyleGetEnumChecked(entry.node.yoga_node, 9, &display));
-            if (display != 1) try Context.drawContextBuffer(target, source, x, y, .{});
+            try yoga.check(yoga.yogaNodeStyleGetEnumChecked(entry.node.yoga_node, api.OT_STYLE_ENUM_DISPLAY, &display));
+            if (display != api.OT_DISPLAY_NONE) try Context.drawContextBuffer(target, source, x, y, .{});
         } else {
             try paintControl(target, node.kind, node.control, node.paint, entry.layout, entry.clip, node.focus_frame == self.attempt.?.frame_id);
         }
@@ -1520,11 +1526,11 @@ pub const Scene = struct {
     }
 
     fn paintControl(target: *buffer.OptimizedBuffer, kind: u32, control: Control, paint: Paint, layout: Layout, clip: buffer.ClipRect, focused: bool) !void {
-        if (kind == 1) {
+        if (kind == api.OT_SCENE_BOX) {
             try paintBox(target, paint, layout, focused, control.box);
-        } else if (kind == 3) {
+        } else if (kind == api.OT_SCENE_SLIDER) {
             try paintSlider(target, control.slider, layout, clip);
-        } else if (kind == 4) {
+        } else if (kind == api.OT_SCENE_ARROW) {
             const arrow = control.arrow;
             const x: i32 = @intFromFloat(layout.screenX);
             const y: i32 = @intFromFloat(layout.screenY);
@@ -1540,7 +1546,7 @@ pub const Scene = struct {
     }
 
     fn hasBoxPaint(paint_options: *const Paint) bool {
-        return paint_options.borderSides != 0 or (paint_options.shouldFill != 0 and paint_options.background[3] != 0);
+        return paint_options.borderSides != api.OT_BORDER_NONE or (paint_options.shouldFill != 0 and paint_options.background[3] != 0);
     }
 
     fn paintBox(target: *buffer.OptimizedBuffer, paint_options: Paint, layout: Layout, focused: bool, details: ?*const BoxDetails) !void {
@@ -1549,10 +1555,10 @@ pub const Scene = struct {
             const options = details orelse &BoxDetails{};
             const chars = if (options.custom_border_chars) |*custom| custom else &borders[paint_options.borderStyle];
             try target.drawBoxChecked(@intFromFloat(layout.screenX), @intFromFloat(layout.screenY), @intFromFloat(layout.width), @intFromFloat(layout.height), chars, .{
-                .left = paint_options.borderSides & 1 != 0,
-                .bottom = paint_options.borderSides & 2 != 0,
-                .right = paint_options.borderSides & 4 != 0,
-                .top = paint_options.borderSides & 8 != 0,
+                .left = paint_options.borderSides & api.OT_BORDER_LEFT != 0,
+                .bottom = paint_options.borderSides & api.OT_BORDER_BOTTOM != 0,
+                .right = paint_options.borderSides & api.OT_BORDER_RIGHT != 0,
+                .top = paint_options.borderSides & api.OT_BORDER_TOP != 0,
             }, border_color, paint_options.background, options.title_color orelse border_color, paint_options.shouldFill != 0, if (options.title.len != 0) options.title else null, @intCast(options.title_alignment), if (options.bottom_title.len != 0) options.bottom_title else null, @intCast(options.bottom_title_alignment));
         }
     }
@@ -1572,7 +1578,7 @@ pub const Scene = struct {
         const value = try objects.get(handle, .native_renderable, native.NativeRenderable);
         const node = value.scene_node orelse return error.WrongKind;
         if (node.owner != self) return error.WrongSession;
-        if (node.kind > 1) return error.WrongKind;
+        if (node.kind > api.OT_SCENE_BOX) return error.WrongKind;
         return value;
     }
 
@@ -1584,8 +1590,8 @@ pub const Scene = struct {
         // The cutoff includes hidden children and changes selection, not refresh ordering.
         if (node.children.items.len < 16 and layout.width > 0 and layout.height > 0) return null;
         var direction: u32 = 0;
-        try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, 1, &direction));
-        return .{ .viewport = layout, .row = direction == 2 or direction == 3 };
+        try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, api.OT_STYLE_ENUM_FLEX_DIRECTION, &direction));
+        return .{ .viewport = layout, .row = direction == api.OT_FLEX_DIRECTION_ROW or direction == api.OT_FLEX_DIRECTION_ROW_REVERSE };
     }
 
     fn prepare(self: *Scene, objects: *const handles.Table, root: *native.NativeRenderable, width: u32, height: u32, mode: enum { candidates, paint }, comptime retained: bool) !bool {
@@ -1615,8 +1621,8 @@ pub const Scene = struct {
                 if (refresh_layout) {
                     var display: u32 = 0;
                     if (builtin.is_test) self.test_style_reads += 1;
-                    try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, 9, &display));
-                    node.layout_flags.display_none = display == 1;
+                    try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, api.OT_STYLE_ENUM_DISPLAY, &display));
+                    node.layout_flags.display_none = display == api.OT_DISPLAY_NONE;
                 }
                 const visible = !node.layout_flags.display_none;
                 const filtered_child = if (node.parent) |parent| parent.scene_node.?.viewport != null else false;
@@ -1652,7 +1658,7 @@ pub const Scene = struct {
                         continue;
                     }
                 }
-                if (node.kind == 3) _ = try sliderThumb(node.control.slider, layout.width, layout.height);
+                if (node.kind == api.OT_SCENE_SLIDER) _ = try sliderThumb(node.control.slider, layout.width, layout.height);
                 frame.opacity *= node.paint.opacity;
                 if (retained) {
                     self.prepared.appendAssumeCapacity(.{ .node = node.handle, .layout = layout, .clip = frame.clip, .opacity = frame.opacity, .visible = visible, .filtered = frame.filtered });
@@ -1668,14 +1674,14 @@ pub const Scene = struct {
                 if (refresh_layout) {
                     var overflow: u32 = 0;
                     if (builtin.is_test) self.test_style_reads += 1;
-                    try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, 8, &overflow));
-                    node.layout_flags.clips_children = overflow != 0;
+                    try yoga.check(yoga.yogaNodeStyleGetEnumChecked(value.yoga_node, api.OT_STYLE_ENUM_OVERFLOW, &overflow));
+                    node.layout_flags.clips_children = overflow != api.OT_OVERFLOW_VISIBLE;
                 }
                 if (node.layout_flags.clips_children) {
-                    const left: u32 = @intFromBool(node.paint.borderSides & 1 != 0);
-                    const top: u32 = @intFromBool(node.paint.borderSides & 8 != 0);
-                    const horizontal = left + @as(u32, @intFromBool(node.paint.borderSides & 4 != 0));
-                    const vertical = top + @as(u32, @intFromBool(node.paint.borderSides & 2 != 0));
+                    const left: u32 = @intFromBool(node.paint.borderSides & api.OT_BORDER_LEFT != 0);
+                    const top: u32 = @intFromBool(node.paint.borderSides & api.OT_BORDER_TOP != 0);
+                    const horizontal = left + @as(u32, @intFromBool(node.paint.borderSides & api.OT_BORDER_RIGHT != 0));
+                    const vertical = top + @as(u32, @intFromBool(node.paint.borderSides & api.OT_BORDER_BOTTOM != 0));
                     frame.clip = intersection(frame.clip, .{
                         .x = @intFromFloat(layout.screenX + @as(f64, @floatFromInt(left))),
                         .y = @intFromFloat(layout.screenY + @as(f64, @floatFromInt(top))),
@@ -1818,7 +1824,7 @@ fn composedLayout(value: *const native.NativeRenderable, comptime observed: bool
 }
 
 fn prepareView(node: *Node, layout: Layout) !void {
-    if (node.kind == 7) {
+    if (node.kind == api.OT_SCENE_TEXT_VIEW) {
         const text_view = node.control.text_view.view orelse return;
         var viewport = text_view.view.getViewport() orelse text_buffer_view.Viewport{ .x = 0, .y = 0, .width = 0, .height = 0 };
         viewport.width = @intFromFloat(layout.width);
