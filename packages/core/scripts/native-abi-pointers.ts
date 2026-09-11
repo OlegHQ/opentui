@@ -68,7 +68,6 @@ export const nativePointerPolicies = {
   ot_embedded_terminal_encode_paste: { 0: context, 1: buffer, 2: empty, 4: empty, 6: buffer },
   ot_embedded_terminal_encode_focus: { 0: context, 1: buffer, 3: empty, 5: buffer },
   ot_embedded_terminal_drain_responses: { 0: context, 1: buffer, 2: buffer, 4: buffer },
-  ot_image_import_compat: { 0: context, 2: buffer },
   ot_image_destroy: { 0: context, 1: buffer },
   ot_image_inspect: { 0: context, 1: buffer, 3: buffer },
   ot_image_decode: { 0: context, 1: buffer, 3: buffer },

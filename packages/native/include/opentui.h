@@ -1396,11 +1396,6 @@ ot_status ot_scene_set_editor_options(ot_context *, const ot_handle *node, const
 #define OT_IMAGE_DRAW_SOURCE_WIDTH UINT32_C(1)
 #define OT_IMAGE_DRAW_SOURCE_HEIGHT UINT32_C(2)
 
-/* Clone a live compatibility image into Context-owned storage, including retained
- * encoded PNG data. This explicit bridge is the only image call accepting a legacy
- * u32 token. The source remains caller-owned; no compatibility token is attached
- * to the copy. Failure preserves out_image. */
-ot_status ot_image_import_compat(ot_context *, uint32_t source, ot_handle *out_image);
 ot_status ot_image_destroy(ot_context *, const ot_handle *image);
 
 /* Image resources use Context allocation, I/O and handle capacity. Encoded inputs

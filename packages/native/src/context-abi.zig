@@ -4479,8 +4479,6 @@ pub fn export_symbols() void {
     for (@typeInfo(c).@"struct".decls) |declaration| {
         if (!std.mem.startsWith(u8, declaration.name, "ot_")) continue;
         if (@typeInfo(@TypeOf(@field(c, declaration.name))) != .@"fn") continue;
-        // The image loader owns the remaining compatibility-to-Context bridge.
-        if (std.mem.eql(u8, declaration.name, "ot_image_import_compat")) continue;
         const implementation = find: {
             for (.{ @This(), editor_transport, text_transport, unicode_transport, terminal_transport, output_transport, image_transport }) |module| {
                 if (@hasDecl(module, declaration.name)) break :find &@field(module, declaration.name);

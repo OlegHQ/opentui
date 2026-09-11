@@ -207,6 +207,18 @@ pub fn ot_image_pixels_release(context: ?*ContextHandle, lease_ptr: ?*const c.ot
     return c.OT_OK;
 }
 
+export fn imageRetainIccCache() void {
+    image.retainIccCache();
+}
+
+export fn imageReleaseIccCache() void {
+    image.releaseIccCache();
+}
+
+export fn imageTestFailIccProfileCopyAllocationOnce() void {
+    image.testFailIccProfileCopyAllocationOnce();
+}
+
 test "Context checked image ABI validates spans owners and output publication" {
     const owner = try abi.createTestContext(.{ .object_capacity = 8, .render_cells_max = 1 });
     defer std.testing.expectEqual(c.OT_OK, abi.ot_context_destroy(owner)) catch unreachable;
