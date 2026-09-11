@@ -8,7 +8,6 @@ const link = @import("link.zig");
 
 const utf8 = @import("utf8.zig");
 const event_emitter = @import("event-emitter.zig");
-const event_bus = @import("event-bus.zig");
 
 const UnifiedTextBuffer = tb.UnifiedTextBuffer;
 const TextChunk = seg_mod.TextChunk;
@@ -22,6 +21,19 @@ pub const EditBufferError = error{
 
 pub const EditBufferEvent = enum {
     cursorChanged,
+};
+
+/// Typed notifications for Context. Distinct from EditBufferEvent, which drives
+/// EditorView's synchronous cursor listeners.
+pub const NativeEvent = enum {
+    cursor_changed,
+    content_changed,
+    history_cursor_changed,
+};
+
+pub const NativeEventNotify = struct {
+    userdata: *anyopaque,
+    callback: *const fn (*anyopaque, NativeEvent) void,
 };
 
 /// Cursor position (row, col in display-width coordinates)
@@ -141,23 +153,22 @@ const AddBuffer = struct {
 };
 
 pub const EditBuffer = struct {
-    id: u32,
     tb: *UnifiedTextBuffer,
     add_buffer: AddBuffer,
     cursors: std.ArrayListUnmanaged(Cursor),
     allocator: Allocator,
     events: event_emitter.EventEmitter(EditBufferEvent),
     segment_splitter: UnifiedRope.Node.LeafSplitFn,
-    event_sink: ?*event_bus.EventSink,
+    notify: ?NativeEventNotify,
 
     pub fn init(
         allocator: Allocator,
         pool: *gp.GraphemePool,
         link_pool: *link.LinkPool,
         width_method: utf8.WidthMethod,
-        event_sink: ?*event_bus.EventSink,
+        notify: ?NativeEventNotify,
     ) !*EditBuffer {
-        return initWithOptions(allocator, pool, link_pool, width_method, event_sink, .{});
+        return initWithOptions(allocator, pool, link_pool, width_method, notify, .{});
     }
 
     pub fn initWithOptions(
@@ -165,7 +176,7 @@ pub const EditBuffer = struct {
         pool: *gp.GraphemePool,
         link_pool: *link.LinkPool,
         width_method: utf8.WidthMethod,
-        event_sink: ?*event_bus.EventSink,
+        notify: ?NativeEventNotify,
         options: UnifiedTextBuffer.InitOptions,
     ) !*EditBuffer {
         const self = try allocator.create(EditBuffer);
@@ -182,14 +193,13 @@ pub const EditBuffer = struct {
         try cursors.append(allocator, .{ .row = 0, .col = 0 });
 
         self.* = .{
-            .id = if (event_sink) |sink| try sink.allocateEditBufferId() else 0,
             .tb = text_buffer,
             .add_buffer = add_buffer,
             .cursors = cursors,
             .allocator = allocator,
             .events = event_emitter.EventEmitter(EditBufferEvent).init(allocator),
             .segment_splitter = .{ .ctx = self, .splitFn = splitSegmentCallback },
-            .event_sink = event_sink,
+            .notify = notify,
         };
 
         return self;
@@ -206,16 +216,8 @@ pub const EditBuffer = struct {
         self.* = undefined;
     }
 
-    pub fn getId(self: *const EditBuffer) u32 {
-        return self.id;
-    }
-
-    fn emitNativeEvent(self: *const EditBuffer, comptime event_name: []const u8) void {
-        const sink = self.event_sink orelse return;
-        var id_bytes: [4]u8 = undefined;
-        std.mem.writeInt(u32, &id_bytes, self.id, .little);
-
-        event_bus.emit(sink, "eb_" ++ event_name, &id_bytes);
+    fn emitNativeEvent(self: *const EditBuffer, event: NativeEvent) void {
+        if (self.notify) |notify| notify.callback(notify.userdata, event);
     }
 
     pub fn getTextBuffer(self: *EditBuffer) *UnifiedTextBuffer {
@@ -248,7 +250,7 @@ pub const EditBuffer = struct {
         }
 
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
+        self.emitNativeEvent(.cursor_changed);
     }
 
     pub fn setCursorByOffset(self: *EditBuffer, offset: u32) !void {
@@ -306,7 +308,7 @@ pub const EditBuffer = struct {
         }
 
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
+        self.emitNativeEvent(.cursor_changed);
     }
 
     fn ensureAddCapacity(self: *EditBuffer, need: usize) !void {
@@ -444,8 +446,8 @@ pub const EditBuffer = struct {
 
         self.tb.markViewsDirty();
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
-        self.emitNativeEvent("content-changed");
+        self.emitNativeEvent(.cursor_changed);
+        self.emitNativeEvent(.content_changed);
     }
 
     pub fn deleteRange(self: *EditBuffer, start_cursor: Cursor, end_cursor: Cursor) !void {
@@ -483,8 +485,8 @@ pub const EditBuffer = struct {
         }
 
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
-        self.emitNativeEvent("content-changed");
+        self.emitNativeEvent(.cursor_changed);
+        self.emitNativeEvent(.content_changed);
     }
 
     /// Replace an exclusive display-cell range, preserving delete-then-insert history and events.
@@ -567,8 +569,8 @@ pub const EditBuffer = struct {
         self.cursors.items[0] = cursor;
         self.tb.markViewsDirty();
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
-        self.emitNativeEvent("content-changed");
+        self.emitNativeEvent(.cursor_changed);
+        self.emitNativeEvent(.content_changed);
     }
 
     fn cursorAfterDeletion(rope: *const UnifiedRope, deleted: *const UnifiedRope, offset: u32) Cursor {
@@ -691,7 +693,7 @@ pub const EditBuffer = struct {
         cursor.offset = iter_mod.coordsToOffset(self.tb.rope(), cursor.row, cursor.col) orelse 0;
 
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
+        self.emitNativeEvent(.cursor_changed);
     }
 
     pub fn moveRight(self: *EditBuffer) void {
@@ -712,7 +714,7 @@ pub const EditBuffer = struct {
         cursor.offset = iter_mod.coordsToOffset(self.tb.rope(), cursor.row, cursor.col) orelse 0;
 
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
+        self.emitNativeEvent(.cursor_changed);
     }
 
     pub fn moveUp(self: *EditBuffer) void {
@@ -733,7 +735,7 @@ pub const EditBuffer = struct {
         }
 
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
+        self.emitNativeEvent(.cursor_changed);
     }
 
     pub fn moveDown(self: *EditBuffer) void {
@@ -755,7 +757,7 @@ pub const EditBuffer = struct {
         }
 
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
+        self.emitNativeEvent(.cursor_changed);
     }
 
     /// Set text and completely reset the buffer state (clears history, resets add_buffer)
@@ -856,8 +858,8 @@ pub const EditBuffer = struct {
             self.cursors.items[0] = origin;
         }
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursor-changed");
-        self.emitNativeEvent("content-changed");
+        self.emitNativeEvent(.cursor_changed);
+        self.emitNativeEvent(.content_changed);
     }
 
     pub fn getText(self: *EditBuffer, out_buffer: []u8) usize {
@@ -891,7 +893,7 @@ pub const EditBuffer = struct {
             const new_offset = iter_mod.coordsToOffset(self.tb.rope(), new_row, new_col) orelse 0;
             self.cursors.items[0] = .{ .row = new_row, .col = new_col, .desired_col = new_col, .offset = new_offset };
             self.events.emit(.cursorChanged);
-            self.emitNativeEvent("cursor-changed");
+            self.emitNativeEvent(.cursor_changed);
         } else {
             const line_width = iter_mod.lineWidthAt(self.tb.rope(), cursor.row);
             if (line_width > 0) {
@@ -974,7 +976,7 @@ pub const EditBuffer = struct {
 
         self.tb.markViewsDirty();
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursorChanged");
+        self.emitNativeEvent(.history_cursor_changed);
 
         return CursorMeta.publicBytes(prev_meta);
     }
@@ -991,7 +993,7 @@ pub const EditBuffer = struct {
 
         self.tb.markViewsDirty();
         self.events.emit(.cursorChanged);
-        self.emitNativeEvent("cursorChanged");
+        self.emitNativeEvent(.history_cursor_changed);
 
         return CursorMeta.publicBytes(next_meta);
     }
@@ -1011,7 +1013,7 @@ pub const EditBuffer = struct {
     pub fn clear(self: *EditBuffer) !void {
         try self.tb.clear();
         try self.setCursor(0, 0);
-        self.emitNativeEvent("content-changed");
+        self.emitNativeEvent(.content_changed);
     }
 
     pub fn getNextWordBoundary(self: *EditBuffer) Cursor {

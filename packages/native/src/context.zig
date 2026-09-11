@@ -18,7 +18,6 @@ const utf8 = @import("utf8.zig");
 const syntax_style = @import("syntax-style.zig");
 const edit_buffer = @import("edit-buffer.zig");
 const editor_view = @import("editor-view.zig");
-const event_bus = @import("event-bus.zig");
 const ansi = @import("ansi.zig");
 const image = @import("image.zig");
 const encoded_unicode = @import("encoded-unicode.zig");
@@ -180,16 +179,16 @@ pub const Edit = struct {
     owner: *Context,
     handle: Handle,
     buffer: *edit_buffer.EditBuffer,
-    sink: event_bus.EventSink,
     views: ?*Editor = null,
     content_epoch: u64 = 0,
     input_mem_id: ?u8 = null,
 
-    fn receive(data: *anyopaque, name: []const u8, _: []const u8) void {
+    fn receive(data: *anyopaque, notification: edit_buffer.NativeEvent) void {
         const self: *Edit = @ptrCast(@alignCast(data));
-        const event: EditEvent = if (std.mem.eql(u8, name, "eb_cursor-changed")) .cursor_changed else if (std.mem.eql(u8, name, "eb_content-changed")) .content_changed else event: {
-            std.debug.assert(std.mem.eql(u8, name, "eb_cursorChanged"));
-            break :event .history_cursor_changed;
+        const event: EditEvent = switch (notification) {
+            .cursor_changed => .cursor_changed,
+            .content_changed => .content_changed,
+            .history_cursor_changed => .history_cursor_changed,
         };
         const owner = self.owner;
         const epoch = self.buffer.tb.getContentEpoch();
@@ -3183,9 +3182,11 @@ pub const Context = struct {
             .owner = self,
             .handle = undefined,
             .buffer = undefined,
-            .sink = .{ .handler = .{ .userdata = value, .callback = Edit.receive } },
         };
-        value.buffer = try edit_buffer.EditBuffer.initWithOptions(self.allocator, &self.graphemes, &self.links, width_method, &value.sink, .{
+        value.buffer = try edit_buffer.EditBuffer.initWithOptions(self.allocator, &self.graphemes, &self.links, width_method, .{
+            .userdata = value,
+            .callback = Edit.receive,
+        }, .{
             .io = self.io,
             .logger = &self.logger,
         });

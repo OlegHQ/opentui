@@ -1,6 +1,5 @@
 const std = @import("std");
 const edit_buffer = @import("../edit-buffer.zig");
-const event_bus = @import("../event-bus.zig");
 const gp = @import("../grapheme.zig");
 const link = @import("../link.zig");
 
@@ -16,9 +15,9 @@ const Events = struct {
         count += 1;
     }
 
-    fn native(name: [*]const u8, name_len: u32, _: [*]const u8, _: u32) callconv(.c) void {
+    fn native(_: *anyopaque, event: edit_buffer.NativeEvent) void {
         if (count < order.len) {
-            order[count] = if (std.mem.eql(u8, name[0..name_len], "eb_cursor-changed")) 'C' else 'X';
+            order[count] = if (event == .cursor_changed) 'C' else 'X';
         }
         count += 1;
     }
@@ -57,8 +56,7 @@ test "EditBuffer atomicity - rejected mutations preserve history content cursor 
             var succeeded = false;
             for (0..128) |offset| {
                 var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-                var sink: event_bus.EventSink = .{ .callback = null };
-                const eb = try EditBuffer.init(failing.allocator(), &pool, &links, .unicode, &sink);
+                const eb = try EditBuffer.init(failing.allocator(), &pool, &links, .unicode, null);
                 defer eb.deinit();
                 const ev = try EditorView.init(failing.allocator(), eb, 10, 2);
                 defer ev.deinit();
@@ -75,7 +73,7 @@ test "EditBuffer atomicity - rejected mutations preserve history content cursor 
                 const endpoints = ev.text_buffer_view.selection_endpoints;
                 const before = EditState.capture(eb);
                 try eb.events.on(.cursorChanged, .{ .ctx = eb, .handle = Events.typed });
-                sink.callback = Events.native;
+                eb.notify = .{ .userdata = eb, .callback = Events.native };
                 Events.count = 0;
                 const allocator = eb.tb.rope().allocator;
                 var rope_failing = std.testing.FailingAllocator.init(allocator, .{});
@@ -196,8 +194,8 @@ const ReplacementEvents = struct {
         record('T');
     }
 
-    fn native(name: [*]const u8, name_len: u32, _: [*]const u8, _: u32) callconv(.c) void {
-        record(if (std.mem.eql(u8, name[0..name_len], "eb_cursor-changed")) 'C' else 'X');
+    fn native(_: *anyopaque, event: edit_buffer.NativeEvent) void {
+        record(if (event == .cursor_changed) 'C' else 'X');
     }
 };
 
@@ -206,8 +204,7 @@ test "selected replacement - empty selection resolves cursor after tab width cha
     defer pool.deinit();
     var links = link.LinkPool.init(std.testing.allocator);
     defer links.deinit();
-    var sink: event_bus.EventSink = .{ .callback = null };
-    const eb = try EditBuffer.init(std.testing.allocator, &pool, &links, .unicode, &sink);
+    const eb = try EditBuffer.init(std.testing.allocator, &pool, &links, .unicode, null);
     defer eb.deinit();
     const ev = try EditorView.init(std.testing.allocator, eb, 20, 3);
     defer ev.deinit();
@@ -258,8 +255,7 @@ test "selected replacement - matches sequential text history cursor selection an
                     var expected_cursor: edit_buffer.Cursor = undefined;
                     var expected_depth: usize = 0;
                     inline for (.{ false, true }) |atomic| {
-                        var sink: event_bus.EventSink = .{ .callback = null };
-                        const eb = try EditBuffer.init(std.testing.allocator, &pool, &links, .unicode, &sink);
+                        const eb = try EditBuffer.init(std.testing.allocator, &pool, &links, .unicode, null);
                         defer eb.deinit();
                         const ev = try EditorView.init(std.testing.allocator, eb, 10, 2);
                         defer ev.deinit();
@@ -277,7 +273,7 @@ test "selected replacement - matches sequential text history cursor selection an
                         try eb.events.on(.cursorChanged, .{ .ctx = eb, .handle = ReplacementEvents.typed });
                         ReplacementEvents.view = ev;
                         ReplacementEvents.count = 0;
-                        sink.callback = ReplacementEvents.native;
+                        eb.notify = .{ .userdata = eb, .callback = ReplacementEvents.native };
                         if (atomic) {
                             _ = try ev.replaceSelectedText(text);
                             try std.testing.expectEqual(expected_count, ReplacementEvents.count);

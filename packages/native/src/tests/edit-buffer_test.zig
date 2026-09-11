@@ -1,6 +1,5 @@
 const std = @import("std");
 const edit_buffer = @import("../edit-buffer.zig");
-const event_bus = @import("../event-bus.zig");
 const text_buffer_view = @import("../text-buffer-view.zig");
 const gp = @import("../grapheme.zig");
 const link = @import("../link.zig");
@@ -69,48 +68,110 @@ test "EditBuffer - add buffer registration failure releases initialization stora
     try std.testing.checkAllAllocationFailures(std.testing.allocator, Check.init, .{});
 }
 
-test "EditBuffer - event IDs cross the u16 boundary without reuse" {
+test "EditBuffer - native notifications do not allocate" {
     const Capture = struct {
-        var bytes: [4]u8 = undefined;
-        var length: u32 = 0;
-        var count: u32 = 0;
+        event: ?edit_buffer.NativeEvent = null,
+        count: u32 = 0,
 
-        fn callback(name: [*]const u8, name_len: u32, data: [*]const u8, data_len: u32) callconv(.c) void {
-            if (!std.mem.eql(u8, name[0..name_len], "eb_cursor-changed")) return;
-            length = data_len;
-            if (data_len == bytes.len) @memcpy(&bytes, data[0..4]);
-            count += 1;
+        fn callback(data: *anyopaque, event: edit_buffer.NativeEvent) void {
+            const self: *@This() = @ptrCast(@alignCast(data));
+            self.event = event;
+            self.count += 1;
         }
     };
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
     var link_pool = link.LinkPool.init(std.testing.allocator);
     defer link_pool.deinit();
-    const sink = try event_bus.createEventSink(std.testing.allocator, Capture.callback);
-    defer event_bus.destroyEventSink(std.testing.allocator, sink);
-    sink.last_edit_buffer_id = 65534;
-
-    const cases = [_]struct { id: u32, bytes: [4]u8 }{
-        .{ .id = 65535, .bytes = .{ 255, 255, 0, 0 } },
-        .{ .id = 65536, .bytes = .{ 0, 0, 1, 0 } },
-    };
-    for (cases) |case| {
-        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-        const eb = try EditBuffer.init(failing.allocator(), &pool, &link_pool, .wcwidth, sink);
-        defer eb.deinit();
-        try std.testing.expectEqual(case.id, eb.getId());
-        try std.testing.expectEqual(@as(?u32, 0), iter_mod.coordsToOffset(eb.getTextBuffer().rope(), 0, 0));
-        failing.fail_index = failing.alloc_index;
-        failing.resize_fail_index = failing.resize_index;
-        try eb.setCursor(0, 0);
-        try std.testing.expectEqual(@as(u32, 4), Capture.length);
-        try std.testing.expectEqualSlices(u8, &case.bytes, &Capture.bytes);
-        try std.testing.expect(!failing.has_induced_failure);
-    }
-    try std.testing.expectEqual(@as(u32, cases.len), Capture.count);
+    var capture: Capture = .{};
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const eb = try EditBuffer.init(
+        failing.allocator(),
+        &pool,
+        &link_pool,
+        .wcwidth,
+        .{ .userdata = &capture, .callback = Capture.callback },
+    );
+    defer eb.deinit();
+    failing.fail_index = failing.alloc_index;
+    failing.resize_fail_index = failing.resize_index;
+    try eb.setCursor(0, 0);
+    try std.testing.expectEqual(edit_buffer.NativeEvent.cursor_changed, capture.event.?);
+    try std.testing.expectEqual(@as(u32, 1), capture.count);
+    try std.testing.expect(!failing.has_induced_failure);
 }
 
-test "EditBuffer - buffers without an event sink use only typed events" {
+test "EditBuffer - native notifications keep cursor content and history order" {
+    const Capture = struct {
+        events: [8]edit_buffer.NativeEvent = undefined,
+        count: usize = 0,
+
+        fn callback(data: *anyopaque, event: edit_buffer.NativeEvent) void {
+            const self: *@This() = @ptrCast(@alignCast(data));
+            self.events[self.count] = event;
+            self.count += 1;
+        }
+    };
+    var pool = gp.GraphemePool.init(std.testing.allocator);
+    defer pool.deinit();
+    var link_pool = link.LinkPool.init(std.testing.allocator);
+    defer link_pool.deinit();
+    var capture: Capture = .{};
+    const eb = try EditBuffer.init(std.testing.allocator, &pool, &link_pool, .wcwidth, .{
+        .userdata = &capture,
+        .callback = Capture.callback,
+    });
+    defer eb.deinit();
+    try eb.insertText("a");
+    _ = try eb.undo();
+    try std.testing.expectEqualSlices(edit_buffer.NativeEvent, &.{
+        .cursor_changed,
+        .content_changed,
+        .cursor_changed,
+        .history_cursor_changed,
+    }, capture.events[0..capture.count]);
+}
+
+test "EditBuffer - native notifications stay with their buffer" {
+    const Owner = struct {
+        count: u32 = 0,
+
+        fn receive(data: *anyopaque, event: edit_buffer.NativeEvent) void {
+            const self: *@This() = @ptrCast(@alignCast(data));
+            std.debug.assert(event == .cursor_changed);
+            self.count += 1;
+        }
+    };
+    var pool = gp.GraphemePool.init(std.testing.allocator);
+    defer pool.deinit();
+    var link_pool = link.LinkPool.init(std.testing.allocator);
+    defer link_pool.deinit();
+    var first: Owner = .{};
+    var second: Owner = .{};
+    const left = try EditBuffer.init(
+        std.testing.allocator,
+        &pool,
+        &link_pool,
+        .wcwidth,
+        .{ .userdata = &first, .callback = Owner.receive },
+    );
+    defer left.deinit();
+    const right = try EditBuffer.init(
+        std.testing.allocator,
+        &pool,
+        &link_pool,
+        .wcwidth,
+        .{ .userdata = &second, .callback = Owner.receive },
+    );
+    defer right.deinit();
+    try left.setCursor(0, 0);
+    try right.setCursor(0, 0);
+    try left.setCursor(0, 0);
+    try std.testing.expectEqual(@as(u32, 2), first.count);
+    try std.testing.expectEqual(@as(u32, 1), second.count);
+}
+
+test "EditBuffer - buffers without a native notify still emit cursor listeners" {
     const Listener = struct {
         fn onCursorChanged(ctx: *anyopaque) void {
             const count: *u32 = @ptrCast(@alignCast(ctx));
@@ -121,15 +182,12 @@ test "EditBuffer - buffers without an event sink use only typed events" {
     defer pool.deinit();
     var link_pool = link.LinkPool.init(std.testing.allocator);
     defer link_pool.deinit();
-    for (0..2) |_| {
-        const eb = try EditBuffer.init(std.testing.allocator, &pool, &link_pool, .wcwidth, null);
-        defer eb.deinit();
-        try std.testing.expectEqual(@as(u32, 0), eb.getId());
-        var count: u32 = 0;
-        try eb.events.on(.cursorChanged, .{ .ctx = &count, .handle = Listener.onCursorChanged });
-        try eb.setCursor(0, 0);
-        try std.testing.expectEqual(@as(u32, 1), count);
-    }
+    const eb = try EditBuffer.init(std.testing.allocator, &pool, &link_pool, .wcwidth, null);
+    defer eb.deinit();
+    var count: u32 = 0;
+    try eb.events.on(.cursorChanged, .{ .ctx = &count, .handle = Listener.onCursorChanged });
+    try eb.setCursor(0, 0);
+    try std.testing.expectEqual(@as(u32, 1), count);
 }
 
 test "EditBuffer - replacement notifications observe accepted state" {
