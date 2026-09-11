@@ -42,7 +42,7 @@ test("NativeScene commit consumes a draft and retries admission errors", async (
       lib.contextReleaseBufferLease(driver.context, lease.handle)
     }
     scene.commit(true)
-    assert.equal(scene.frame, null)
+    assert.equal(scene.frame === null, true)
     assert.throws(() => scene.commit(true), /no painted frame/)
     assert.throws(() => lib.sceneFrameCommit(driver.context, driver.session, frame, true), {
       status: NativeStatus.StaleFrame,

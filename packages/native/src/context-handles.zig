@@ -21,6 +21,9 @@ pub const Kind = enum(u32) {
     encoded_unicode,
     embedded_terminal,
     image_pixels_lease,
+    audio_engine,
+    clipboard_service,
+    clipboard_operation,
 };
 
 pub const Error = error{

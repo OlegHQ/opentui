@@ -99,6 +99,13 @@ registerEnvVar({
 })
 
 export type NativeHandle<T extends string> = Pointer & { readonly __nativeHandle: T }
+
+// Public numeric handles never identify a later resource or a different library instance.
+let lastStandaloneHandle = 0
+function nextStandaloneHandle(): number {
+  if (lastStandaloneHandle === Number.MAX_SAFE_INTEGER) throw new RangeError("Native handle limit reached")
+  return ++lastStandaloneHandle
+}
 declare const nativeContextBrand: unique symbol
 export type NativeContextHandle = { readonly [nativeContextBrand]: true }
 
@@ -1971,75 +1978,75 @@ function getOpenTUILib(libPath?: string) {
       returns: "void",
     },
     clipboardServiceCreate: {
-      args: ["u32", "u32", "ptr", "u32"],
-      returns: "u32",
+      args: ["ptr", "u32", "u32", "ptr", "u32"],
+      returns: "i32",
     },
     clipboardServiceBeginShutdown: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "u8",
     },
     clipboardServicePollShutdown: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "u8",
     },
     clipboardServiceDestroy: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "u8",
     },
     clipboardServiceDrain: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "u8",
     },
     clipboardReadOperationStart: {
-      args: ["u32", "ptr", "u32", "u8", "u32", "u32", "u32", "u32", "ptr"],
+      args: ["ptr", "buffer", "u32", "u8", "u32", "u32", "u32", "u32", "buffer"],
       returns: "u8",
     },
     clipboardWriteOperationStart: {
-      args: ["u32", "ptr", "u32", "u8", "u32", "ptr"],
+      args: ["ptr", "buffer", "u32", "u8", "u32", "buffer"],
       returns: "u8",
     },
     clipboardClearOperationStart: {
-      args: ["u32", "u8", "u32", "ptr"],
+      args: ["ptr", "u8", "u32", "buffer"],
       returns: "u8",
     },
     clipboardOperationPoll: {
-      args: ["u32"],
+      args: ["ptr", "buffer"],
       returns: "u8",
     },
     clipboardOperationCancel: {
-      args: ["u32"],
+      args: ["ptr", "buffer"],
       returns: "u8",
     },
     clipboardOperationResultMimeLength: {
-      args: ["u32", "ptr"],
+      args: ["ptr", "buffer", "buffer"],
       returns: "u8",
     },
     clipboardOperationResultMimeCopy: {
-      args: ["u32", "ptr", "u32"],
+      args: ["ptr", "buffer", "buffer", "u32"],
       returns: "u8",
     },
     clipboardOperationResultDataLength: {
-      args: ["u32", "ptr"],
+      args: ["ptr", "buffer", "buffer"],
       returns: "u8",
     },
     clipboardOperationResultDataCopy: {
-      args: ["u32", "ptr", "u32"],
+      args: ["ptr", "buffer", "buffer", "u32"],
       returns: "u8",
     },
     clipboardOperationResultErrorCode: {
-      args: ["u32", "ptr"],
+      args: ["ptr", "buffer", "buffer"],
       returns: "u8",
     },
     clipboardOperationResultDiagnosticLength: {
-      args: ["u32", "ptr"],
+      args: ["ptr", "buffer", "buffer"],
       returns: "u8",
     },
     clipboardOperationResultDiagnosticCopy: {
-      args: ["u32", "ptr", "u32"],
+      args: ["ptr", "buffer", "buffer", "u32"],
       returns: "u8",
     },
     clipboardOperationDestroy: {
-      args: ["u32"],
+      args: ["ptr", "buffer"],
       returns: "u8",
     },
 
@@ -2063,175 +2070,171 @@ function getOpenTUILib(libPath?: string) {
 
     // Audio
     createAudioEngine: {
-      args: ["ptr"],
-      returns: "u32",
-    },
-    destroyAudioEngine: {
-      args: ["u32"],
-      returns: "void",
+      args: ["ptr", "ptr"],
+      returns: "i32",
     },
     audioRefreshPlaybackDevices: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "i32",
     },
     audioGetPlaybackDeviceCount: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "u32",
     },
     audioGetPlaybackDeviceName: {
-      args: ["u32", "u32", "buffer", "u32"],
+      args: ["ptr", "u32", "buffer", "u32"],
       returns: "u32",
     },
     audioIsPlaybackDeviceDefault: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "bool",
     },
     audioSelectPlaybackDevice: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "i32",
     },
     audioClearPlaybackDeviceSelection: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "void",
     },
     audioRefreshCaptureDevices: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "i32",
     },
     audioGetCaptureDeviceCount: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "u32",
     },
     audioGetCaptureDeviceName: {
-      args: ["u32", "u32", "buffer", "u32"],
+      args: ["ptr", "u32", "buffer", "u32"],
       returns: "u32",
     },
     audioIsCaptureDeviceDefault: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "bool",
     },
     audioSelectCaptureDevice: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "i32",
     },
     audioClearCaptureDeviceSelection: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "void",
     },
     audioStartCapture: {
-      args: ["u32", "ptr", "u32", "u32"],
+      args: ["ptr", "ptr", "u32", "u32"],
       returns: "i32",
     },
     audioStopCapture: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "i32",
     },
     audioIsCaptureRunning: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "bool",
     },
     audioReadCapture: {
-      args: ["u32", "buffer", "u32", "u32", "ptr"],
+      args: ["ptr", "buffer", "u32", "u32", "ptr"],
       returns: "i32",
     },
     audioGetCaptureStats: {
-      args: ["u32", "ptr"],
+      args: ["ptr", "ptr"],
       returns: "i32",
     },
     audioStart: {
-      args: ["u32", "ptr"],
+      args: ["ptr", "ptr"],
       returns: "i32",
     },
     audioStartMixer: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "i32",
     },
     audioStop: {
-      args: ["u32"],
+      args: ["ptr"],
       returns: "i32",
     },
     audioCreateStream: {
-      args: ["u32", "ptr", "ptr"],
+      args: ["ptr", "ptr", "ptr"],
       returns: "i32",
     },
     audioWriteStream: {
-      args: ["u32", "u32", "ptr", "u32"],
+      args: ["ptr", "u32", "buffer", "u32"],
       returns: "i32",
     },
     audioEndStream: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "i32",
     },
     audioRestartStream: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "i32",
     },
     audioSetStreamVolume: {
-      args: ["u32", "u32", "f32"],
+      args: ["ptr", "u32", "f32"],
       returns: "i32",
     },
     audioSetStreamPan: {
-      args: ["u32", "u32", "f32"],
+      args: ["ptr", "u32", "f32"],
       returns: "i32",
     },
     audioSetStreamGroup: {
-      args: ["u32", "u32", "u32"],
+      args: ["ptr", "u32", "u32"],
       returns: "i32",
     },
     audioGetStreamStats: {
-      args: ["u32", "u32", "ptr"],
+      args: ["ptr", "u32", "ptr"],
       returns: "i32",
     },
     audioCloseStream: {
-      args: ["u32", "u32", "u32", "ptr"],
+      args: ["ptr", "u32", "u32", "ptr"],
       returns: "i32",
     },
     audioLoad: {
-      args: ["u32", "buffer", "u32", "ptr"],
+      args: ["ptr", "buffer", "u32", "ptr"],
       returns: "i32",
     },
     audioUnload: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "i32",
     },
     audioPlay: {
-      args: ["u32", "u32", "ptr", "ptr"],
+      args: ["ptr", "u32", "ptr", "ptr"],
       returns: "i32",
     },
     audioStopVoice: {
-      args: ["u32", "u32"],
+      args: ["ptr", "u32"],
       returns: "i32",
     },
     audioSetVoiceGroup: {
-      args: ["u32", "u32", "u32"],
+      args: ["ptr", "u32", "u32"],
       returns: "i32",
     },
     audioCreateGroup: {
-      args: ["u32", "buffer", "u32", "ptr"],
+      args: ["ptr", "buffer", "u32", "ptr"],
       returns: "i32",
     },
     audioSetGroupVolume: {
-      args: ["u32", "u32", "f32"],
+      args: ["ptr", "u32", "f32"],
       returns: "i32",
     },
     audioSetMasterVolume: {
-      args: ["u32", "f32"],
+      args: ["ptr", "f32"],
       returns: "i32",
     },
     audioMixToBuffer: {
-      args: ["u32", "buffer", "u32", "u8"],
+      args: ["ptr", "buffer", "u32", "u8"],
       returns: "i32",
     },
     audioEnableTap: {
-      args: ["u32", "u8", "u32"],
+      args: ["ptr", "u8", "u32"],
       returns: "i32",
     },
     audioReadTap: {
-      args: ["u32", "buffer", "u32", "u8", "ptr"],
+      args: ["ptr", "buffer", "u32", "u8", "ptr"],
       returns: "i32",
     },
     audioGetStats: {
-      args: ["u32", "ptr"],
+      args: ["ptr", "ptr"],
       returns: "i32",
     },
 
@@ -2624,7 +2627,13 @@ export class FFIRenderLib {
       nodes: Map<number, { handle: SceneNodeHandle; measure: MeasureFunction }>
     }
   >()
-  private clipboardServices = new Set<ClipboardServiceHandle>()
+  private clipboardServices = new Map<ClipboardServiceHandle, NativeContextHandle>()
+  private clipboardOperations = new Map<
+    ClipboardOperationHandle,
+    { service: ClipboardServiceHandle; handle: BigUint64Array }
+  >()
+  private audioEngines = new Map<AudioEngineHandle, NativeContextHandle>()
+  private readonly invalidStandaloneHandle = new BigUint64Array(nativeLayouts.ot_handle.size / 8)
   public readonly encoder: TextEncoder = new TextEncoder()
   private readonly emptyBytes = new Uint8Array(0)
   public readonly decoder: TextDecoder = new TextDecoder()
@@ -2666,6 +2675,10 @@ export class FFIRenderLib {
 
   public destroyContext(context: NativeContextHandle): void {
     this.getYogaHost().assertMutable()
+    this.releaseContext(context)
+  }
+
+  private releaseContext(context: NativeContextHandle): void {
     const pointer = this.nativeContextPointer(context, "ot_context_destroy")
     nativeResult("ot_context_destroy", this.opentui.symbols.ot_context_destroy(pointer))
     this.nativeContexts.delete(context)
@@ -7130,11 +7143,13 @@ export class FFIRenderLib {
 
   public dispose(): void {
     if (this.disposed) return
-    if (this.nativeContexts.size) {
-      throw new NativeError("dispose", NativeStatus.ContextBusy)
-    }
+    for (const context of this.audioEngines.values()) this.releaseContext(context)
+    this.audioEngines.clear()
     if (this.clipboardServices.size > 0) {
       throw new Error("Cannot dispose OpenTUI native library while clipboard services are active")
+    }
+    if (this.nativeContexts.size) {
+      throw new NativeError("dispose", NativeStatus.ContextBusy)
     }
     this.yogaHost?.dispose()
     this.disposed = true
@@ -7191,47 +7206,81 @@ export class FFIRenderLib {
     waylandSeat?: string,
   ): ClipboardServiceHandle | null {
     const seat = waylandSeat === undefined ? null : this.encoder.encode(waylandSeat)
-    const handle = this.opentui.symbols.clipboardServiceCreate(
-      toSafeFFIU32Length(maxConcurrentOperations, "clipboard operation limit"),
-      toSafeFFIU32Length(maxProviderTransfers, "clipboard provider transfer limit"),
-      seat,
-      seat?.byteLength ?? 0,
-    )
-    if (handle === 0) return null
-    const service = handle as ClipboardServiceHandle
-    this.clipboardServices.add(service)
-    return service
+    const operations = toSafeFFIU32Length(maxConcurrentOperations, "clipboard operation limit")
+    const transfers = toSafeFFIU32Length(maxProviderTransfers, "clipboard provider transfer limit")
+    if (operations === 0 || transfers === 0) return null
+    const service = nextStandaloneHandle() as ClipboardServiceHandle
+    const context = this.tryCreateStandaloneContext(Math.min(operations + 1, 0xffff))
+    if (!context) return null
+    try {
+      const pointer = this.nativeContextPointer(context, "clipboardServiceCreate")
+      if (
+        this.opentui.symbols.clipboardServiceCreate(pointer, operations, transfers, seat, seat?.byteLength ?? 0) !== 0
+      ) {
+        this.releaseContext(context)
+        return null
+      }
+      this.clipboardServices.set(service, context)
+      return service
+    } catch (error) {
+      this.releaseContext(context)
+      throw error
+    }
+  }
+
+  private clipboardContext(service: ClipboardServiceHandle): Pointer | null {
+    const context = this.clipboardServices.get(service)
+    return context ? this.nativeContextPointer(context, "clipboard") : null
+  }
+
+  private clipboardOperationArgs(operation: ClipboardOperationHandle): [Pointer | null, BigUint64Array] {
+    const value = this.clipboardOperations.get(operation)
+    return value ? [this.clipboardContext(value.service), value.handle] : [null, this.invalidStandaloneHandle]
   }
 
   public clipboardServiceBeginShutdown(service: ClipboardServiceHandle): NativeClipboardShutdownStatus {
-    if (!this.clipboardServices.has(service)) return NativeClipboardShutdownStatus.InvalidHandle
-    return this.opentui.symbols.clipboardServiceBeginShutdown(service)
+    return this.opentui.symbols.clipboardServiceBeginShutdown(this.clipboardContext(service))
   }
 
   public clipboardServicePollShutdown(service: ClipboardServiceHandle): NativeClipboardShutdownStatus {
-    if (!this.clipboardServices.has(service)) return NativeClipboardShutdownStatus.InvalidHandle
-    return this.opentui.symbols.clipboardServicePollShutdown(service)
+    return this.opentui.symbols.clipboardServicePollShutdown(this.clipboardContext(service))
   }
 
   public clipboardServiceDestroy(service: ClipboardServiceHandle): NativeClipboardDestroyStatus {
-    if (!this.clipboardServices.has(service)) return NativeClipboardDestroyStatus.InvalidHandle
-    const status = this.opentui.symbols.clipboardServiceDestroy(service)
-    if (status === NativeClipboardDestroyStatus.Destroyed) this.clipboardServices.delete(service)
+    const context = this.clipboardServices.get(service)
+    if (!context) return NativeClipboardDestroyStatus.InvalidHandle
+    const status = this.opentui.symbols.clipboardServiceDestroy(this.clipboardContext(service))
+    if (status === NativeClipboardDestroyStatus.Destroyed) {
+      this.releaseContext(context)
+      this.clipboardServices.delete(service)
+      for (const [id, operation] of this.clipboardOperations) {
+        if (operation.service === service) this.clipboardOperations.delete(id)
+      }
+    }
     return status
   }
 
   public clipboardServiceDrain(service: ClipboardServiceHandle): number {
-    if (!this.clipboardServices.has(service)) return 2
-    return this.opentui.symbols.clipboardServiceDrain(service)
+    return this.opentui.symbols.clipboardServiceDrain(this.clipboardContext(service))
   }
 
-  private clipboardStartResult(
-    status: NativeClipboardStartStatus,
-    output: Uint32Array,
+  private clipboardStart(
+    service: ClipboardServiceHandle,
+    start: (...args: unknown[]) => NativeClipboardStartStatus,
+    args: unknown[],
   ): { status: NativeClipboardStartStatus; operation: ClipboardOperationHandle | null } {
-    return {
-      status,
-      operation: output[0] === 0 ? null : (output[0] as ClipboardOperationHandle),
+    if (!this.clipboardServices.has(service))
+      return { status: NativeClipboardStartStatus.InvalidService, operation: null }
+    const operation = nextStandaloneHandle() as ClipboardOperationHandle
+    const handle = new BigUint64Array(nativeLayouts.ot_handle.size / 8)
+    this.clipboardOperations.set(operation, { service, handle })
+    let retained = false
+    try {
+      const status = start(this.clipboardContext(service), ...args, handle)
+      retained = status === NativeClipboardStartStatus.Ok
+      return { status, operation: retained ? operation : null }
+    } finally {
+      if (!retained) this.clipboardOperations.delete(operation)
     }
   }
 
@@ -7244,9 +7293,7 @@ export class FFIRenderLib {
     maxConversionBytes: number,
     timeoutMs: number,
   ): { status: NativeClipboardStartStatus; operation: ClipboardOperationHandle | null } {
-    const output = new Uint32Array(1)
-    const status = this.opentui.symbols.clipboardReadOperationStart(
-      service,
+    return this.clipboardStart(service, this.opentui.symbols.clipboardReadOperationStart, [
       request,
       toSafeFFIU32Length(request.byteLength, "clipboard read request"),
       selection,
@@ -7254,9 +7301,7 @@ export class FFIRenderLib {
       toSafeFFIU32Length(maxImagePixels, "clipboard image pixel limit"),
       toSafeFFIU32Length(maxConversionBytes, "clipboard conversion byte limit"),
       toSafeFFIU32Length(timeoutMs, "clipboard read timeout"),
-      output,
-    )
-    return this.clipboardStartResult(status, output)
+    ])
   }
 
   public clipboardWriteOperationStart(
@@ -7265,16 +7310,12 @@ export class FFIRenderLib {
     selection: number,
     timeoutMs: number,
   ): { status: NativeClipboardStartStatus; operation: ClipboardOperationHandle | null } {
-    const output = new Uint32Array(1)
-    const status = this.opentui.symbols.clipboardWriteOperationStart(
-      service,
+    return this.clipboardStart(service, this.opentui.symbols.clipboardWriteOperationStart, [
       textUtf8,
       toSafeFFIU32Length(textUtf8.byteLength, "clipboard write text"),
       selection,
       toSafeFFIU32Length(timeoutMs, "clipboard write timeout"),
-      output,
-    )
-    return this.clipboardStartResult(status, output)
+    ])
   }
 
   public clipboardClearOperationStart(
@@ -7282,30 +7323,26 @@ export class FFIRenderLib {
     selection: number,
     timeoutMs: number,
   ): { status: NativeClipboardStartStatus; operation: ClipboardOperationHandle | null } {
-    const output = new Uint32Array(1)
-    const status = this.opentui.symbols.clipboardClearOperationStart(
-      service,
+    return this.clipboardStart(service, this.opentui.symbols.clipboardClearOperationStart, [
       selection,
       toSafeFFIU32Length(timeoutMs, "clipboard clear timeout"),
-      output,
-    )
-    return this.clipboardStartResult(status, output)
+    ])
   }
 
   public clipboardOperationPoll(operation: ClipboardOperationHandle): NativeClipboardOperationStatus {
-    return this.opentui.symbols.clipboardOperationPoll(operation)
+    return this.opentui.symbols.clipboardOperationPoll(...this.clipboardOperationArgs(operation))
   }
 
   public clipboardOperationCancel(operation: ClipboardOperationHandle): NativeClipboardCancelStatus {
-    return this.opentui.symbols.clipboardOperationCancel(operation)
+    return this.opentui.symbols.clipboardOperationCancel(...this.clipboardOperationArgs(operation))
   }
 
   private clipboardResultLength(
-    symbol: (operation: ClipboardOperationHandle, output: Uint32Array) => number,
+    symbol: (context: Pointer | null, operation: BigUint64Array, output: Uint32Array) => number,
     operation: ClipboardOperationHandle,
   ): { status: NativeClipboardCopyStatus; length: number } {
     const output = new Uint32Array(1)
-    const status = symbol(operation, output)
+    const status = symbol(...this.clipboardOperationArgs(operation), output)
     return { status, length: output[0] }
   }
 
@@ -7320,10 +7357,12 @@ export class FFIRenderLib {
     operation: ClipboardOperationHandle,
     output: Uint8Array,
   ): NativeClipboardCopyStatus {
+    const capacity = toSafeFFIU32Length(output.byteLength, "clipboard MIME output")
+    void output.buffer
     return this.opentui.symbols.clipboardOperationResultMimeCopy(
-      operation,
-      output.byteLength === 0 ? null : output,
-      toSafeFFIU32Length(output.byteLength, "clipboard MIME output"),
+      ...this.clipboardOperationArgs(operation),
+      output,
+      capacity,
     )
   }
 
@@ -7338,10 +7377,12 @@ export class FFIRenderLib {
     operation: ClipboardOperationHandle,
     output: Uint8Array,
   ): NativeClipboardCopyStatus {
+    const capacity = toSafeFFIU32Length(output.byteLength, "clipboard data output")
+    void output.buffer
     return this.opentui.symbols.clipboardOperationResultDataCopy(
-      operation,
-      output.byteLength === 0 ? null : output,
-      toSafeFFIU32Length(output.byteLength, "clipboard data output"),
+      ...this.clipboardOperationArgs(operation),
+      output,
+      capacity,
     )
   }
 
@@ -7350,7 +7391,10 @@ export class FFIRenderLib {
     errorCode: number
   } {
     const output = new Uint32Array(1)
-    const status = this.opentui.symbols.clipboardOperationResultErrorCode(operation, output)
+    const status = this.opentui.symbols.clipboardOperationResultErrorCode(
+      ...this.clipboardOperationArgs(operation),
+      output,
+    )
     return { status, errorCode: output[0] }
   }
 
@@ -7365,15 +7409,19 @@ export class FFIRenderLib {
     operation: ClipboardOperationHandle,
     output: Uint8Array,
   ): NativeClipboardCopyStatus {
+    const capacity = toSafeFFIU32Length(output.byteLength, "clipboard diagnostic output")
+    void output.buffer
     return this.opentui.symbols.clipboardOperationResultDiagnosticCopy(
-      operation,
-      output.byteLength === 0 ? null : output,
-      toSafeFFIU32Length(output.byteLength, "clipboard diagnostic output"),
+      ...this.clipboardOperationArgs(operation),
+      output,
+      capacity,
     )
   }
 
   public clipboardOperationDestroy(operation: ClipboardOperationHandle): NativeClipboardDestroyStatus {
-    return this.opentui.symbols.clipboardOperationDestroy(operation)
+    const status = this.opentui.symbols.clipboardOperationDestroy(...this.clipboardOperationArgs(operation))
+    if (status === NativeClipboardDestroyStatus.Destroyed) this.clipboardOperations.delete(operation)
+    return status
   }
 
   public getYogaHost(): YogaHost {
@@ -7706,72 +7754,102 @@ export class FFIRenderLib {
     }
   }
 
+  private tryCreateStandaloneContext(objectCapacity: number): NativeContextHandle | null {
+    try {
+      return this.createContext({ objectCapacity, renderCellsMax: 1 })
+    } catch (error) {
+      if (error instanceof NativeError) return null
+      throw error
+    }
+  }
+
   public createAudioEngine(options?: AudioCreateOptions | null): AudioEngineHandle | null {
     const optionsBuffer = options == null ? null : AudioCreateOptionsStruct.pack(options)
-    const engineHandle = this.opentui.symbols.createAudioEngine(optionsBuffer) as AudioEngineHandle
-    return engineHandle ? engineHandle : null
+    const id = nextStandaloneHandle() as AudioEngineHandle
+    const context = this.tryCreateStandaloneContext(1)
+    if (!context) return null
+    try {
+      const pointer = this.nativeContextPointer(context, "createAudioEngine")
+      if (this.opentui.symbols.createAudioEngine(pointer, optionsBuffer) !== 0) {
+        this.releaseContext(context)
+        return null
+      }
+      this.audioEngines.set(id, context)
+      return id
+    } catch (error) {
+      this.releaseContext(context)
+      throw error
+    }
   }
 
   public destroyAudioEngine(engine: AudioEngineHandle): void {
-    this.opentui.symbols.destroyAudioEngine(engine)
+    const context = this.audioEngines.get(engine)
+    if (!context) return
+    this.releaseContext(context)
+    this.audioEngines.delete(engine)
+  }
+
+  private audioContext(engine: AudioEngineHandle): Pointer | null {
+    const context = this.audioEngines.get(engine)
+    return context ? this.nativeContextPointer(context, "audio") : null
   }
 
   public audioRefreshPlaybackDevices(engine: AudioEngineHandle): number {
-    return this.opentui.symbols.audioRefreshPlaybackDevices(engine)
+    return this.opentui.symbols.audioRefreshPlaybackDevices(this.audioContext(engine))
   }
 
   public audioGetPlaybackDeviceCount(engine: AudioEngineHandle): number {
-    return this.opentui.symbols.audioGetPlaybackDeviceCount(engine)
+    return this.opentui.symbols.audioGetPlaybackDeviceCount(this.audioContext(engine))
   }
 
   public audioGetPlaybackDeviceName(engine: AudioEngineHandle, index: number): string {
     const outBuffer = new Uint8Array(512)
     const bytesWritten = toNumber(
-      this.opentui.symbols.audioGetPlaybackDeviceName(engine, index, outBuffer, outBuffer.length),
+      this.opentui.symbols.audioGetPlaybackDeviceName(this.audioContext(engine), index, outBuffer, outBuffer.length),
     )
     const safeBytesWritten = Math.max(0, Math.min(outBuffer.length, bytesWritten))
     return this.decoder.decode(outBuffer.subarray(0, safeBytesWritten))
   }
 
   public audioIsPlaybackDeviceDefault(engine: AudioEngineHandle, index: number): boolean {
-    return this.opentui.symbols.audioIsPlaybackDeviceDefault(engine, index)
+    return this.opentui.symbols.audioIsPlaybackDeviceDefault(this.audioContext(engine), index)
   }
 
   public audioSelectPlaybackDevice(engine: AudioEngineHandle, index: number): number {
-    return this.opentui.symbols.audioSelectPlaybackDevice(engine, index)
+    return this.opentui.symbols.audioSelectPlaybackDevice(this.audioContext(engine), index)
   }
 
   public audioClearPlaybackDeviceSelection(engine: AudioEngineHandle): void {
-    this.opentui.symbols.audioClearPlaybackDeviceSelection(engine)
+    this.opentui.symbols.audioClearPlaybackDeviceSelection(this.audioContext(engine))
   }
 
   public audioRefreshCaptureDevices(engine: AudioEngineHandle): number {
-    return this.opentui.symbols.audioRefreshCaptureDevices(engine)
+    return this.opentui.symbols.audioRefreshCaptureDevices(this.audioContext(engine))
   }
 
   public audioGetCaptureDeviceCount(engine: AudioEngineHandle): number {
-    return this.opentui.symbols.audioGetCaptureDeviceCount(engine)
+    return this.opentui.symbols.audioGetCaptureDeviceCount(this.audioContext(engine))
   }
 
   public audioGetCaptureDeviceName(engine: AudioEngineHandle, index: number): string {
     const outBuffer = new Uint8Array(512)
     const bytesWritten = toNumber(
-      this.opentui.symbols.audioGetCaptureDeviceName(engine, index, outBuffer, outBuffer.length),
+      this.opentui.symbols.audioGetCaptureDeviceName(this.audioContext(engine), index, outBuffer, outBuffer.length),
     )
     const safeBytesWritten = Math.max(0, Math.min(outBuffer.length, bytesWritten))
     return this.decoder.decode(outBuffer.subarray(0, safeBytesWritten))
   }
 
   public audioIsCaptureDeviceDefault(engine: AudioEngineHandle, index: number): boolean {
-    return Boolean(this.opentui.symbols.audioIsCaptureDeviceDefault(engine, index))
+    return Boolean(this.opentui.symbols.audioIsCaptureDeviceDefault(this.audioContext(engine), index))
   }
 
   public audioSelectCaptureDevice(engine: AudioEngineHandle, index: number): number {
-    return this.opentui.symbols.audioSelectCaptureDevice(engine, index)
+    return this.opentui.symbols.audioSelectCaptureDevice(this.audioContext(engine), index)
   }
 
   public audioClearCaptureDeviceSelection(engine: AudioEngineHandle): void {
-    this.opentui.symbols.audioClearCaptureDeviceSelection(engine)
+    this.opentui.symbols.audioClearCaptureDeviceSelection(this.audioContext(engine))
   }
 
   public audioStartCapture(
@@ -7792,15 +7870,15 @@ export class FFIRenderLib {
     } catch {
       return -1
     }
-    return this.opentui.symbols.audioStartCapture(engine, optionsBuffer, channels, capacityFrames)
+    return this.opentui.symbols.audioStartCapture(this.audioContext(engine), optionsBuffer, channels, capacityFrames)
   }
 
   public audioStopCapture(engine: AudioEngineHandle): number {
-    return this.opentui.symbols.audioStopCapture(engine)
+    return this.opentui.symbols.audioStopCapture(this.audioContext(engine))
   }
 
   public audioIsCaptureRunning(engine: AudioEngineHandle): boolean {
-    return Boolean(this.opentui.symbols.audioIsCaptureRunning(engine))
+    return Boolean(this.opentui.symbols.audioIsCaptureRunning(this.audioContext(engine)))
   }
 
   public audioReadCapture(
@@ -7811,7 +7889,7 @@ export class FFIRenderLib {
     const outFramesReadBuffer = new ArrayBuffer(4)
     const sampleCapacity = toSafeFFIU32Length(outBuffer.length, "Audio capture output sample capacity")
     const status = this.opentui.symbols.audioReadCapture(
-      engine,
+      this.audioContext(engine),
       outBuffer,
       sampleCapacity,
       frameCount,
@@ -7823,7 +7901,7 @@ export class FFIRenderLib {
 
   public audioGetCaptureStats(engine: AudioEngineHandle): { status: number; stats: NativeAudioCaptureStats | null } {
     const statsBuffer = new ArrayBuffer(AudioCaptureStatsStruct.size)
-    const status = this.opentui.symbols.audioGetCaptureStats(engine, statsBuffer)
+    const status = this.opentui.symbols.audioGetCaptureStats(this.audioContext(engine), statsBuffer)
     if (status !== 0) return { status, stats: null }
     const stats = AudioCaptureStatsStruct.unpack(statsBuffer)
     return {
@@ -7847,15 +7925,15 @@ export class FFIRenderLib {
     } catch {
       return -1
     }
-    return this.opentui.symbols.audioStart(engine, optionsBuffer)
+    return this.opentui.symbols.audioStart(this.audioContext(engine), optionsBuffer)
   }
 
   public audioStartMixer(engine: AudioEngineHandle): number {
-    return this.opentui.symbols.audioStartMixer(engine)
+    return this.opentui.symbols.audioStartMixer(this.audioContext(engine))
   }
 
   public audioStop(engine: AudioEngineHandle): number {
-    return this.opentui.symbols.audioStop(engine)
+    return this.opentui.symbols.audioStop(this.audioContext(engine))
   }
 
   public audioCreateStream(
@@ -7870,40 +7948,41 @@ export class FFIRenderLib {
     }
     const optionsBuffer = AudioStreamCreateOptionsStruct.pack(options)
     const outBuffer = new ArrayBuffer(4)
-    const status = this.opentui.symbols.audioCreateStream(engine, optionsBuffer, outBuffer)
+    const status = this.opentui.symbols.audioCreateStream(this.audioContext(engine), optionsBuffer, outBuffer)
     if (status !== 0) return { status, streamId: null }
     return { status, streamId: new Uint32Array(outBuffer)[0] ?? null }
   }
 
   public audioWriteStream(engine: AudioEngineHandle, streamId: number, data: Uint8Array): number {
     const dataLength = toSafeFFIU32Length(data.byteLength, "Audio stream data length")
-    return this.opentui.symbols.audioWriteStream(engine, streamId, dataLength === 0 ? null : data, dataLength)
+    void data.buffer
+    return this.opentui.symbols.audioWriteStream(this.audioContext(engine), streamId, data, dataLength)
   }
 
   public audioEndStream(engine: AudioEngineHandle, streamId: number): number {
-    return this.opentui.symbols.audioEndStream(engine, streamId)
+    return this.opentui.symbols.audioEndStream(this.audioContext(engine), streamId)
   }
 
   public audioRestartStream(engine: AudioEngineHandle, streamId: number): number {
-    return this.opentui.symbols.audioRestartStream(engine, streamId)
+    return this.opentui.symbols.audioRestartStream(this.audioContext(engine), streamId)
   }
 
   public audioSetStreamVolume(engine: AudioEngineHandle, streamId: number, volume: number): number {
-    return this.opentui.symbols.audioSetStreamVolume(engine, streamId, volume)
+    return this.opentui.symbols.audioSetStreamVolume(this.audioContext(engine), streamId, volume)
   }
 
   public audioSetStreamPan(engine: AudioEngineHandle, streamId: number, pan: number): number {
-    return this.opentui.symbols.audioSetStreamPan(engine, streamId, pan)
+    return this.opentui.symbols.audioSetStreamPan(this.audioContext(engine), streamId, pan)
   }
 
   public audioSetStreamGroup(engine: AudioEngineHandle, streamId: number, groupId: number): number {
     if (!isFFIU32(groupId)) return -1
-    return this.opentui.symbols.audioSetStreamGroup(engine, streamId, groupId)
+    return this.opentui.symbols.audioSetStreamGroup(this.audioContext(engine), streamId, groupId)
   }
 
   public audioGetStreamStats(engine: AudioEngineHandle, streamId: number): NativeAudioStreamStats | null {
     const storage = this.ffiStructStorage.audioStreamStats
-    const status = this.opentui.symbols.audioGetStreamStats(engine, streamId, storage.buffer)
+    const status = this.opentui.symbols.audioGetStreamStats(this.audioContext(engine), streamId, storage.buffer)
     if (status !== 0) return null
     const stats = AudioStreamStatsStruct.unpackInto(storage.view, storage.result) as NativeAudioStreamStats
     return { ...stats }
@@ -7915,7 +7994,7 @@ export class FFIRenderLib {
     reason: NativeAudioStreamCloseReason,
   ): { status: number; stats: NativeAudioStreamStats | null } {
     const storage = this.ffiStructStorage.audioStreamStats
-    const status = this.opentui.symbols.audioCloseStream(engine, streamId, reason, storage.buffer)
+    const status = this.opentui.symbols.audioCloseStream(this.audioContext(engine), streamId, reason, storage.buffer)
     if (status !== 0) return { status, stats: null }
     const stats = AudioStreamStatsStruct.unpackInto(storage.view, storage.result) as NativeAudioStreamStats
     return { status, stats: { ...stats } }
@@ -7924,7 +8003,7 @@ export class FFIRenderLib {
   public audioLoad(engine: AudioEngineHandle, data: Uint8Array): { status: number; soundId: number | null } {
     const outBuffer = new ArrayBuffer(4)
     const dataLength = toSafeFFIU32Length(data.byteLength, "Audio data length")
-    const status = this.opentui.symbols.audioLoad(engine, data, dataLength, outBuffer)
+    const status = this.opentui.symbols.audioLoad(this.audioContext(engine), data, dataLength, outBuffer)
     if (status !== 0) {
       return { status, soundId: null }
     }
@@ -7933,7 +8012,7 @@ export class FFIRenderLib {
   }
 
   public audioUnload(engine: AudioEngineHandle, soundId: number): number {
-    return this.opentui.symbols.audioUnload(engine, soundId)
+    return this.opentui.symbols.audioUnload(this.audioContext(engine), soundId)
   }
 
   public audioPlay(
@@ -7944,7 +8023,7 @@ export class FFIRenderLib {
     if (options?.groupId !== undefined && !isFFIU32(options.groupId)) return { status: -1, voiceId: null }
     const outBuffer = new ArrayBuffer(4)
     const optionsBuffer = options ? AudioVoiceOptionsStruct.pack(options) : null
-    const status = this.opentui.symbols.audioPlay(engine, soundId, optionsBuffer, outBuffer)
+    const status = this.opentui.symbols.audioPlay(this.audioContext(engine), soundId, optionsBuffer, outBuffer)
     if (status !== 0) {
       return { status, voiceId: null }
     }
@@ -7953,19 +8032,19 @@ export class FFIRenderLib {
   }
 
   public audioStopVoice(engine: AudioEngineHandle, voiceId: number): number {
-    return this.opentui.symbols.audioStopVoice(engine, voiceId)
+    return this.opentui.symbols.audioStopVoice(this.audioContext(engine), voiceId)
   }
 
   public audioSetVoiceGroup(engine: AudioEngineHandle, voiceId: number, groupId: number): number {
     if (!isFFIU32(groupId)) return -1
-    return this.opentui.symbols.audioSetVoiceGroup(engine, voiceId, groupId)
+    return this.opentui.symbols.audioSetVoiceGroup(this.audioContext(engine), voiceId, groupId)
   }
 
   public audioCreateGroup(engine: AudioEngineHandle, name: string): { status: number; groupId: number | null } {
     const outBuffer = new ArrayBuffer(4)
     const nameBytes = this.encoder.encode(name)
     const nameLength = toSafeFFIU32Length(nameBytes.byteLength, "Audio group name length")
-    const status = this.opentui.symbols.audioCreateGroup(engine, nameBytes, nameLength, outBuffer)
+    const status = this.opentui.symbols.audioCreateGroup(this.audioContext(engine), nameBytes, nameLength, outBuffer)
     if (status !== 0) {
       return { status, groupId: null }
     }
@@ -7974,11 +8053,11 @@ export class FFIRenderLib {
   }
 
   public audioSetGroupVolume(engine: AudioEngineHandle, groupId: number, volume: number): number {
-    return this.opentui.symbols.audioSetGroupVolume(engine, groupId, volume)
+    return this.opentui.symbols.audioSetGroupVolume(this.audioContext(engine), groupId, volume)
   }
 
   public audioSetMasterVolume(engine: AudioEngineHandle, volume: number): number {
-    return this.opentui.symbols.audioSetMasterVolume(engine, volume)
+    return this.opentui.symbols.audioSetMasterVolume(this.audioContext(engine), volume)
   }
 
   public audioMixToBuffer(
@@ -7987,11 +8066,11 @@ export class FFIRenderLib {
     frameCount: number,
     channels: number,
   ): number {
-    return this.opentui.symbols.audioMixToBuffer(engine, outBuffer, frameCount, channels)
+    return this.opentui.symbols.audioMixToBuffer(this.audioContext(engine), outBuffer, frameCount, channels)
   }
 
   public audioEnableTap(engine: AudioEngineHandle, enabled: boolean, capacityFrames: number): number {
-    return this.opentui.symbols.audioEnableTap(engine, ffiBool(enabled), capacityFrames)
+    return this.opentui.symbols.audioEnableTap(this.audioContext(engine), ffiBool(enabled), capacityFrames)
   }
 
   public audioReadTap(
@@ -8001,7 +8080,13 @@ export class FFIRenderLib {
     channels: number,
   ): { status: number; framesRead: number } {
     const outFramesReadBuffer = new ArrayBuffer(4)
-    const status = this.opentui.symbols.audioReadTap(engine, outBuffer, frameCount, channels, outFramesReadBuffer)
+    const status = this.opentui.symbols.audioReadTap(
+      this.audioContext(engine),
+      outBuffer,
+      frameCount,
+      channels,
+      outFramesReadBuffer,
+    )
     if (status !== 0) {
       return { status, framesRead: 0 }
     }
@@ -8011,7 +8096,7 @@ export class FFIRenderLib {
 
   public audioGetStats(engine: AudioEngineHandle): AudioStats | null {
     const statsBuffer = new ArrayBuffer(AudioStatsStruct.size)
-    const status = this.opentui.symbols.audioGetStats(engine, statsBuffer)
+    const status = this.opentui.symbols.audioGetStats(this.audioContext(engine), statsBuffer)
     if (status !== 0) {
       return null
     }

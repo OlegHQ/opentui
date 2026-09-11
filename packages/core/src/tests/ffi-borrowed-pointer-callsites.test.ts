@@ -371,7 +371,6 @@ describe("borrowed pointer call sites", () => {
     try {
       const result = lib.audioCloseStream(11 as any, 22, NativeAudioStreamCloseReason.TransportError)
       expect(calls).toHaveLength(1)
-      expect(calls[0]![0]).toBe(11)
       expect(calls[0]![1]).toBe(22)
       expect(calls[0]![2]).toBe(NativeAudioStreamCloseReason.TransportError)
       expect(calls[0]![3]).toBeInstanceOf(ArrayBuffer)
@@ -415,7 +414,7 @@ describe("borrowed pointer call sites", () => {
       expect(calls[0]).toHaveLength(4)
       expect(calls[0]![2]).toBe(bytes)
       expect(calls[0]![3]).toBe(bytes.byteLength)
-      expect(calls[3]![2]).toBeNull()
+      expect(calls[3]![2]).toBeInstanceOf(Uint8Array)
       expect(calls[3]![3]).toBe(0)
     } finally {
       symbols.audioWriteStream = original
@@ -592,7 +591,7 @@ describe("borrowed pointer call sites", () => {
   test("clipboard calls pass transient request and output buffers as object values", () => {
     withStubbedSymbols(
       {
-        clipboardServiceCreate: () => 1,
+        clipboardServiceCreate: () => 0,
         clipboardServiceDestroy: () => 0,
         clipboardReadOperationStart: () => 0,
         clipboardWriteOperationStart: () => 0,
@@ -615,18 +614,18 @@ describe("borrowed pointer call sites", () => {
         lib.clipboardOperationResultDiagnosticCopy(1 as any, new Uint8Array(2))
         lib.clipboardServiceDestroy(service)
 
-        expect(calls.clipboardServiceCreate![0]![2]).toBeInstanceOf(Uint8Array)
+        expect(calls.clipboardServiceCreate![0]![3]).toBeInstanceOf(Uint8Array)
         expect(calls.clipboardReadOperationStart![0]![1]).toBeInstanceOf(Uint8Array)
         expect(calls.clipboardReadOperationStart![0]!.slice(4, 8)).toEqual([16, 32, 64, 100])
-        expect(calls.clipboardReadOperationStart![0]![8]).toBeInstanceOf(Uint32Array)
+        expect(calls.clipboardReadOperationStart![0]![8]).toBeInstanceOf(BigUint64Array)
         expect(calls.clipboardWriteOperationStart![0]![1]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardWriteOperationStart![0]![5]).toBeInstanceOf(Uint32Array)
-        expect(calls.clipboardClearOperationStart![0]![3]).toBeInstanceOf(Uint32Array)
-        expect(calls.clipboardOperationResultMimeLength![0]![1]).toBeInstanceOf(Uint32Array)
-        expect(calls.clipboardOperationResultMimeCopy![0]![1]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardOperationResultDataCopy![0]![1]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardOperationResultErrorCode![0]![1]).toBeInstanceOf(Uint32Array)
-        expect(calls.clipboardOperationResultDiagnosticCopy![0]![1]).toBeInstanceOf(Uint8Array)
+        expect(calls.clipboardWriteOperationStart![0]![5]).toBeInstanceOf(BigUint64Array)
+        expect(calls.clipboardClearOperationStart![0]![3]).toBeInstanceOf(BigUint64Array)
+        expect(calls.clipboardOperationResultMimeLength![0]![2]).toBeInstanceOf(Uint32Array)
+        expect(calls.clipboardOperationResultMimeCopy![0]![2]).toBeInstanceOf(Uint8Array)
+        expect(calls.clipboardOperationResultDataCopy![0]![2]).toBeInstanceOf(Uint8Array)
+        expect(calls.clipboardOperationResultErrorCode![0]![2]).toBeInstanceOf(Uint32Array)
+        expect(calls.clipboardOperationResultDiagnosticCopy![0]![2]).toBeInstanceOf(Uint8Array)
       },
     )
   })

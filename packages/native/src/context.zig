@@ -20,6 +20,8 @@ const edit_buffer = @import("edit-buffer.zig");
 const editor_view = @import("editor-view.zig");
 const ansi = @import("ansi.zig");
 const image = @import("image.zig");
+const audio = @import("audio.zig");
+const clipboard = @import("clipboard/host.zig");
 const encoded_unicode = @import("encoded-unicode.zig");
 pub const embedded_terminal = if (@import("ghostty_vt_options").available)
     @import("embedded-terminal/main.zig")
@@ -551,6 +553,10 @@ pub const Context = struct {
             return self.owner.getImage(handle);
         }
 
+        pub fn getAudioEngine(self: RawAccess, handle: Handle) Error!*audio.Engine {
+            return self.owner.objects.get(handle, .audio_engine, audio.Engine);
+        }
+
         pub fn getBuffer(self: RawAccess, handle: Handle) Error!*buf.OptimizedBuffer {
             return self.owner.getBuffer(handle);
         }
@@ -624,6 +630,14 @@ pub const Context = struct {
             const view = self.objects.get(handle, .text_buffer_view, TextView) catch unreachable;
             view.checkMutable() catch return error.ContextBusy;
         }
+        var clipboard_cursor: usize = 0;
+        var clipboard_ready = true;
+        while (self.objects.next(.clipboard_service, &clipboard_cursor)) |handle| {
+            const service = self.objects.get(handle, .clipboard_service, clipboard.Service) catch unreachable;
+            service.beginShutdown();
+            if (service.pollShutdown() != .ready) clipboard_ready = false;
+        }
+        if (!clipboard_ready) return error.ContextBusy;
         self.closing = true;
         session_cursor = 0;
         while (self.objects.next(.session, &session_cursor)) |handle| {
@@ -631,7 +645,7 @@ pub const Context = struct {
             if (value.scene) |owned| owned.detachAll();
         }
         // Walk the registry once per kind; borrowers release before their resources.
-        for ([_]handles.Kind{ .native_renderable, .text_buffer_view, .text_buffer, .editor_view, .edit_buffer, .syntax_style, .buffer, .session, .image, .encoded_unicode, .embedded_terminal }) |kind| {
+        for ([_]handles.Kind{ .native_renderable, .text_buffer_view, .text_buffer, .editor_view, .edit_buffer, .syntax_style, .buffer, .session, .image, .encoded_unicode, .embedded_terminal, .audio_engine, .clipboard_service }) |kind| {
             var cursor: usize = 0;
             while (self.objects.next(kind, &cursor)) |handle| {
                 self.destroyToken(self.objects.beginDestroy(handle) catch unreachable);
@@ -675,6 +689,21 @@ pub const Context = struct {
         while (cursor) |node| : (cursor = node.scene_node.?.next) {
             try yoga.check(yoga.nodeTeardownStatus(node.yoga_node));
         }
+    }
+
+    pub fn createClipboardService(self: *Context, max_operations: u32, max_provider_transfers: u32, seat: ?[*]const u8, seat_length: u32) !Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        return clipboard.createService(self.allocator, &self.objects, max_operations, max_provider_transfers, seat, seat_length);
+    }
+
+    pub fn createAudioEngine(self: *Context, options: ?*const audio.CreateOptions) Error!Handle {
+        try self.beginMutation();
+        defer self.mutating = false;
+        try self.objects.checkCapacity();
+        const engine = audio.create(self.allocator, options) orelse return error.InvalidOptions;
+        errdefer audio.destroy(engine);
+        return self.objects.insert(.audio_engine, engine);
     }
 
     pub fn createSession(self: *Context, options: session.Options) Error!Handle {
@@ -3651,6 +3680,15 @@ pub const Context = struct {
         } else |_| {}
         switch (try self.objects.getKind(handle)) {
             .edit_buffer => try (try self.getEditBuffer(handle)).checkMutable(),
+            .clipboard_service => {
+                const service = try self.objects.get(handle, .clipboard_service, clipboard.Service);
+                service.beginShutdown();
+                if (service.pollShutdown() != .ready) return error.ContextBusy;
+            },
+            .clipboard_operation => {
+                const operation = try self.objects.get(handle, .clipboard_operation, clipboard.Operation);
+                if (!operation.isReadyToDestroy()) return error.ContextBusy;
+            },
             .editor_view => try (try self.getEditorView(handle)).checkMutable(),
             .text_buffer => try (try self.getTextBuffer(handle)).checkMutable(),
             .text_buffer_view => try (try self.getTextBufferView(handle)).checkMutable(),
@@ -3669,6 +3707,15 @@ pub const Context = struct {
     fn destroyToken(self: *Context, token: handles.DestroyToken) void {
         defer self.objects.finishDestroy(token);
         switch (token.kind) {
+            .audio_engine => audio.destroy(@ptrCast(@alignCast(token.ptr))),
+            .clipboard_service => {
+                const service: *clipboard.Service = @ptrCast(@alignCast(token.ptr));
+                service.deinit();
+            },
+            .clipboard_operation => {
+                const operation: *clipboard.Operation = @ptrCast(@alignCast(token.ptr));
+                operation.destroyStorage();
+            },
             .image_pixels_lease => {
                 const value: *image.Image = @ptrCast(@alignCast(token.ptr));
                 self.lease_count -= 1;

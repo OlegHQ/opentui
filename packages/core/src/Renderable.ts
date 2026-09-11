@@ -46,6 +46,7 @@ import { isVNode, maybeMakeRenderable, type VNode } from "./renderables/composit
 import type { MouseEvent } from "./renderer.js"
 import type { RenderContext } from "./types.js"
 import { RGBA } from "./lib/RGBA.js"
+import { nativeConstants } from "./native-abi.generated.js"
 import {
   isNativeScenePaintFrame,
   NATIVE_EDGE_NONE,
@@ -86,10 +87,12 @@ const nativeSceneMethodDefaults: Partial<Record<(typeof nativeSceneMethodNames)[
   renderBefore: undefined,
   renderAfter: undefined,
 }
-const nativeSceneHookUpdates = NativeSceneHook.Update | NativeSceneHook.IdleUpdate
-const nativeSceneHookListeners = NativeSceneHook.Resize | NativeSceneHook.LayoutChanged
-const nativeSceneHookBeforeAfter = NativeSceneHook.RenderBefore | NativeSceneHook.RenderAfter
-const nativeSceneHookHostMethods = NativeSceneHook.Update | nativeSceneHookBeforeAfter | NativeSceneHook.RenderSelf
+const nativeSceneHookUpdates = nativeConstants.OT_SCENE_HOOK_UPDATE | nativeConstants.OT_SCENE_HOOK_IDLE_UPDATE
+const nativeSceneHookListeners = nativeConstants.OT_SCENE_HOOK_RESIZE | nativeConstants.OT_SCENE_HOOK_LAYOUT_CHANGED
+const nativeSceneHookBeforeAfter =
+  nativeConstants.OT_SCENE_HOOK_RENDER_BEFORE | nativeConstants.OT_SCENE_HOOK_RENDER_AFTER
+const nativeSceneHookHostMethods =
+  nativeConstants.OT_SCENE_HOOK_UPDATE | nativeSceneHookBeforeAfter | nativeConstants.OT_SCENE_HOOK_RENDER_SELF
 
 function isRowFlexDirection(direction: FlexDirection): boolean {
   return direction === FlexDirection.Row || direction === FlexDirection.RowReverse
