@@ -610,66 +610,6 @@ pub fn ot_buffer_resize(
     return c.OT_OK;
 }
 
-pub fn ot_buffer_clear(
-    context: ?*ContextHandle,
-    buffer_ptr: ?*const c.ot_handle,
-    background_ptr: ?*const [4]u16,
-) callconv(.c) c.ot_status {
-    const status = sessionContextStatus(context);
-    if (status != c.OT_OK) return status;
-    const owner = context.?;
-    const id = buffer_ptr orelse return sessionError(owner, error.InvalidOptions);
-    const background = background_ptr orelse return sessionError(owner, error.InvalidOptions);
-    owner.core.clearBuffer(handleFromC(id.*), background.*) catch |err| return sessionError(owner, err);
-    return c.OT_OK;
-}
-
-pub fn ot_buffer_fill_rect(context: ?*ContextHandle, buffer_ptr: ?*const c.ot_handle, x: u32, y: u32, width: u32, height: u32, background_ptr: ?*const [4]u16) callconv(.c) c.ot_status {
-    const status = sessionContextStatus(context);
-    if (status != c.OT_OK) return status;
-    const owner = context.?;
-    const id = buffer_ptr orelse return sessionError(owner, error.InvalidOptions);
-    const background = background_ptr orelse return sessionError(owner, error.InvalidOptions);
-    owner.core.fillBufferRect(handleFromC(id.*), x, y, width, height, background.*) catch |err| return sessionError(owner, err);
-    return c.OT_OK;
-}
-
-pub fn ot_buffer_draw_text(
-    context: ?*ContextHandle,
-    buffer_ptr: ?*const c.ot_handle,
-    options_ptr: ?*const c.ot_buffer_text_options,
-    bytes_ptr: ?[*]const u8,
-    byte_count: u32,
-) callconv(.c) c.ot_status {
-    const status = sessionContextStatus(context);
-    if (status != c.OT_OK) return status;
-    const owner = context.?;
-    const id = buffer_ptr orelse return sessionError(owner, error.InvalidOptions);
-    const options = options_ptr orelse return sessionError(owner, error.InvalidOptions);
-    if (options.struct_size != @sizeOf(c.ot_buffer_text_options)) return sessionError(owner, error.InvalidOptions);
-    if (options.abi_version != c.OT_CONTEXT_ABI_VERSION) return sessionError(owner, error.UnsupportedVersion);
-    if (options.flags & ~@as(u32, c.OT_BUFFER_TEXT_HAS_BACKGROUND) != 0) return sessionError(owner, error.InvalidOptions);
-    if (options.flags == 0) {
-        for (options.background) |channel| {
-            if (channel != 0) return sessionError(owner, error.InvalidOptions);
-        }
-    }
-    if (byte_count > c.OT_BUFFER_TEXT_BYTES_MAX or (byte_count != 0 and bytes_ptr == null)) {
-        return sessionError(owner, error.InvalidOptions);
-    }
-    const bytes = if (bytes_ptr) |ptr| ptr[0..byte_count] else &.{};
-    owner.core.drawBufferText(
-        handleFromC(id.*),
-        bytes,
-        options.x,
-        options.y,
-        options.foreground,
-        if (options.flags == c.OT_BUFFER_TEXT_HAS_BACKGROUND) options.background else null,
-        options.attributes,
-    ) catch |err| return sessionError(owner, err);
-    return c.OT_OK;
-}
-
 fn bufferDrawRecord(comptime T: type, header: *const c.ot_buffer_draw_header, flags: u32) !*const T {
     if (header.struct_size != @sizeOf(T) or header.flags & ~flags != 0) return error.InvalidOptions;
     return @ptrCast(header);
@@ -2865,9 +2805,15 @@ test "Context console ABI validates rectangle frame and diagnostic arguments" {
     _ = try core.sceneCreateNode(handleFromC(session), 0, 1);
     const buffer = handleToC(try core.createBuffer(2, 1, .{}));
     const red: [4]u16 = .{ 255, 0, 0, 255 };
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_fill_rect(handle, &buffer, 0, 0, 1, 1, null));
-    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_fill_rect(handle, null, 0, 0, 1, 1, &red));
-    try std.testing.expectEqual(c.OT_OK, ot_buffer_fill_rect(handle, &buffer, 0, 0, std.math.maxInt(u32), 1, &red));
+    var fill = std.mem.zeroes(c.ot_buffer_draw_fill);
+    fill.header.struct_size = @sizeOf(c.ot_buffer_draw_fill);
+    fill.header.abi_version = c.OT_CONTEXT_ABI_VERSION;
+    fill.header.operation = c.OT_BUFFER_DRAW_FILL;
+    fill.width = std.math.maxInt(u32);
+    fill.height = 1;
+    fill.background = red;
+    try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_buffer_draw(handle, null, null, &fill.header, null, null, 0, null, 0));
+    try std.testing.expectEqual(c.OT_OK, ot_buffer_draw(handle, &buffer, null, &fill.header, null, null, 0, null, 0));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_set_debug_overlay(handle, &session, 2, 0));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_set_debug_overlay(handle, &session, 1, 4));
     try std.testing.expectEqual(c.OT_INVALID_ARGUMENT, ot_session_update_stats(handle, &session, std.math.nan(f64), 60, 0));
@@ -2918,7 +2864,7 @@ test "Context console ABI validates rectangle frame and diagnostic arguments" {
     core.mutating = true;
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_buffer_draw(handle, &buffer, null, draw, null, null, 0, null, 0));
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_session_dump_hit_grid(handle, &session));
-    try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_buffer_fill_rect(handle, &buffer, 0, 0, 1, 1, &red));
+    try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_buffer_draw(handle, &buffer, null, &fill.header, null, null, 0, null, 0));
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, ot_scene_frame_draw_buffer(handle, &session, &frame, &buffer, 0, 0));
     core.mutating = false;
     try std.testing.expectEqual(c.OT_OK, ot_scene_frame_cancel(handle, &session, frame.frame_id));

@@ -1663,24 +1663,6 @@ ot_status ot_buffer_draw_scene_text(ot_context *, const ot_handle *target, const
     const ot_handle *node, int32_t x, int32_t y);
 
 #define OT_BUFFER_TEXT_BYTES_MAX UINT32_C(65536)
-#define OT_BUFFER_TEXT_HAS_BACKGROUND UINT32_C(1)
-
-/* Draw one plain UTF-8 row at unsigned cell coordinates, clipped to the buffer.
- * Colors use packed RGBA with canonical RGB, indexed, or terminal-default intent.
- * flags is zero or OT_BUFFER_TEXT_HAS_BACKGROUND. Without that flag, background
- * must be all zero; drawing uses the background at each glyph or tab start.
- * attributes accepts bits 0..7: bold, dim, italic, underline, blink, inverse,
- * hidden, and strikethrough. Packed resource IDs and other bits are invalid. */
-typedef struct ot_buffer_text_options {
-    uint32_t struct_size;
-    uint32_t abi_version;
-    uint32_t x;
-    uint32_t y;
-    uint16_t foreground[4];
-    uint16_t background[4];
-    uint32_t attributes;
-    uint32_t flags;
-} ot_buffer_text_options;
 
 #define OT_BUFFER_DRAW_CLEAR UINT32_C(0)
 #define OT_BUFFER_DRAW_FILL UINT32_C(1)
@@ -1807,7 +1789,7 @@ typedef struct ot_buffer_grid_options {
  * change before output admission or presentation; it is not a last-presented
  * snapshot. NEXT is drawing storage and rendering clears it after encoding.
  * Raw planes must not add, replace, or remove pooled grapheme/link IDs. Use
- * ot_buffer_draw_text for checked plain UTF-8 on an owned offscreen buffer.
+ * ot_buffer_draw TEXT for checked plain UTF-8 on an owned offscreen buffer.
  * Styled-text/editor resources, hyperlinks, and images need separate checked APIs. */
 typedef struct ot_buffer_lease_snapshot {
     uint32_t struct_size;
@@ -2103,43 +2085,22 @@ ot_status ot_buffer_resize(
     uint32_t width,
     uint32_t height);
 
-/* Clear to spaces, zero attributes, white foreground, and this packed RGBA
- * background with canonical RGB, indexed, or terminal-default intent. Failure preserves
- * cells. Existing leases stay current; clear does not replace storage. */
-ot_status ot_buffer_clear(
-    ot_context *context,
-    const ot_handle *buffer,
-    const uint16_t background[4]);
-
-/* Fill a clipped cell rectangle using packed RGBA with canonical color intent. Zero-sized
- * or offscreen rectangles are no-ops. Existing storage leases remain current. */
-ot_status ot_buffer_fill_rect(ot_context *context, const ot_handle *buffer,
-    uint32_t x, uint32_t y, uint32_t width, uint32_t height, const uint16_t background[4]);
-
-/* Draw at most OT_BUFFER_TEXT_BYTES_MAX bytes without borrowing them after return.
- * Options require the exact size/version. bytes may be NULL only for zero length.
- * Byte-limit violations, invalid UTF-8, C0/C1/DEL controls except tab, and rendered
- * graphemes over the native 128-byte limit return OT_INVALID_ARGUMENT.
- * Tabs occupy two cells.
- * Image-bearing targets return OT_UNSUPPORTED_RESOURCE. Rejection preserves
- * cells and output, though prepared capacity may remain. No output is emitted;
- * use ot_session_draw_buffer to copy into a Session before rendering. */
-ot_status ot_buffer_draw_text(
-    ot_context *context,
-    const ot_handle *buffer,
-    const ot_buffer_text_options *options,
-    const uint8_t *bytes,
-    uint32_t byte_count);
-
 /* Draw into an owned buffer, or a Session's next buffer with the exact active
  * prefix/painted ticket. frame must be NULL for an owned buffer and non-NULL
  * for a Session. source is a same-Context buffer for COMPOSE only.
  * text is used only for TEXT or the BOX top title; bottom_title is BOX-only.
  * Other operations require zero byte counts for unused spans.
- * Text/title byte counts are bounded by OT_BUFFER_TEXT_BYTES_MAX. Raw resource
- * IDs are rejected. Any Box title drawing failure may partially modify the
- * destination; callers must cancel the frame or discard the offscreen draft.
- * No native framebuffer pointer is accepted. */
+ * CLEAR fills spaces, zero attributes, and white foreground using the record
+ * background. FILL clips to the destination; zero-sized or offscreen rectangles
+ * are no-ops. Neither replaces storage or invalidates leases. TEXT uses signed
+ * cell coordinates; negative positions are no-ops. Text/title byte counts are
+ * bounded by OT_BUFFER_TEXT_BYTES_MAX. Invalid UTF-8, C0/C1/DEL except tab, and
+ * graphemes over the native 128-byte limit return OT_INVALID_ARGUMENT. Tabs
+ * occupy two cells. Image-bearing targets return OT_UNSUPPORTED_RESOURCE.
+ * Raw resource IDs are rejected. Rejection preserves cells except that any Box
+ * title drawing failure may partially modify the destination; callers must
+ * cancel the frame or discard the offscreen draft. No native framebuffer
+ * pointer is accepted. */
 ot_status ot_buffer_draw(ot_context *context, const ot_handle *target,
     const ot_scene_frame_request *frame, const ot_buffer_draw_header *options,
     const ot_handle *source, const uint8_t *text, uint32_t text_len,

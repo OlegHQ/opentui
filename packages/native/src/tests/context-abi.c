@@ -11,8 +11,8 @@ _Static_assert(offsetof(ot_handle, generation) == 12, "handle generation offset"
 _Static_assert(sizeof(ot_buffer_lease_snapshot) == 80, "lease size");
 _Static_assert(offsetof(ot_buffer_lease_snapshot, char_ptr) == 40, "lease pointer offset");
 _Static_assert(offsetof(ot_buffer_lease_snapshot, attributes_ptr) == 64, "lease attributes offset");
-_Static_assert(sizeof(ot_buffer_text_options) == 40, "text options size");
-_Static_assert(offsetof(ot_buffer_text_options, foreground) == 16, "text color offset");
+_Static_assert(sizeof(ot_buffer_draw_text_record) == 44, "text draw size");
+_Static_assert(offsetof(ot_buffer_draw_text_record, foreground) == 28, "text color offset");
 _Static_assert(sizeof(ot_output_ticket) == 32, "output ticket size");
 _Static_assert(offsetof(ot_output_ticket, request_id) == 16, "output request offset");
 _Static_assert(sizeof(ot_scene_layout) == 48, "scene layout size");
@@ -104,17 +104,30 @@ static void buffer_lease(ot_context *context, ot_context *foreign) {
     uint16_t *bg = (uint16_t *)(uintptr_t)snapshot.bg_ptr;
     uint32_t *attributes = (uint32_t *)(uintptr_t)snapshot.attributes_ptr;
     const uint16_t background[4] = {68, 85, 102, 255};
-    const ot_buffer_text_options text = {
-        .struct_size = sizeof(text), .abi_version = OT_CONTEXT_ABI_VERSION,
-        .foreground = {17, 34, 51, 255}, .attributes = 1,
+    const ot_buffer_draw_clear clear = {
+        .header = {
+            .struct_size = sizeof(ot_buffer_draw_clear),
+            .abi_version = OT_CONTEXT_ABI_VERSION,
+            .operation = OT_BUFFER_DRAW_CLEAR,
+        },
+        .background = {68, 85, 102, 255},
+    };
+    const ot_buffer_draw_text_record text = {
+        .header = {
+            .struct_size = sizeof(ot_buffer_draw_text_record),
+            .abi_version = OT_CONTEXT_ABI_VERSION,
+            .operation = OT_BUFFER_DRAW_TEXT,
+        },
+        .foreground = {17, 34, 51, 255},
+        .attributes = 1,
     };
     assert(snapshot.width == 4 && snapshot.height == 1);
-    assert(ot_buffer_clear(context, &buffer, background) == OT_OK);
-    assert(ot_buffer_draw_text(context, &buffer, &text, (const uint8_t *)"A", 1) == OT_OK);
+    assert(ot_buffer_draw(context, &buffer, NULL, &clear.header, NULL, NULL, 0, NULL, 0) == OT_OK);
+    assert(ot_buffer_draw(context, &buffer, NULL, &text.header, NULL, (const uint8_t *)"A", 1, NULL, 0) == OT_OK);
     assert(chars[0] == 'A' && attributes[0] == 1);
     assert(memcmp(fg, text.foreground, sizeof(text.foreground)) == 0);
     assert(memcmp(bg, background, sizeof(background)) == 0);
-    assert(ot_buffer_draw_text(context, &buffer, &text, NULL, 1) == OT_INVALID_ARGUMENT);
+    assert(ot_buffer_draw(context, &buffer, NULL, &text.header, NULL, NULL, 1, NULL, 0) == OT_INVALID_ARGUMENT);
     assert(chars[0] == 'A');
     assert(ot_buffer_destroy(context, &snapshot.lease) == OT_WRONG_KIND);
     assert(ot_buffer_resize(context, &buffer, 2, 1) == OT_OK);

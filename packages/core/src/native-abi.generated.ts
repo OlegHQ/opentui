@@ -1,7 +1,7 @@
 // Generated from packages/native/include/opentui.h and scripts/native-abi-pointers.ts.
 // Run `bun run generate:abi` in packages/core. Do not edit.
 // Inspect audit input: bun scripts/native-abi.ts --audit
-// ABI audit SHA-256: 30fb8da8d0f5c0c35bceaa27641d6de6db580d5b365337865dadf4fc2b1135c5
+// ABI audit SHA-256: 574c990e7633af5f74d9ab59ab98163e4d58a25756df45609f5a9f85de44f2d6
 
 export const nativeSymbols = {
   ot_scene_set_hooks: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
@@ -193,9 +193,6 @@ export const nativeSymbols = {
   ot_buffer_create: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
   ot_buffer_destroy: { args: ["ptr", "buffer"], returns: "i32" },
   ot_buffer_resize: { args: ["ptr", "buffer", "u32", "u32"], returns: "i32" },
-  ot_buffer_clear: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
-  ot_buffer_fill_rect: { args: ["ptr", "buffer", "u32", "u32", "u32", "u32", "buffer"], returns: "i32" },
-  ot_buffer_draw_text: { args: ["ptr", "buffer", "buffer", "ptr", "u32"], returns: "i32" },
   ot_buffer_draw: { args: ["ptr", "buffer", "ptr", "buffer", "ptr", "buffer", "u32", "buffer", "u32"], returns: "i32" },
   ot_buffer_stack: {
     args: ["ptr", "buffer", "ptr", "u32", "i32", "i32", "u32", "u32", "buffer", "buffer"],
@@ -970,20 +967,6 @@ export const nativeLayouts = {
       byte_count: { offset: 4, size: 4, alignment: 4, type: "u32" },
     },
   },
-  ot_buffer_text_options: {
-    size: 40,
-    alignment: 4,
-    fields: {
-      struct_size: { offset: 0, size: 4, alignment: 4, type: "u32" },
-      abi_version: { offset: 4, size: 4, alignment: 4, type: "u32" },
-      x: { offset: 8, size: 4, alignment: 4, type: "u32" },
-      y: { offset: 12, size: 4, alignment: 4, type: "u32" },
-      foreground: { offset: 16, size: 8, alignment: 2, type: "[4]u16" },
-      background: { offset: 24, size: 8, alignment: 2, type: "[4]u16" },
-      attributes: { offset: 32, size: 4, alignment: 4, type: "u32" },
-      flags: { offset: 36, size: 4, alignment: 4, type: "u32" },
-    },
-  },
   ot_buffer_draw_header: {
     size: 16,
     alignment: 4,
@@ -1569,7 +1552,6 @@ export const nativeConstants = {
   OT_TEXT_REPLACEMENT_BYTES_MAX: 4194304,
   OT_TEXT_REPLACEMENT_URL_BYTES_MAX: 1048576,
   OT_BUFFER_TEXT_BYTES_MAX: 65536,
-  OT_BUFFER_TEXT_HAS_BACKGROUND: 1,
   OT_BUFFER_DRAW_CLEAR: 0,
   OT_BUFFER_DRAW_FILL: 1,
   OT_BUFFER_DRAW_TEXT: 2,
