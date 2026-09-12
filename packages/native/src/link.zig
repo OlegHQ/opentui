@@ -361,10 +361,18 @@ pub const LinkTracker = struct {
     }
 };
 
+/// Process-wide pool for native tests and constructors that omit an owner.
+/// Context instances keep their own pools.
+var global_pool: ?LinkPool = null;
+
 pub fn initGlobalLinkPool(allocator: std.mem.Allocator) *LinkPool {
-    return @import("compatibility-context.zig").compatDefault.initLinkPool(allocator);
+    if (global_pool == null) global_pool = LinkPool.init(allocator);
+    return &global_pool.?;
 }
 
 pub fn deinitGlobalLinkPool() void {
-    @import("compatibility-context.zig").compatDefault.deinitLinkPool();
+    if (global_pool) |*pool| {
+        pool.deinit();
+        global_pool = null;
+    }
 }

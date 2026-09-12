@@ -1,9 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const c = @import("yoga");
-const compatibility = @import("compatibility-context.zig");
 const logger = @import("logger.zig");
 const api = @import("context_abi_c");
+const process_io = @import("runtime.zig").io();
 
 pub const YGNodeRef = c.YGNodeRef;
 pub const YGNodeConstRef = c.YGNodeConstRef;
@@ -184,6 +184,22 @@ pub const Config = struct {
         return self.nodes != null;
     }
 };
+
+/// Process-lifetime config for standalone OpenTUI nodes. Heap-owned configs from
+/// yogaConfigCreate remain independently created and destroyed.
+var default_config: Config = undefined;
+var default_config_ready = false;
+var default_config_mutex: std.Io.Mutex = .init;
+
+fn defaultConfig() Error!*Config {
+    default_config_mutex.lockUncancelable(process_io);
+    defer default_config_mutex.unlock(process_io);
+    if (!default_config_ready) {
+        try default_config.init(std.heap.c_allocator, .{});
+        default_config_ready = true;
+    }
+    return &default_config;
+}
 
 const CallbackContext = struct {
     config: *Config,
@@ -488,7 +504,7 @@ pub export fn yogaNodeCreateForOpenTUI() YGNodeRef {
 
 pub export fn yogaNodeCreateForOpenTUIChecked(out: ?*YGNodeRef) Status {
     const result = out orelse return .invalid_argument;
-    const config = compatibility.compatDefault.getYogaConfig() catch |err| return fromError(err);
+    const config = defaultConfig() catch |err| return fromError(err);
     result.* = config.createNode() catch |err| return fromError(err);
     return .ok;
 }
@@ -960,7 +976,7 @@ pub export fn yogaConfigSetCallbacks(ref: YGConfigConstRef, measure: JsMeasureCa
     if (configStatus(ref) != .ok) return false;
     const config = configContext(ref).?;
     // The measure trampoline is also the owner's identity. A second facade
-    // cannot steal a compatibility config or clear another facade's callbacks.
+    // cannot steal a config or clear another facade's callbacks.
     if (config.js_measure != null and config.js_measure != measure) return false;
     config.js_measure = measure;
     config.js_dirtied = dirtied;

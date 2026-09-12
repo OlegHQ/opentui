@@ -541,7 +541,7 @@ pub const OptimizedBuffer = struct {
         width_method: utf8.WidthMethod = .unicode,
         id: []const u8 = "unnamed buffer",
         link_pool: ?*link.LinkPool = null,
-        logger: *const logger.Logger = logger.compatibilityLogger(),
+        logger: *const logger.Logger = logger.processLogger(),
     };
 
     const BoxTitleLayout = struct {

@@ -352,7 +352,7 @@ pub const CliRenderer = struct {
         io: std.Io = compatibility_io,
         /// Sessions advance resource deadlines with explicit host time.
         host_driven_time: bool = false,
-        logger: *const logger.Logger = logger.compatibilityLogger(),
+        logger: *const logger.Logger = logger.processLogger(),
         remote_mode: Terminal.RemoteMode = .local,
         output: OutputTarget = .stdout,
         clearOnShutdown: bool = true,

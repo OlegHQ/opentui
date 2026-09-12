@@ -560,7 +560,7 @@ pub const BufferedBackend = struct {
     allocator: Allocator,
     output: BufferedOutput,
     io: std.Io,
-    logger: *const logger.Logger = logger.compatibilityLogger(),
+    logger: *const logger.Logger = logger.processLogger(),
     ownedStdoutOutput: ?*StdoutOutput = null,
     ownedMemoryOutput: ?*MemoryOutput = null,
 

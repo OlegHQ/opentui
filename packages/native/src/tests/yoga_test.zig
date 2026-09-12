@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const yoga = @import("../yoga.zig");
-const CompatibilityOwner = @import("../compatibility-context.zig").CompatibilityOwner;
 const yoga_c = @import("yoga");
 
 test "Yoga cache predicate matches eager reference across modes rounding margins and undefined dimensions" {
@@ -962,23 +961,24 @@ test "Yoga checked host callback fallback remains recoverable and rejects layout
     try std.testing.expectEqual(@as(f32, 7), result.width);
 }
 
-test "Yoga compatibility owner retains config until unregistered native nodes are freed" {
-    const owner = try std.testing.allocator.create(CompatibilityOwner);
-    defer std.testing.allocator.destroy(owner);
-    owner.init();
-    const config = try owner.getYogaConfig();
-    try std.testing.expect(config == try owner.getYogaConfig());
-    const root = try config.createNode();
-    const child = yoga.yogaNodeCreateWithConfig(config.ref);
-    yoga.yogaNodeInsertChild(root, child, 0);
-    try std.testing.expectError(error.LiveYogaNodes, owner.deinit());
-    try std.testing.expect(config.hasLiveNodes());
-    yoga.yogaNodeFree(root);
-    try std.testing.expectError(error.LiveYogaNodes, owner.deinit());
-    yoga.yogaNodeFree(child);
-    try std.testing.expect(!config.hasLiveNodes());
-    try std.testing.expect(!yoga.yogaConfigFree(config.ref));
-    try std.testing.expectEqual(std.heap.Check.ok, try owner.deinit());
+test "OpenTUI default Yoga nodes are independent of Context and heap-owned configs" {
+    const context = @import("../context.zig");
+    const first = yoga.yogaNodeCreateForOpenTUI();
+    defer yoga.yogaNodeFree(first);
+    const owner = try context.Context.init(std.testing.allocator, std.testing.io, .{
+        .object_capacity = 1,
+        .render_cells_max = 1,
+    });
+    try owner.deinit();
+    const owned = yoga.yogaConfigCreate();
+    const node = yoga.yogaNodeCreateWithConfig(owned);
+    try std.testing.expect(yoga.yogaNodeGetConfig(first) != owned);
+    try std.testing.expect(!yoga.yogaConfigFree(owned));
+    yoga.yogaNodeFree(node);
+    try std.testing.expect(yoga.yogaConfigFree(owned));
+    const second = yoga.yogaNodeCreateForOpenTUI();
+    defer yoga.yogaNodeFree(second);
+    try std.testing.expect(yoga.yogaNodeGetConfig(first) == yoga.yogaNodeGetConfig(second));
 }
 
 test "Yoga public config free rejects a live node and permits retry" {

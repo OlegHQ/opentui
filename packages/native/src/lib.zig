@@ -1,4 +1,4 @@
-pub const io = @import("compatibility-context.zig").compatDefault.io_threaded.io();
+pub const io = @import("runtime.zig").io();
 pub const std_options = @import("runtime-abi.zig").std_options;
 
 comptime {

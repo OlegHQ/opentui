@@ -2,7 +2,6 @@ const std = @import("std");
 const logger = @import("../logger.zig");
 const context = @import("../context.zig");
 const buffer = @import("../buffer.zig");
-const CompatibilityOwner = @import("../compatibility-context.zig").CompatibilityOwner;
 
 test "Context Yoga warnings use only their owning diagnostic queues with bounded formatting" {
     const yoga = @import("../yoga.zig");
@@ -174,30 +173,6 @@ const LegacyProbe = struct {
         _ = calls.fetchAdd(1, .monotonic);
     }
 };
-
-test "diagnostics compatibility owners clear only their own callback on successful teardown" {
-    LegacyProbe.calls.store(0, .monotonic);
-    logger.setLogCallback(LegacyProbe.callback);
-    defer logger.setLogCallback(null);
-    const owner = try std.testing.allocator.create(CompatibilityOwner);
-    defer std.testing.allocator.destroy(owner);
-    owner.init();
-    const log = &owner.logger;
-    try std.testing.expect(log.callback == null);
-    owner.logger = .{ .callback = LegacyProbe.callback };
-    const yoga = @import("../yoga.zig");
-    const node = try (try owner.getYogaConfig()).createNode();
-    try std.testing.expectError(error.LiveYogaNodes, owner.deinit());
-    log.warn("busy owner keeps its callback", .{});
-    try std.testing.expectEqual(@as(u32, 1), LegacyProbe.calls.load(.monotonic));
-    yoga.yogaNodeFree(node);
-    try std.testing.expectEqual(std.heap.Check.ok, try owner.deinit());
-    try std.testing.expect(log.callback == null);
-    log.warn("closed owner is silent", .{});
-    try std.testing.expectEqual(@as(u32, 1), LegacyProbe.calls.load(.monotonic));
-    logger.warn("default owner still registered", .{});
-    try std.testing.expectEqual(@as(u32, 2), LegacyProbe.calls.load(.monotonic));
-}
 
 const LogTask = struct {
     owner: *context.Context,

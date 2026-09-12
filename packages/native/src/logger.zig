@@ -1,5 +1,4 @@
 const std = @import("std");
-const compatibility = @import("compatibility-context.zig");
 
 pub const LogLevel = enum(u8) {
     err = 0,
@@ -116,16 +115,19 @@ pub const Logger = union(enum) {
     }
 };
 
-pub fn compatibilityLogger() *const Logger {
-    return &compatibility.compatDefault.logger;
+/// Process-wide callback logger. Context diagnostic queues do not use this sink.
+var process_logger: Logger = .{ .callback = null };
+
+pub fn processLogger() *const Logger {
+    return &process_logger;
 }
 
 pub fn setLogCallback(callback: ?LogCallback) void {
-    compatibility.compatDefault.logger = .{ .callback = callback };
+    process_logger = .{ .callback = callback };
 }
 
 pub fn logMessage(level: LogLevel, comptime format: []const u8, args: anytype) void {
-    compatibilityLogger().logMessage(level, format, args);
+    processLogger().logMessage(level, format, args);
 }
 
 pub fn err(comptime format: []const u8, args: anytype) void {

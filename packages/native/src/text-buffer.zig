@@ -237,7 +237,7 @@ pub const UnifiedTextBuffer = struct {
 
     pub const InitOptions = struct {
         io: std.Io = compatibility_io,
-        logger: *const logger.Logger = logger.compatibilityLogger(),
+        logger: *const logger.Logger = logger.processLogger(),
     };
 
     pub fn init(

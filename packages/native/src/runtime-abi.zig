@@ -1,7 +1,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
 const logger = @import("logger.zig");
-const compat = &@import("compatibility-context.zig").compatDefault;
+const runtime = @import("runtime.zig");
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
@@ -107,11 +107,11 @@ fn sanitizeRequestedBytes(value: u64) RequestedBytesInfo {
 }
 
 fn queryStatsField(comptime field_names: []const []const u8) ?u64 {
-    if (!@hasDecl(@TypeOf(compat.gpa), "queryStats")) {
+    if (!@hasDecl(@TypeOf(runtime.gpa), "queryStats")) {
         return null;
     }
 
-    const stats = compat.gpa.queryStats();
+    const stats = runtime.gpa.queryStats();
     const StatsType = @TypeOf(stats);
 
     inline for (field_names) |field_name| {
@@ -132,12 +132,12 @@ fn getTotalRequestedBytesInfo() RequestedBytesInfo {
         return sanitizeRequestedBytes(value);
     }
 
-    if (@hasField(@TypeOf(compat.gpa), "total_requested_bytes")) {
-        if (@TypeOf(compat.gpa.total_requested_bytes) == void) {
+    if (@hasField(@TypeOf(runtime.gpa), "total_requested_bytes")) {
+        if (@TypeOf(runtime.gpa.total_requested_bytes) == void) {
             return .{ .bytes = 0, .valid = false };
         }
 
-        return sanitizeRequestedBytes(toNonNegativeU64(compat.gpa.total_requested_bytes));
+        return sanitizeRequestedBytes(toNonNegativeU64(runtime.gpa.total_requested_bytes));
     }
 
     return .{ .bytes = 0, .valid = false };
@@ -149,7 +149,7 @@ fn getSmallAllocationCount() u64 {
     }
 
     var total: u64 = 0;
-    for (compat.gpa.buckets) |bucket_head| {
+    for (runtime.gpa.buckets) |bucket_head| {
         var current = bucket_head;
         while (current) |bucket| {
             const allocated: u64 = @intCast(bucket.allocated_count);
@@ -169,11 +169,12 @@ fn getLargeAllocationCount() u64 {
         return value;
     }
 
-    return @intCast(compat.gpa.large_allocations.count());
+    return @intCast(runtime.gpa.large_allocations.count());
 }
 
 export fn getArenaAllocatedBytes() u64 {
-    return @intCast(compat.arena.queryCapacity());
+    // Standalone resources allocate from the process GPA or c_allocator, not an arena.
+    return 0;
 }
 
 export fn getBuildOptions(out_ptr: *ExternalBuildOptions) void {

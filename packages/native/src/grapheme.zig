@@ -721,15 +721,25 @@ pub fn initGlobalPool(allocator: std.mem.Allocator) *GraphemePool {
     return initGlobalPoolWithOptions(allocator, .{});
 }
 
+/// Process-wide pool for native tests and constructors that omit an owner.
+/// Context instances keep their own pools.
+var global_pool: ?GraphemePool = null;
+
 pub fn initGlobalPoolWithOptions(
     allocator: std.mem.Allocator,
     options: GraphemePool.InitOptions,
 ) *GraphemePool {
-    return @import("compatibility-context.zig").compatDefault.initGraphemePool(allocator, options);
+    if (global_pool == null) {
+        global_pool = GraphemePool.initWithOptions(allocator, options);
+    }
+    return &global_pool.?;
 }
 
 pub fn deinitGlobalPool() void {
-    @import("compatibility-context.zig").compatDefault.deinitGraphemePool();
+    if (global_pool) |*pool| {
+        pool.deinit();
+        global_pool = null;
+    }
 }
 
 pub const GraphemeTracker = struct {
