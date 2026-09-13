@@ -1111,8 +1111,9 @@ fn drawTrackedCells(target: *buffer.OptimizedBuffer, count: u32, base: u8) !void
         const glyph = [_]u8{ base + @as(u8, @intCast(x)), 0xcc, 0x81 };
         var url_buffer: [64]u8 = undefined;
         const url = try std.fmt.bufPrint(&url_buffer, "https://render.invalid/{d}", .{glyph[0]});
-        const link_id = try target.link_pool.alloc(url);
+        const link_id = try target.link_pool.acquire(url);
         try target.drawText(&glyph, @intCast(x), 0, ansi.rgbColor(255, 255, 255, 255), null, ansi.TextAttributes.setLinkId(0, link_id));
+        try target.link_pool.decref(link_id);
     }
 }
 
@@ -1316,10 +1317,10 @@ test "Context concurrently renders with independent pools, Yoga callbacks, clock
     });
     defer second.deinit() catch unreachable;
     try std.testing.expect(first.yoga_config.ref != second.yoga_config.ref);
-    const first_grapheme = try first.graphemes.alloc("e\xcc\x81");
-    const second_grapheme = try second.graphemes.alloc("o\xcc\x82");
-    const first_link = try first.links.alloc("https://first.invalid");
-    const second_link = try second.links.alloc("https://second.invalid");
+    const first_grapheme = try first.graphemes.acquire("e\xcc\x81");
+    const second_grapheme = try second.graphemes.acquire("o\xcc\x82");
+    const first_link = try first.links.acquire("https://first.invalid");
+    const second_link = try second.links.acquire("https://second.invalid");
     try std.testing.expectEqual(first_grapheme, second_grapheme);
     try std.testing.expectEqual(first_link, second_link);
 

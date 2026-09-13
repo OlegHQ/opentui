@@ -193,7 +193,7 @@ test "Context frame buffer composition checks tickets and retains source resourc
     const source = try owner.createBuffer(4, 1, .{});
     const peer = try foreign.createBuffer(4, 1, .{});
     const source_buffer = try owner.raw().getBuffer(source);
-    const link_id = try owner.links.alloc("https://example.test/frame-buffer");
+    const link_id = try owner.links.acquire("https://example.test/frame-buffer");
     try source_buffer.drawText("\u{754c}AB", 0, 0, ansi.rgbColor(255, 255, 255, 255), ansi.rgbColor(200, 0, 0, 255), ansi.TextAttributes.setLinkId(0, link_id));
     const glyph = source_buffer.buffer.char[0] & grapheme.GRAPHEME_ID_MASK;
     const frame = try owner.sceneFrameStep(session, null, options);
@@ -285,7 +285,7 @@ test "Context frame composition replaces right-clipped wide glyphs without writi
     const source = try owner.createBuffer(2, 1, .{});
     const red = ansi.rgbColor(200, 0, 0, 255);
     const source_buffer = try owner.raw().getBuffer(source);
-    const link_id = try owner.links.alloc("https://example.test/clipped-wide");
+    const link_id = try owner.links.acquire("https://example.test/clipped-wide");
     const attributes = ansi.TextAttributes.setLinkId(1, link_id);
     try source_buffer.drawText("\u{754c}", 0, 0, red, red, attributes);
     const source_chars = source_buffer.buffer.char[0..2].*;

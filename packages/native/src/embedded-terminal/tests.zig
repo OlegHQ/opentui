@@ -178,8 +178,9 @@ test "embedded terminal checked composition owns cells and retries after every a
         defer terminal.deinit();
         try terminal.write("old0\r\nold1\r\nold2");
         try terminal.composeChecked(target, 0, 0, 24);
-        const link_id = try links.alloc("https://old.example");
+        const link_id = try links.acquire("https://old.example");
         try target.drawGrapheme("\u{754c}", 2, 0, 0, ansi.rgbColor(255, 255, 255, 255), ansi.rgbColor(0, 0, 0, 255), ansi.TextAttributes.setLinkId(0, link_id));
+        try links.decref(link_id);
         try terminal.write("\x1b[1;1H\u{e9}\u{4e2d}\x1b[2;1He\u{301}\u{3b1}\u{3b2}\u{3b3}\u{3b4}\u{3b5}");
 
         failing.fail_index = failing.alloc_index + fail_after;

@@ -33,6 +33,15 @@ pub fn validateColor(color: RGBA) error{InvalidOptions}!void {
     if (ansi.getMeta(color) != ansi.packMeta(intent, if (intent == .indexed) ansi.slot(color) else 0)) return error.InvalidOptions;
 }
 
+fn mapGraphemeAcquire(err: gp.GraphemePoolError) error{ OutOfMemory, TextLimit, TrackerLimit } {
+    return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.GraphemeTooLong => error.TextLimit,
+        error.RefcountOverflow => error.TrackerLimit,
+        error.InvalidId, error.WrongGeneration => unreachable,
+    };
+}
+
 pub fn validateTextInput(text: []const u8) error{ TextLimit, InvalidUnicode }!void {
     if (text.len > text_bytes_max) return error.TextLimit;
     const view = std.unicode.Utf8View.init(text) catch return error.InvalidUnicode;
@@ -860,7 +869,7 @@ pub const OptimizedBuffer = struct {
         try self.syncImagePlacements(source);
 
         // Source membership pins each ID, so rebuilding the preallocated trackers
-        // cannot free a shared ID or allocate in the pools' first-use interners.
+        // retains live IDs without first-use interning.
         self.grapheme_tracker.clear();
         var graphemes = source.grapheme_tracker.used_ids.iterator();
         while (graphemes.next()) |entry| {
@@ -1693,20 +1702,12 @@ pub const OptimizedBuffer = struct {
 
             try runs.ensureUnusedCapacity(scratch_allocator, 1);
             const encoded: u32 = if (is_tab) DEFAULT_SPACE_CHAR else if (bytes.len == 1) bytes[0] else encoded: {
-                const id = self.pool.alloc(bytes) catch |err| return switch (err) {
-                    error.OutOfMemory => error.OutOfMemory,
-                    error.GraphemeTooLong => error.TextLimit,
-                    else => unreachable,
-                };
+                const id = self.pool.acquire(bytes) catch |err| return mapGraphemeAcquire(err);
                 // Leave one reference for the destination tracker's first use.
-                if ((self.pool.getRefcount(id) catch unreachable) >= math.maxInt(u32) - 1) return error.TrackerLimit;
-                self.pool.incref(id) catch |err| {
-                    self.pool.freeUnreferenced(id) catch unreachable;
-                    return switch (err) {
-                        error.OutOfMemory => error.OutOfMemory,
-                        else => unreachable,
-                    };
-                };
+                if ((self.pool.getRefcount(id) catch unreachable) == math.maxInt(u32)) {
+                    self.pool.decref(id) catch unreachable;
+                    return error.TrackerLimit;
+                }
                 grapheme_count += 1;
                 break :encoded gp.packGraphemeStart(id, cell_width);
             };
@@ -1746,10 +1747,13 @@ pub const OptimizedBuffer = struct {
             if (!self.isPointInScissor(@intCast(x + offset), @intCast(y))) return;
         }
 
+        var retained_gid: ?u32 = null;
+        defer if (retained_gid) |gid| self.pool.decref(gid) catch unreachable;
         const encoded_char: u32 = if (grapheme_bytes.len == 1 and cell_width == 1 and grapheme_bytes[0] >= 32)
             grapheme_bytes[0]
         else blk: {
-            const gid = self.pool.alloc(grapheme_bytes) catch return BufferError.OutOfMemory;
+            const gid = self.pool.acquire(grapheme_bytes) catch return BufferError.OutOfMemory;
+            retained_gid = gid;
             break :blk gp.packGraphemeStart(gid & gp.GRAPHEME_ID_MASK, cell_width);
         };
         self.set(x, y, makeCell(encoded_char, fg, bg, attributes));
@@ -1781,29 +1785,18 @@ pub const OptimizedBuffer = struct {
         for (0..cell_width) |offset| {
             if (!self.isPointInScissor(@intCast(x + offset), @intCast(y))) return;
         }
-        var input: [128]u8 = undefined;
-        if (grapheme_bytes.len > input.len) return error.TextLimit;
+        if (grapheme_bytes.len > 128) return error.TextLimit;
         if (!std.unicode.utf8ValidateSlice(grapheme_bytes)) return error.InvalidUnicode;
         if (grapheme_bytes.len == 1 and cell_width == 1 and grapheme_bytes[0] >= 32) {
             self.set(x, y, makeCell(grapheme_bytes[0], fg, bg, attributes));
             return;
         }
 
-        // Pool growth can relocate bytes borrowed from another glyph in this pool.
-        @memcpy(input[0..grapheme_bytes.len], grapheme_bytes);
-        const id = self.pool.alloc(input[0..grapheme_bytes.len]) catch |err| return switch (err) {
-            error.OutOfMemory => error.OutOfMemory,
-            error.GraphemeTooLong => error.TextLimit,
-            else => unreachable,
-        };
-        if ((self.pool.getRefcount(id) catch unreachable) >= math.maxInt(u32) - 1) return error.TrackerLimit;
-        self.pool.incref(id) catch |err| {
-            self.pool.freeUnreferenced(id) catch unreachable;
-            return switch (err) {
-                error.OutOfMemory => error.OutOfMemory,
-                else => unreachable,
-            };
-        };
+        const id = self.pool.acquire(grapheme_bytes) catch |err| return mapGraphemeAcquire(err);
+        if ((self.pool.getRefcount(id) catch unreachable) == math.maxInt(u32)) {
+            self.pool.decref(id) catch unreachable;
+            return error.TrackerLimit;
+        }
         defer self.pool.decref(id) catch unreachable;
         try self.storage.ensureTrackerCapacity(
             @as(u64, self.grapheme_tracker.getGraphemeCount()) + 1,
@@ -1934,10 +1927,13 @@ pub const OptimizedBuffer = struct {
             }
 
             var encoded_char: u32 = 0;
+            var retained_gid: ?u32 = null;
+            defer if (retained_gid) |gid| self.pool.decref(gid) catch unreachable;
             if (grapheme_bytes.len == 1 and cell_width == 1 and grapheme_bytes[0] >= 32) {
                 encoded_char = @as(u32, grapheme_bytes[0]);
             } else {
-                const gid = self.pool.alloc(grapheme_bytes) catch return BufferError.OutOfMemory;
+                const gid = self.pool.acquire(grapheme_bytes) catch return BufferError.OutOfMemory;
+                retained_gid = gid;
                 encoded_char = gp.packGraphemeStart(gid & gp.GRAPHEME_ID_MASK, cell_width);
             }
 
@@ -2595,10 +2591,10 @@ pub const OptimizedBuffer = struct {
                         );
                         const refs = try self.link_pool.getRefcount(link_id);
                         if (refs >= math.maxInt(u32) - 1) return error.TrackerLimit;
-                        self.link_pool.incref(link_id) catch |err| {
-                            // LinkPool publishes its reference before first-use interning.
-                            if (err == error.OutOfMemory) self.link_pool.decref(link_id) catch unreachable;
-                            return err;
+                        self.link_pool.incref(link_id) catch |err| switch (err) {
+                            error.RefcountOverflow => return error.TrackerLimit,
+                            error.InvalidId, error.WrongGeneration => return err,
+                            error.OutOfMemory, error.UrlTooLong => unreachable,
                         };
                     }
                     defer if (link_id != 0) self.link_pool.decref(link_id) catch unreachable;
@@ -2719,18 +2715,16 @@ pub const OptimizedBuffer = struct {
         if (bytes.len == 1 and width == 1 and bytes[0] >= 32) {
             encoded_char = @as(u32, bytes[0]);
         } else {
-            const gid = self.pool.alloc(bytes) catch |err| {
-                if (checked) return err;
+            const gid = self.pool.acquire(bytes) catch |err| {
+                if (checked) return mapGraphemeAcquire(err);
                 self.logger.warn("Failed to allocate grapheme: {}", .{err});
                 return;
             };
-            if ((try self.pool.getRefcount(gid)) >= math.maxInt(u32) - 1) return error.TrackerLimit;
-            // Intern before the void cell writer can take its first reference.
-            // This temporary reference also reclaims glyphs discarded by blending.
-            self.pool.incref(gid) catch |err| {
-                self.pool.freeUnreferenced(gid) catch unreachable;
-                return err;
-            };
+            if ((try self.pool.getRefcount(gid)) == math.maxInt(u32)) {
+                self.pool.decref(gid) catch unreachable;
+                return error.TrackerLimit;
+            }
+            // Temporary reference reclaims glyphs discarded by blending.
             retained_gid = gid;
             try self.storage.ensureTrackerCapacity(
                 @as(u64, self.grapheme_tracker.getGraphemeCount()) + 1,

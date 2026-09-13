@@ -126,8 +126,8 @@ test "Buffer lease resize is transactional at every replacement allocation" {
             .link_pool = &links,
         });
         defer target.deinit();
-        const grapheme_id = try pool.alloc("e\xcc\x81");
-        const link_id = try links.alloc("https://oom.invalid");
+        const grapheme_id = try pool.acquire("e\xcc\x81");
+        const link_id = try links.acquire("https://oom.invalid");
         const cell: buffer.Cell = .{
             .char = gp.packGraphemeStart(grapheme_id, 1),
             .fg = ansi.rgbColor(1, 2, 3, 255),
@@ -135,6 +135,8 @@ test "Buffer lease resize is transactional at every replacement allocation" {
             .attributes = ansi.TextAttributes.setLinkId(0, link_id),
         };
         target.set(0, 0, cell);
+        try pool.decref(grapheme_id);
+        try links.decref(link_id);
         var lease = try target.acquireLease();
         defer lease.release();
         const before = try lease.snapshot();

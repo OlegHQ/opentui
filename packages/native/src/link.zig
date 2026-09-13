@@ -152,14 +152,23 @@ pub const LinkPool = struct {
         }
     }
 
-    pub fn alloc(self: *LinkPool, url: []const u8) LinkPoolError!IdPayload {
+    /// Return one owned live reference. Failed acquisition leaves no stranded
+    /// slot or interned identity. Internal pages may remain allocated.
+    pub fn acquire(self: *LinkPool, url: []const u8) LinkPoolError!IdPayload {
         if (url.len > self.slot_capacity) {
             return LinkPoolError.UrlTooLong;
         }
-
         if (self.lookupOrInvalidate(url)) |live_id| {
+            try self.incref(live_id);
             return live_id;
         }
+        return self.acquireNew(url);
+    }
+
+    fn acquireNew(self: *LinkPool, url: []const u8) LinkPoolError!IdPayload {
+        var copy: [MAX_URL_LENGTH]u8 = undefined;
+        @memcpy(copy[0..url.len], url);
+        const owned = copy[0..url.len];
 
         if (self.free_list.items.len == 0) try self.grow();
 
@@ -169,31 +178,37 @@ pub const LinkPool = struct {
 
         std.debug.assert(header_ptr.generation < GEN_MASK);
         const new_generation = header_ptr.generation + 1;
-
         header_ptr.* = .{
-            .len = @intCast(url.len),
+            .len = @intCast(owned.len),
             .refcount = 0,
             .generation = new_generation,
         };
-
         const data_ptr = @as([*]u8, @ptrCast(p)) + @sizeOf(SlotHeader);
-        @memcpy(data_ptr[0..url.len], url);
+        @memcpy(data_ptr[0..owned.len], owned);
+        errdefer self.releaseSlot(slot_index, new_generation);
 
-        return packId(slot_index, new_generation);
-    }
+        const id = try packId(slot_index, new_generation);
+        try self.internLiveId(id, owned);
+        errdefer self.removeInternedLiveId(owned, id);
 
-    /// Acquire one producer reference, including first-use interning rollback.
-    pub fn acquire(self: *LinkPool, url: []const u8) LinkPoolError!IdPayload {
-        const id = try self.alloc(url);
-        if (try self.getRefcount(id) == std.math.maxInt(u32)) return LinkPoolError.RefcountOverflow;
-        self.incref(id) catch |err| {
-            // Legacy incref publishes its reference before interning can fail.
-            self.decref(id) catch unreachable;
-            return err;
-        };
+        header_ptr.refcount = 1;
         return id;
     }
 
+    fn releaseSlot(self: *LinkPool, slot_index: u32, expected_generation: u32) void {
+        const p = self.slotPtr(slot_index);
+        const header_ptr = slotHeaderPtr(p);
+        std.debug.assert(header_ptr.generation == expected_generation);
+        std.debug.assert(header_ptr.refcount == 0);
+        if (header_ptr.generation == GEN_MASK) {
+            header_ptr.generation = RETIRED_GENERATION;
+            self.retired_slot_count += 1;
+        } else {
+            self.free_list.appendAssumeCapacity(slot_index);
+        }
+    }
+
+    /// Retain an already-live ID. First-use interning stays inside acquire.
     pub fn incref(self: *LinkPool, id: IdPayload) LinkPoolError!void {
         const unpacked = unpackId(id);
         if (unpacked.slot_index >= self.num_slots) return LinkPoolError.InvalidId;
@@ -204,14 +219,9 @@ pub const LinkPool = struct {
         if (header_ptr.generation != unpacked.generation) {
             return LinkPoolError.WrongGeneration;
         }
-
-        const old_refcount = header_ptr.refcount;
-        header_ptr.refcount +%= 1;
-
-        if (old_refcount == 0) {
-            const live_url = try self.get(id);
-            try self.internLiveId(id, live_url);
-        }
+        if (header_ptr.refcount == 0) return LinkPoolError.InvalidId;
+        if (header_ptr.refcount == std.math.maxInt(u32)) return LinkPoolError.RefcountOverflow;
+        header_ptr.refcount += 1;
     }
 
     pub fn decref(self: *LinkPool, id: IdPayload) LinkPoolError!void {
@@ -232,12 +242,7 @@ pub const LinkPool = struct {
         header_ptr.refcount -%= 1;
 
         if (header_ptr.refcount == 0) {
-            if (header_ptr.generation == GEN_MASK) {
-                header_ptr.generation = RETIRED_GENERATION;
-                self.retired_slot_count += 1;
-            } else {
-                self.free_list.appendAssumeCapacity(unpacked.slot_index);
-            }
+            self.releaseSlot(unpacked.slot_index, unpacked.generation);
         }
     }
 
@@ -326,13 +331,9 @@ pub const LinkTracker = struct {
             std.debug.panic("LinkTracker.addCellRef getOrPut failed: {}\n", .{err});
         };
         if (!res.found_existing) {
-            // First time seeing this ID - try to incref in pool
-            self.pool.incref(id) catch |err| {
-                // First-use interning OOM already acquired a reference; keep it for the cell.
-                if (err != error.OutOfMemory) {
-                    _ = self.used_ids.remove(id);
-                    return;
-                }
+            self.pool.incref(id) catch {
+                _ = self.used_ids.remove(id);
+                return;
             };
             res.value_ptr.* = 1;
         } else {

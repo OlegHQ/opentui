@@ -432,7 +432,7 @@ test "Context image compose and grayscale overlays ignore unrelated glyph and li
             try testing.expect(try owner.drawBufferImage(handle, null, imported, .{ .width = 1, .height = 1 }));
             if (unrelated == 1) try owner.drawBufferText(handle, "\u{754c}", 3, 1, white, null, 0);
             if (unrelated == 2) {
-                const id = try owner.links.alloc("https://example.test/unrelated");
+                const id = try owner.links.acquire("https://example.test/unrelated");
                 target.set(3, 1, .{ .char = 'L', .fg = white, .bg = blue, .attributes = ansi.TextAttributes.setLinkId(0, id) });
             }
             if (grayscale) {

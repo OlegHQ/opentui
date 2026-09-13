@@ -43,14 +43,11 @@ pub const EncodedUnicode = struct {
             const width = utf8.getWidthAt(bytes, 0, tab_width, width_method);
             if (width == 0) continue;
             const char: u32 = if (bytes.len == 1 and width == 1 and bytes[0] >= 32) bytes[0] else char: {
-                const id = pool.alloc(bytes) catch |err| return switch (err) {
+                const id = pool.acquire(bytes) catch |err| return switch (err) {
                     error.GraphemeTooLong => error.TextLimit,
-                    else => err,
-                };
-                if ((pool.getRefcount(id) catch unreachable) == std.math.maxInt(u32)) return error.TrackerLimit;
-                pool.incref(id) catch |err| {
-                    pool.freeUnreferenced(id) catch unreachable;
-                    return err;
+                    error.RefcountOverflow => error.TrackerLimit,
+                    error.OutOfMemory => error.OutOfMemory,
+                    error.InvalidId, error.WrongGeneration => unreachable,
                 };
                 break :char grapheme.packGraphemeStart(id, width);
             };

@@ -4240,8 +4240,7 @@ test "Context ABI preserves its allocator and I/O through busy destruction and p
     defer if (handle != null) std.testing.expectEqual(c.OT_OK, ot_context_destroy(handle)) catch unreachable;
     try std.testing.expectEqual(c.OT_OK, createContext(&options, &peer, peer_backing.allocator()));
     defer if (peer != null) std.testing.expectEqual(c.OT_OK, ot_context_destroy(peer)) catch unreachable;
-    const peer_link = try peer.?.core.links.alloc("https://peer.invalid");
-    try peer.?.core.links.incref(peer_link);
+    const peer_link = try peer.?.core.links.acquire("https://peer.invalid");
     const owner = handle.?;
     const session = try owner.core.createSession(.{ .chunk_size = 4096 });
     try owner.core.attachSessionRenderer(session, 2, 1, .{ .remote_mode = .remote });
@@ -4256,8 +4255,7 @@ test "Context ABI preserves its allocator and I/O through busy destruction and p
     try std.testing.expectEqual(c.OT_OK, ot_context_get_last_error(owner, &details));
     try std.testing.expectEqual(c.OT_CONTEXT_BUSY, details.status);
     const before = backing.allocated_bytes;
-    const link = try owner.core.links.alloc("https://after-busy.invalid");
-    try owner.core.links.incref(link);
+    const link = try owner.core.links.acquire("https://after-busy.invalid");
     try std.testing.expect(backing.allocated_bytes > before);
     try std.testing.expectEqualStrings("https://after-busy.invalid", try owner.core.links.get(link));
     var bytes: [4096]u8 = undefined;
@@ -4269,8 +4267,7 @@ test "Context ABI preserves its allocator and I/O through busy destruction and p
     try std.testing.expectEqual(backing.allocated_bytes, backing.freed_bytes);
 
     try std.testing.expectEqualStrings("https://peer.invalid", try peer.?.core.links.get(peer_link));
-    const next = try peer.?.core.links.alloc("https://survivor.invalid");
-    try peer.?.core.links.incref(next);
+    const next = try peer.?.core.links.acquire("https://survivor.invalid");
     try std.testing.expectEqualStrings("https://survivor.invalid", try peer.?.core.links.get(next));
     try std.testing.expect(peer_backing.allocated_bytes > peer_backing.freed_bytes);
     try std.testing.expectEqual(c.OT_OK, ot_context_destroy(peer));

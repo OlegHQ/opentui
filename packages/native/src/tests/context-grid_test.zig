@@ -43,10 +43,11 @@ test "Grid primitive retires overwritten grapheme and link references" {
     defer owner.deinit() catch unreachable;
     const id = try owner.createBuffer(7, 5, .{});
     const target = try owner.raw().getBuffer(id);
-    const link = try owner.links.alloc("https://grid.test");
+    const link = try owner.links.acquire("https://grid.test");
     const attributes = ansi.TextAttributes.setLinkId(0, link);
     try target.drawText("e\xcc\x81e\xcc\x81", 0, 0, red, black, attributes);
     try target.drawText("e\xcc\x81", 0, 1, red, black, attributes);
+    try owner.links.decref(link);
     const glyph = grapheme.graphemeIdFromChar(target.buffer.char[0]);
     target.drawGrid(&border, red, black, &columns, 2, &rows, 2, true, true);
     try testing.expect(!target.grapheme_tracker.hasAny());
@@ -256,8 +257,9 @@ test "GPU checked drawing clips opacity and retires overwritten pooled cells" {
     const gray: [16]f32 = @splat(1);
     inline for (0..4) |mode| {
         target.clear(black, 'Z');
-        const link = try owner.links.alloc("https://pixels.test");
+        const link = try owner.links.acquire("https://pixels.test");
         try target.drawText("e\xcc\x81", 0, 0, red, black, ansi.TextAttributes.setLinkId(0, link));
+        try owner.links.decref(link);
         const glyph = grapheme.graphemeIdFromChar(target.buffer.char[0]);
         switch (mode) {
             0 => try target.drawPackedBufferChecked(std.mem.asBytes(&cells), 0, 0, 2, 2),

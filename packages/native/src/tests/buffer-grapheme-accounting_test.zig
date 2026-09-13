@@ -35,8 +35,7 @@ test "grapheme accounting - renderer narrow wide cycles stay within leased track
     const next = value.getNextBuffer();
     const fg = ansi.rgbColor(255, 255, 255, 255);
     const bg = ansi.rgbColor(0, 0, 0, 255);
-    const link_id = try owner.links.alloc("https://grapheme.invalid");
-    try owner.links.incref(link_id);
+    const link_id = try owner.links.acquire("https://grapheme.invalid");
     defer owner.links.decref(link_id) catch unreachable;
     const attributes = ansi.TextAttributes.setLinkId(0, link_id);
 
@@ -100,10 +99,10 @@ test "grapheme accounting - overlapping continuations remove only overwritten st
             .link_pool = &links,
         });
         defer target.deinit();
-        const first_id = try pool.alloc("\xf0\x9f\x98\x80");
-        const second_id = try pool.alloc("e\xcc\x81");
-        const old_link = try links.alloc("https://old.invalid");
-        const new_link = try links.alloc("https://new.invalid");
+        const first_id = try pool.acquire("\xf0\x9f\x98\x80");
+        const second_id = try pool.acquire("e\xcc\x81");
+        const old_link = try links.acquire("https://old.invalid");
+        const new_link = try links.acquire("https://new.invalid");
         var cell: buffer.Cell = .{
             .char = gp.packGraphemeStart(first_id, 2),
             .fg = ansi.rgbColor(255, 255, 255, 255),
@@ -120,6 +119,10 @@ test "grapheme accounting - overlapping continuations remove only overwritten st
         cell.char = gp.packGraphemeStart(first_id, 4);
         cell.attributes = ansi.TextAttributes.setLinkId(0, new_link);
         write(target, 0, 0, cell);
+        try pool.decref(first_id);
+        try pool.decref(second_id);
+        try links.decref(old_link);
+        try links.decref(new_link);
         try expectTrackedStarts(target);
         try std.testing.expectEqual(@as(u32, 2), target.grapheme_tracker.used_ids.get(first_id).?);
         try std.testing.expectEqual(@as(u32, 1), target.grapheme_tracker.used_ids.get(second_id).?);
@@ -172,11 +175,11 @@ test "grapheme accounting - right edge truncation removes each overwritten start
                 .link_pool = &links,
             });
             defer target.deinit();
-            const old_id = try pool.alloc("e\xcc\x81");
-            const truncated_id = try pool.alloc("\xf0\x9f\x98\x80");
-            defer pool.freeUnreferenced(truncated_id) catch unreachable;
-            const old_link = try links.alloc("https://old.invalid");
-            const new_link = try links.alloc("https://new.invalid");
+            const old_id = try pool.acquire("e\xcc\x81");
+            const truncated_id = try pool.acquire("\xf0\x9f\x98\x80");
+            defer pool.decref(truncated_id) catch unreachable;
+            const old_link = try links.acquire("https://old.invalid");
+            const new_link = try links.acquire("https://new.invalid");
             var cell: buffer.Cell = .{
                 .char = gp.packGraphemeStart(old_id, 1),
                 .fg = ansi.rgbColor(255, 255, 255, 255),
@@ -193,10 +196,13 @@ test "grapheme accounting - right edge truncation removes each overwritten start
             cell.char = gp.packGraphemeStart(truncated_id, 4);
             cell.attributes = ansi.TextAttributes.setLinkId(0, new_link);
             write(target, 5, 1, cell);
+            try pool.decref(old_id);
+            try links.decref(old_link);
+            try links.decref(new_link);
             try expectTrackedStarts(target);
             try std.testing.expectEqual(@as(u32, 1), target.grapheme_tracker.used_ids.get(old_id).?);
             try std.testing.expectEqual(@as(u32, 1), try pool.getRefcount(old_id));
-            try std.testing.expectEqual(@as(u32, 0), try pool.getRefcount(truncated_id));
+            try std.testing.expectEqual(@as(u32, 1), try pool.getRefcount(truncated_id));
             for (5..8) |x| {
                 const cleared = target.get(@intCast(x), 1).?;
                 try std.testing.expectEqual(buffer.DEFAULT_SPACE_CHAR, cleared.char);
@@ -231,10 +237,10 @@ test "grapheme accounting - ordinary overlapping sets compose without orphan tai
                         .link_pool = &links,
                     });
                     defer target.deinit();
-                    const old_id = try pool.alloc("\xf0\x9f\x98\x80");
-                    const new_id = if (same_glyph) old_id else try pool.alloc("\xf0\x9f\x94\xa5");
-                    const old_link = if (link_mode == .none) 0 else try links.alloc("https://old.invalid");
-                    const new_link = if (link_mode == .different) try links.alloc("https://new.invalid") else old_link;
+                    const old_id = try pool.acquire("\xf0\x9f\x98\x80");
+                    const new_id = if (same_glyph) old_id else try pool.acquire("\xf0\x9f\x94\xa5");
+                    const old_link = if (link_mode == .none) 0 else try links.acquire("https://old.invalid");
+                    const new_link = if (link_mode == .different) try links.acquire("https://new.invalid") else old_link;
                     var cell: buffer.Cell = .{
                         .char = gp.packGraphemeStart(old_id, 2),
                         .fg = ansi.rgbColor(255, 255, 255, 255),
@@ -247,6 +253,10 @@ test "grapheme accounting - ordinary overlapping sets compose without orphan tai
                     cell.char = gp.packGraphemeStart(new_id, 2);
                     cell.attributes = ansi.TextAttributes.setLinkId(0, new_link);
                     source.set(positions[1], 0, cell);
+                    try pool.decref(old_id);
+                    if (new_id != old_id) try pool.decref(new_id);
+                    if (old_link != 0) try links.decref(old_link);
+                    if (new_link != 0 and new_link != old_link) try links.decref(new_link);
                     try expectTrackedStarts(source);
                     try std.testing.expectEqual(@as(u32, 1), try pool.getRefcount(new_id));
                     if (!same_glyph) try std.testing.expectError(error.InvalidId, pool.getRefcount(old_id));
@@ -254,8 +264,7 @@ test "grapheme accounting - ordinary overlapping sets compose without orphan tai
                         try std.testing.expectEqual(@as(u32, 2), source.link_tracker.used_ids.get(new_link).?);
                         try std.testing.expectEqual(@as(u32, 1), source.link_tracker.getLinkCount());
                         try std.testing.expectEqual(@as(u32, 1), try links.getRefcount(new_link));
-                        const probe = try links.alloc("https://probe.invalid");
-                        try links.incref(probe);
+                        const probe = try links.acquire("https://probe.invalid");
                         defer links.decref(probe) catch unreachable;
                         try std.testing.expect(probe & link.SLOT_MASK != new_link & link.SLOT_MASK);
                         try std.testing.expectEqualStrings(

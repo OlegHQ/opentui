@@ -51,8 +51,8 @@ test "Context lease pins stale generations through renderer resize, destroy, and
     const renderer = try owner.createSession(.{});
     try owner.attachSessionRenderer(renderer, 2, 1, .{ .remote_mode = .remote });
     const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
-    const grapheme_id = try owner.graphemes.alloc("e\xcc\x81");
-    const link_id = try owner.links.alloc("https://lease.invalid");
+    const grapheme_id = try owner.graphemes.acquire("e\xcc\x81");
+    const link_id = try owner.links.acquire("https://lease.invalid");
     target.set(0, 0, .{
         .char = gp.packGraphemeStart(grapheme_id, 2),
         .fg = ansi.rgbColor(1, 2, 3, 255),
@@ -104,14 +104,14 @@ test "Context link retirement preserves all slots on destroy and final lease rel
         var alive = true;
         defer if (alive) owner.deinit() catch unreachable;
         owner.links.allocator = failing.allocator();
-        const first_id = try owner.links.alloc("https://retirement.invalid/first");
+        const first_id = try owner.links.acquire("https://retirement.invalid/first");
         const link_count: u32 = @intCast(owner.links.free_list.capacity + 1);
         const renderer = try owner.createSession(.{});
         try owner.attachSessionRenderer(renderer, link_count, 1, .{ .remote_mode = .remote });
         const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
         for (0..link_count) |index| {
             var url: [64]u8 = undefined;
-            const id = if (index == 0) first_id else try owner.links.alloc(
+            const id = if (index == 0) first_id else try owner.links.acquire(
                 try std.fmt.bufPrint(&url, "https://retirement.invalid/{d}", .{index}),
             );
             target.set(@intCast(index), 0, .{
@@ -120,6 +120,7 @@ test "Context link retirement preserves all slots on destroy and final lease rel
                 .bg = ansi.rgbColor(0, 0, 0, 255),
                 .attributes = ansi.TextAttributes.setLinkId(0, id),
             });
+            try owner.links.decref(id);
         }
         const num_slots = owner.links.num_slots;
         try std.testing.expect(num_slots > owner.links.slots_per_page);
@@ -155,8 +156,9 @@ test "Context link retirement preserves all slots on destroy and final lease rel
             defer recovered.deinit();
             for (0..num_slots) |index| {
                 var url: [64]u8 = undefined;
-                const id = try owner.links.alloc(try std.fmt.bufPrint(&url, "https://recovery.invalid/{d}", .{index}));
+                const id = try owner.links.acquire(try std.fmt.bufPrint(&url, "https://recovery.invalid/{d}", .{index}));
                 recovered.addCellRef(id);
+                try owner.links.decref(id);
             }
             try std.testing.expectEqual(num_slots, owner.links.num_slots);
             try std.testing.expectEqual(@as(u64, 0), owner.links.getFreeSlotCount());
@@ -302,10 +304,8 @@ test "Context lease accounts for future tracker growth before admitting storage"
     var links: [33]u32 = undefined;
     for (&ids, &links, 0..) |*id, *link, index| {
         var text: [32]u8 = undefined;
-        id.* = try owner.graphemes.alloc(try std.fmt.bufPrint(&text, "g{d}", .{index}));
-        try owner.graphemes.incref(id.*);
-        link.* = try owner.links.alloc(try std.fmt.bufPrint(&text, "https://lease.invalid/{d}", .{index}));
-        try owner.links.incref(link.*);
+        id.* = try owner.graphemes.acquire(try std.fmt.bufPrint(&text, "g{d}", .{index}));
+        link.* = try owner.links.acquire(try std.fmt.bufPrint(&text, "https://lease.invalid/{d}", .{index}));
     }
     defer for (ids) |id| owner.graphemes.decref(id) catch unreachable;
     defer for (links) |link| owner.links.decref(link) catch unreachable;

@@ -761,11 +761,9 @@ test "OptimizedBuffer drawTextBufferChecked returns errors at every drawing allo
             try text.setText("\u{3a9}\u{4e16}e\u{301}\tZ\u{3b1}\u{3b2}\u{3b3}\u{3b4}\u{3b5}\nlast");
             view.setViewport(.{ .x = 0, .y = 0, .width = 16, .height = 2 });
             _ = view.getVirtualLines();
-            const kept = try pool.alloc("\u{3a9}");
-            try pool.incref(kept);
+            const kept = try pool.acquire("\u{3a9}");
             defer pool.decref(kept) catch unreachable;
-            const kept_link = try links.alloc("https://kept.example");
-            try links.incref(kept_link);
+            const kept_link = try links.acquire("https://kept.example");
             defer links.decref(kept_link) catch unreachable;
             text.setDefaultAttributes(ansi.TextAttributes.setLinkId(1, kept_link));
             const old_allocator = text.allocator;
@@ -847,8 +845,7 @@ test "OptimizedBuffer drawTextBuffer transparent glyphs reclaim pending slots an
         text.setDefaultFg(ansi.rgbColor(200, 100, 50, 0));
         text.setDefaultBg(ansi.rgbColor(10, 20, 30, 0));
         view.setViewport(.{ .x = 0, .y = 0, .width = 4, .height = 1 });
-        const kept = try pool.alloc("\u{4e16}");
-        try pool.incref(kept);
+        const kept = try pool.acquire("\u{4e16}");
         defer pool.decref(kept) catch unreachable;
         for (0..400) |_| {
             if (checked) try target.drawTextBufferChecked(view, 0, 0) else target.drawTextBuffer(view, 0, 0);
@@ -872,8 +869,9 @@ test "OptimizedBuffer drawTextChecked validates all input before drawing and enf
     const fg = ansi.rgbColor(255, 128, 64, 255);
     const bg = ansi.rgbColor(1, 2, 3, 255);
     target.clear(bg, null);
-    const link_id = try links.alloc("https://kept.example");
+    const link_id = try links.acquire("https://kept.example");
     try target.drawText("\u{3a9}old", 0, 0, fg, bg, ansi.TextAttributes.setLinkId(1, link_id));
+    try links.decref(link_id);
     const old_id = gp.graphemeIdFromChar(target.buffer.char[0]);
     const chars = target.buffer.char[0..4].*;
     const foreground = target.buffer.fg[0..4].*;
@@ -935,8 +933,7 @@ test "OptimizedBuffer drawTextChecked copies input before its supplied pool grow
     const text = "e" ++ "\u{301}" ** 4 ++ "X";
     // The source and its first drawn cluster share the 16-byte class.
     try pool.classes[1].slots.ensureTotalCapacityPrecise(moving.allocator(), pool.classes[1].slot_size_bytes);
-    const source = try pool.alloc(text);
-    try pool.incref(source);
+    const source = try pool.acquire(text);
     defer pool.decref(source) catch unreachable;
     const target = try OptimizedBuffer.init(std.testing.allocator, 2, 1, .{ .pool = &pool, .link_pool = &links });
     defer target.deinit();
@@ -2236,11 +2233,11 @@ test "OptimizedBuffer - set should not clear newly written adjacent grapheme con
     const fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
     buf.clear(bg, null);
 
-    const old_gid = try local_pool.alloc("🌟");
+    const old_gid = try local_pool.acquire("🌟");
     const old_start = gp.packGraphemeStart(old_gid & gp.GRAPHEME_ID_MASK, 2);
     buf.set(3, 0, .{ .char = old_start, .fg = fg, .bg = bg, .attributes = 0 });
 
-    const new_gid = try local_pool.alloc("🔥");
+    const new_gid = try local_pool.acquire("🔥");
     const new_start = gp.packGraphemeStart(new_gid & gp.GRAPHEME_ID_MASK, 2);
 
     // Simulate renderer's left-to-right in-place update:
@@ -2283,10 +2280,10 @@ test "OptimizedBuffer - set span cleanup keeps shared link refcounts consistent"
     const fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
     buf.clear(bg, null);
 
-    const link_id = try local_link_pool.alloc("https://example.com");
+    const link_id = try local_link_pool.acquire("https://example.com");
     const linked_attr = ansi.TextAttributes.setLinkId(0, link_id);
 
-    const gid = try local_pool.alloc("你");
+    const gid = try local_pool.acquire("你");
     const start = gp.packGraphemeStart(gid & gp.GRAPHEME_ID_MASK, 2);
 
     // Create three linked cells total:
@@ -2294,6 +2291,8 @@ test "OptimizedBuffer - set span cleanup keeps shared link refcounts consistent"
     // - one additional linked cell at x=6
     buf.set(2, 0, .{ .char = start, .fg = fg, .bg = bg, .attributes = linked_attr });
     buf.set(6, 0, .{ .char = 'X', .fg = fg, .bg = bg, .attributes = linked_attr });
+    try local_link_pool.decref(link_id);
+    try local_pool.decref(gid);
 
     try std.testing.expectEqual(@as(u32, 3), buf.link_tracker.used_ids.get(link_id).?);
     try std.testing.expectEqual(@as(u32, 1), try local_link_pool.getRefcount(link_id));
@@ -2327,8 +2326,8 @@ test "OptimizedBuffer - syncCell updates grapheme tracker for start transitions"
     const fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
     buf.clear(bg, null);
 
-    const gid_old = try local_pool.alloc("你");
-    const gid_new = try local_pool.alloc("好");
+    const gid_old = try local_pool.acquire("你");
+    const gid_new = try local_pool.acquire("好");
     const old_id = gid_old & gp.GRAPHEME_ID_MASK;
     const new_id = gid_new & gp.GRAPHEME_ID_MASK;
     const start_old = gp.packGraphemeStart(old_id, 2);
@@ -2696,7 +2695,7 @@ test "OptimizedBuffer - link encoding round-trip" {
     buf.clear(bg, null);
 
     // Allocate a link
-    const link_id = try local_link_pool.alloc("https://example.com");
+    const link_id = try local_link_pool.acquire("https://example.com");
     const attributes = ansi.TextAttributes.setLinkId(ansi.TextAttributes.BOLD, link_id);
 
     // Draw text with link
@@ -2732,11 +2731,12 @@ test "OptimizedBuffer - link tracker per-cell counting" {
     buf.clear(bg, null);
 
     // Allocate a link
-    const link_id = try local_link_pool.alloc("https://example.com");
+    const link_id = try local_link_pool.acquire("https://example.com");
     const attributes = ansi.TextAttributes.setLinkId(0, link_id);
 
     // Draw text covering 3 cells
     try buf.drawText("ABC", 0, 0, fg, bg, attributes);
+    try local_link_pool.decref(link_id);
 
     // Verify link tracker has 1 unique link
     // Pool refcount is 1 (tracker owns one ref, tracks 3 cells internally)
@@ -2781,7 +2781,7 @@ test "OptimizedBuffer - fillRect removes links" {
     buf.clear(bg, null);
 
     // Allocate a link
-    const link_id = try local_link_pool.alloc("https://example.com");
+    const link_id = try local_link_pool.acquire("https://example.com");
     const attributes = ansi.TextAttributes.setLinkId(0, link_id);
 
     // Draw linked text
@@ -3012,7 +3012,7 @@ test "OptimizedBuffer - link reuse after free" {
     const fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
 
     // Allocate first link
-    const link_id1 = try local_link_pool.alloc("https://first.com");
+    const link_id1 = try local_link_pool.acquire("https://first.com");
     const attr1 = ansi.TextAttributes.setLinkId(0, link_id1);
     try buf.drawText("A", 0, 0, fg, bg, attr1);
 
@@ -3020,7 +3020,7 @@ test "OptimizedBuffer - link reuse after free" {
     buf.clear(bg, null);
 
     // Allocate second link - should reuse same slot but different generation
-    const link_id2 = try local_link_pool.alloc("https://second.com");
+    const link_id2 = try local_link_pool.acquire("https://second.com");
     try std.testing.expect(link_id1 != link_id2); // Different due to generation
 
     const attr2 = ansi.TextAttributes.setLinkId(0, link_id2);
@@ -3050,7 +3050,7 @@ test "OptimizedBuffer - alpha blending preserves overlay link not dest link" {
     buf.clear(bg_opaque, null);
 
     // Draw underlying text with link A
-    const link_id_a = try local_link_pool.alloc("https://underlying.com");
+    const link_id_a = try local_link_pool.acquire("https://underlying.com");
     const attr_a = ansi.TextAttributes.setLinkId(ansi.TextAttributes.BOLD, link_id_a);
     try buf.drawText("X", 5, 0, fg, bg_opaque, attr_a);
 
@@ -3060,7 +3060,7 @@ test "OptimizedBuffer - alpha blending preserves overlay link not dest link" {
     try std.testing.expectEqual(@as(u32, 'X'), dest_cell.char);
 
     // Draw space with alpha and link B over it (will preserve 'X' but blend colors)
-    const link_id_b = try local_link_pool.alloc("https://overlay.com");
+    const link_id_b = try local_link_pool.acquire("https://overlay.com");
     const attr_b = ansi.TextAttributes.setLinkId(0, link_id_b);
     try buf.drawText(" ", 5, 0, fg, bg_alpha, attr_b);
 
@@ -3091,7 +3091,7 @@ test "OptimizedBuffer - alpha blending with no link clears underlying link" {
     buf.clear(bg_opaque, null);
 
     // Draw underlying text with link
-    const link_id = try local_link_pool.alloc("https://underlying.com");
+    const link_id = try local_link_pool.acquire("https://underlying.com");
     const attr_link = ansi.TextAttributes.setLinkId(ansi.TextAttributes.BOLD, link_id);
     try buf.drawText("X", 5, 0, fg, bg_opaque, attr_link);
 
@@ -3744,9 +3744,11 @@ test "buffer - set same grapheme ID with different extents keeps slot alive" {
 
     const emoji = "👋";
 
-    const gid = local_pool.alloc(emoji) catch @panic("alloc failed");
+    const gid = local_pool.acquire(emoji) catch @panic("alloc failed");
     const packed_w2 = gp.packGraphemeStart(gid & gp.GRAPHEME_ID_MASK, 2);
     buf.set(0, 0, .{ .char = packed_w2, .fg = fg, .bg = bg, .attributes = 0 });
+    try local_pool.decref(gid);
+    try std.testing.expectEqual(@as(u32, 1), try local_pool.getRefcount(gid));
 
     const id_from_char = gp.graphemeIdFromChar(packed_w2);
     try std.testing.expect(buf.grapheme_tracker.contains(id_from_char));
@@ -3759,6 +3761,9 @@ test "buffer - set same grapheme ID with different extents keeps slot alive" {
 
     const bytes = local_pool.get(gid) catch @panic("get failed - slot was freed");
     try std.testing.expectEqualSlices(u8, emoji, bytes);
+    try std.testing.expectEqual(@as(u32, 1), try local_pool.getRefcount(gid));
+    buf.clear(bg, null);
+    try std.testing.expectError(error.InvalidId, local_pool.get(gid));
 }
 
 // Exercises grapheme pool slot reuse across multiple render frames with
@@ -4094,8 +4099,9 @@ test "OptimizedBuffer drawTextChecked preserves cells and references at every al
             const bg = ansi.rgbColor(20, 40, 60, 255);
             target.clear(bg, null);
             if (case.width == 512) try target.pushScissorRect(0, 0, case.visible_columns, 1);
-            const link_id = try links.alloc("https://kept.example");
+            const link_id = try links.acquire("https://kept.example");
             try target.drawText("\u{3a9}old", 0, 0, fg, bg, ansi.TextAttributes.setLinkId(1, link_id));
+            try links.decref(link_id);
             const old_id = gp.graphemeIdFromChar(target.buffer.char[0]);
             const chars = try std.testing.allocator.dupe(u32, target.buffer.char);
             defer std.testing.allocator.free(chars);

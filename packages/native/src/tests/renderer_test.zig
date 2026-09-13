@@ -579,7 +579,7 @@ test "renderer preserves terminal semantics when replaying cells over Sixel" {
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
     const image_handle: u32 = 1;
-    const link_id = try link_pool.alloc("https://example.com/replayed");
+    const link_id = try link_pool.acquire("https://example.com/replayed");
     const linked_bold = ansi.TextAttributes.setLinkId(ansi.TextAttributes.BOLD, link_id);
 
     const next = test_renderer.renderer.getNextBuffer();
@@ -1428,8 +1428,8 @@ test "renderer - resize allocation failures preserve both buffers and hit grids"
                 .link_pool = &links,
             });
             defer target.destroy();
-            const grapheme_id = try pool.alloc("\xf0\x9f\x98\x80");
-            const link_id = try links.alloc("https://resize.invalid");
+            const grapheme_id = try pool.acquire("\xf0\x9f\x98\x80");
+            const link_id = try links.acquire("https://resize.invalid");
             const cell: buffer.Cell = .{
                 .char = gp.packGraphemeStart(grapheme_id, 2),
                 .fg = ansi.rgbColor(1, 2, 3, 255),
@@ -1438,6 +1438,8 @@ test "renderer - resize allocation failures preserve both buffers and hit grids"
             };
             target.currentRenderBuffer.set(0, 0, cell);
             target.nextRenderBuffer.set(0, 0, cell);
+            try pool.decref(grapheme_id);
+            try links.decref(link_id);
             target.currentHitGrid[3] = 42;
             target.nextHitGrid[3] = 43;
             target.terminal.setCursorPosition(2, 2, true);
@@ -1905,7 +1907,7 @@ test "renderer - hyperlinks enabled with OSC 8 output" {
     cli_renderer.terminal.caps.hyperlinks = true;
 
     // Allocate a link
-    const link_id = try local_link_pool.alloc("https://example.com");
+    const link_id = try local_link_pool.acquire("https://example.com");
     const attributes = ansi.TextAttributes.setLinkId(ansi.TextAttributes.BOLD, link_id);
 
     const next_buffer = cli_renderer.getNextBuffer();
@@ -1953,7 +1955,7 @@ test "renderer - hyperlinks disabled no OSC 8 output" {
     cli_renderer.terminal.caps.hyperlinks = false;
 
     // Allocate a link
-    const link_id = try local_link_pool.alloc("https://example.com");
+    const link_id = try local_link_pool.acquire("https://example.com");
     const attributes = ansi.TextAttributes.setLinkId(0, link_id);
 
     const next_buffer = cli_renderer.getNextBuffer();
@@ -1992,8 +1994,8 @@ test "renderer - link transition mid-line" {
     const next_buffer = cli_renderer.getNextBuffer();
 
     // Allocate two different links
-    const link_id1 = try local_link_pool.alloc("https://first.com");
-    const link_id2 = try local_link_pool.alloc("https://second.com");
+    const link_id1 = try local_link_pool.acquire("https://first.com");
+    const link_id2 = try local_link_pool.acquire("https://second.com");
 
     const attr1 = ansi.TextAttributes.setLinkId(0, link_id1);
     const attr2 = ansi.TextAttributes.setLinkId(0, link_id2);
@@ -2049,7 +2051,7 @@ test "renderer - hyperlink spanning multiple rows uses same id" {
     const next_buffer = cli_renderer.getNextBuffer();
 
     // Allocate a single link
-    const link_id = try link_pool.alloc("https://example.com/long-url");
+    const link_id = try link_pool.acquire("https://example.com/long-url");
     const attributes = ansi.TextAttributes.setLinkId(0, link_id);
 
     const fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
@@ -3183,8 +3185,8 @@ test "renderer - commitSplitFooterSnapshot appends styled snapshot with snapshot
     cli_renderer.terminal.caps.ansi256 = true;
     cli_renderer.terminal.caps.hyperlinks = true;
 
-    const renderer_link_id = try renderer_links.alloc("https://renderer.invalid");
-    const snapshot_link_id = try snapshot_links.alloc("https://snapshot.example");
+    const renderer_link_id = try renderer_links.acquire("https://renderer.invalid");
+    const snapshot_link_id = try snapshot_links.acquire("https://snapshot.example");
     try std.testing.expectEqual(renderer_link_id, snapshot_link_id);
 
     _ = cli_renderer.resetSplitScrollback(2, 2);

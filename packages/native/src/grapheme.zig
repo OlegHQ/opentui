@@ -6,6 +6,7 @@ pub const GraphemePoolError = error{
     GraphemeTooLong,
     InvalidId,
     WrongGeneration,
+    RefcountOverflow,
 };
 
 // Encoding flags for char buffer entries (u32)
@@ -95,7 +96,7 @@ pub const GraphemePool = struct {
         len: u16,
         refcount: u32,
         generation: u32,
-        is_allocated: u32, // 0 = free slot, 1 = pending or referenced slot.
+        is_allocated: u32, // 0 = free slot, 1 = pending during acquire or live.
     };
 
     pub fn init(allocator: std.mem.Allocator) GraphemePool {
@@ -214,35 +215,44 @@ pub const GraphemePool = struct {
         return id;
     }
 
-    pub fn alloc(self: *GraphemePool, bytes: []const u8) GraphemePoolError!IdPayload {
+    /// Return one owned live reference. Failed acquisition leaves no stranded
+    /// slot or interned identity. Internal pages may remain allocated.
+    pub fn acquire(self: *GraphemePool, bytes: []const u8) GraphemePoolError!IdPayload {
         if (bytes.len > CLASS_SIZES[CLASS_SIZES.len - 1]) return GraphemePoolError.GraphemeTooLong;
-        assert(bytes.len <= CLASS_SIZES[CLASS_SIZES.len - 1]);
         if (self.lookupOrInvalidate(bytes)) |live_id| {
+            try self.incref(live_id);
             return live_id;
         }
+        return self.acquireNew(bytes);
+    }
 
-        const class_id: u32 = classForSize(bytes.len);
-        const slot_index = try self.classes[class_id].allocInternal(bytes);
+    fn acquireNew(self: *GraphemePool, bytes: []const u8) GraphemePoolError!IdPayload {
+        var copy: [CLASS_SIZES[CLASS_SIZES.len - 1]]u8 = undefined;
+        @memcpy(copy[0..bytes.len], bytes);
+        const owned = copy[0..bytes.len];
+
+        const class_id: u32 = classForSize(owned.len);
+        const slot_index = try self.classes[class_id].allocInternal(owned);
         const generation = self.classes[class_id].getGeneration(slot_index);
+        errdefer self.classes[class_id].rollbackPending(slot_index, generation);
+
         const id = try packId(class_id, slot_index, generation);
-        assert((try self.getRefcount(id)) == 0);
+        try self.internLiveId(id, owned);
+        errdefer self.removeInternedLiveId(owned, id);
+
+        try self.classes[class_id].incref(slot_index, generation);
+        assert((try self.getRefcount(id)) == 1);
         return id;
     }
 
+    /// Retain an already-live ID. First-use interning stays inside acquire.
     pub fn incref(self: *GraphemePool, id: IdPayload) GraphemePoolError!void {
         const class_id: u32 = (id >> (GENERATION_BITS + SLOT_BITS)) & CLASS_MASK;
         if (class_id >= MAX_CLASSES) return GraphemePoolError.InvalidId;
         const slot_index: u32 = id & SLOT_MASK;
         const generation: u32 = (id >> SLOT_BITS) & GENERATION_MASK;
         const old_refcount = try self.classes[class_id].getRefcount(slot_index, generation);
-
-        if (old_refcount == 0) {
-            // Intern before publishing the first live reference so OOM does
-            // not leave the caller holding an unreported reference.
-            const bytes = try self.classes[class_id].get(slot_index, generation);
-            try self.internLiveId(id, bytes);
-        }
-
+        if (old_refcount == 0) return GraphemePoolError.InvalidId;
         try self.classes[class_id].incref(slot_index, generation);
         assert(
             (try self.classes[class_id].getRefcount(slot_index, generation)) ==
@@ -276,21 +286,6 @@ pub const GraphemePool = struct {
                 assert(err == GraphemePoolError.InvalidId);
             }
         }
-    }
-
-    /// Free a freshly allocated slot that was never incref'd (refcount=0).
-    /// Use this for cleanup when allocation succeeded but the slot was never used.
-    /// This prevents slot leaks when an error occurs between alloc and incref.
-    pub fn freeUnreferenced(self: *GraphemePool, id: IdPayload) GraphemePoolError!void {
-        const class_id: u32 = (id >> (GENERATION_BITS + SLOT_BITS)) & CLASS_MASK;
-        if (class_id >= MAX_CLASSES) return GraphemePoolError.InvalidId;
-        const slot_index: u32 = id & SLOT_MASK;
-        const generation: u32 = (id >> SLOT_BITS) & GENERATION_MASK;
-
-        const bytes = try self.classes[class_id].get(slot_index, generation);
-        self.removeInternedLiveId(bytes, id);
-
-        try self.classes[class_id].freeUnreferenced(slot_index, generation);
     }
 
     pub fn get(self: *GraphemePool, id: IdPayload) GraphemePoolError![]const u8 {
@@ -460,8 +455,8 @@ pub const GraphemePool = struct {
                 return GraphemePoolError.WrongGeneration;
             }
             if (header_ptr.is_allocated != 1) return GraphemePoolError.InvalidId;
-            assert(header_ptr.refcount < std.math.maxInt(u32));
-            header_ptr.refcount +%= 1;
+            if (header_ptr.refcount == std.math.maxInt(u32)) return GraphemePoolError.RefcountOverflow;
+            header_ptr.refcount += 1;
             assert(header_ptr.refcount > 0);
         }
 
@@ -493,23 +488,13 @@ pub const GraphemePool = struct {
             self.assertInvariants();
         }
 
-        /// Free a slot that has refcount=0 (freshly allocated, never incref'd).
-        /// This is used for cleanup when allocation succeeded but the caller
-        /// needs to abort before taking ownership via incref.
-        pub fn freeUnreferenced(
-            self: *ClassPool,
-            slot_index: u32,
-            expected_generation: u32,
-        ) GraphemePoolError!void {
-            if (slot_index >= self.num_slots) return GraphemePoolError.InvalidId;
+        fn rollbackPending(self: *ClassPool, slot_index: u32, expected_generation: u32) void {
+            assert(slot_index < self.num_slots);
             const p = self.slotPtr(slot_index);
             const header_ptr = slotHeaderPtr(p);
-
-            if (header_ptr.generation != expected_generation) {
-                return GraphemePoolError.WrongGeneration;
-            }
-            if (header_ptr.is_allocated != 1) return GraphemePoolError.InvalidId;
-            if (header_ptr.refcount != 0) return GraphemePoolError.InvalidId; // Not unreferenced
+            assert(header_ptr.generation == expected_generation);
+            assert(header_ptr.is_allocated == 1);
+            assert(header_ptr.refcount == 0);
 
             header_ptr.is_allocated = 0;
             const free_slots_before = self.free_list.items.len;
