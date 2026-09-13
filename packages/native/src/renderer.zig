@@ -356,15 +356,15 @@ pub const CliRenderer = struct {
         remote_mode: Terminal.RemoteMode = .local,
         output: OutputTarget = .stdout,
         clearOnShutdown: bool = true,
-        // Borrowed: when provided, both frame buffers share this caller-owned pool.
-        link_pool: ?*link.LinkPool = null,
+        // Borrowed: both frame buffers share this caller-owned pool.
+        link_pool: *link.LinkPool,
         // Optional override for terminal environment lookups. Borrowed: the
         // caller owns the map and must keep it alive for the renderer's lifetime.
         env_map: ?*const std.process.Environ.Map = null,
     };
 
-    pub fn create(allocator: Allocator, width: u32, height: u32, pool: *gp.GraphemePool) !*CliRenderer {
-        return createWithOptions(allocator, width, height, pool, .{});
+    pub fn create(allocator: Allocator, width: u32, height: u32, pool: *gp.GraphemePool, link_pool: *link.LinkPool) !*CliRenderer {
+        return createWithOptions(allocator, width, height, pool, .{ .link_pool = link_pool });
     }
 
     pub fn createWithOptions(

@@ -849,34 +849,6 @@ test "GraphemeTracker - stress test many graphemes" {
     }
 }
 
-test "GraphemePool - global pool init and deinit" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-
-    const text = "test";
-    const id = try pool.acquire(text);
-
-    const retrieved = try pool.get(id);
-    try std.testing.expectEqualSlices(u8, text, retrieved);
-
-    try pool.decref(id);
-}
-
-test "GraphemePool - global pool reinitialization returns same instance" {
-    const pool1 = gp.initGlobalPool(std.testing.allocator);
-    const pool2 = gp.initGlobalPool(std.testing.allocator);
-
-    try std.testing.expectEqual(pool1, pool2);
-
-    gp.deinitGlobalPool();
-}
-
-test "GraphemePool - global unicode data init" {
-
-    // Pointers should not be null (just verify they're returned)
-    // We can't easily test their validity without using them
-}
-
 test "GraphemePool - alloc copies input into pool storage" {
     var pool = GraphemePool.init(std.testing.allocator);
     defer pool.deinit();

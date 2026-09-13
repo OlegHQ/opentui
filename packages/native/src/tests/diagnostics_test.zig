@@ -302,6 +302,7 @@ test "Context diagnostics capture renderer and buffer failures without invoking 
     view.setViewportSize(2, 1);
     value.getNextBuffer().drawTextBuffer(view, 0, 0);
     try std.testing.expectError(error.InvalidDimensions, buffer.OptimizedBuffer.init(std.testing.allocator, 0, 1, .{
+        .link_pool = &owner.links,
         .pool = &owner.graphemes,
         .logger = &owner.logger,
     }));
@@ -315,6 +316,7 @@ test "Context diagnostics capture renderer and buffer failures without invoking 
     try std.testing.expectEqualStrings("OptimizedBuffer.init: Invalid dimensions 0x1", events[2].message[0..events[2].message_len]);
     try std.testing.expectEqual(@as(u32, 0), LegacyProbe.calls.load(.monotonic));
     try std.testing.expectError(error.InvalidDimensions, buffer.OptimizedBuffer.init(std.testing.allocator, 0, 1, .{
+        .link_pool = &owner.links,
         .pool = &owner.graphemes,
     }));
     try std.testing.expectEqual(@as(u32, 1), LegacyProbe.calls.load(.monotonic));

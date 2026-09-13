@@ -1,4 +1,5 @@
 const std = @import("std");
+const TestPools = @import("test-pools.zig").TestPools;
 const io = std.testing.io;
 const renderer = @import("../renderer.zig");
 const text_buffer = @import("../text-buffer.zig");
@@ -20,6 +21,88 @@ const OptimizedBuffer = buffer.OptimizedBuffer;
 const RGBA = text_buffer.RGBA;
 const TestMemoryOutput = test_renderer_mod.TestMemoryOutput;
 const TestRenderer = test_renderer_mod.TestRenderer;
+
+test "standalone renderer pools survive either owner teardown order" {
+    const allocator = std.testing.allocator;
+    const glyphs = [_][]const u8{ "e\xcc\x81", "o\xcc\x82" };
+    const urls = [_][]const u8{ "https://first.invalid", "https://second.invalid" };
+    for (0..2) |first| {
+        var pools = [_]gp.GraphemePool{ gp.GraphemePool.init(allocator), gp.GraphemePool.init(allocator) };
+        var links = [_]link.LinkPool{ link.LinkPool.init(allocator), link.LinkPool.init(allocator) };
+        var alive = [_]bool{ true, true };
+        var renderers: [2]?TestRenderer = .{ null, null };
+        defer for (0..2) |i| {
+            if (renderers[i]) |*value| value.deinit();
+            if (alive[i]) {
+                links[i].deinit();
+                pools[i].deinit();
+            }
+        };
+
+        var ids: [2]u32 = undefined;
+        for (0..2) |i| {
+            renderers[i] = try TestRenderer.create(allocator, 4, 1, &pools[i], &links[i]);
+            const target = renderers[i].?.renderer;
+            target.terminal.caps.hyperlinks = true;
+            ids[i] = try links[i].acquire(urls[i]);
+            defer links[i].decref(ids[i]) catch unreachable;
+            try target.getNextBuffer().drawText(glyphs[i], 0, 0, ansi.rgbColor(255, 255, 255, 255), null, ansi.TextAttributes.setLinkId(0, ids[i]));
+            try std.testing.expectEqual(renderer.RenderStatus.rendered, target.render(true));
+            try std.testing.expect(std.mem.find(u8, renderers[i].?.lastOutput(), glyphs[i]) != null);
+            try std.testing.expect(std.mem.find(u8, renderers[i].?.lastOutput(), urls[i]) != null);
+        }
+        try std.testing.expectEqual(ids[0], ids[1]);
+        renderers[first].?.deinit();
+        renderers[first] = null;
+        try std.testing.expectEqual(@as(u32, 0), pools[first].interned_live_ids.count());
+        try std.testing.expectEqual(@as(u32, 0), links[first].interned_live_ids.count());
+        links[first].deinit();
+        pools[first].deinit();
+        alive[first] = false;
+
+        const remaining = 1 - first;
+        const target = renderers[remaining].?.renderer;
+        try std.testing.expectEqualStrings(urls[remaining], try links[remaining].get(ids[remaining]));
+        try target.getNextBuffer().drawText(glyphs[remaining], 1, 0, ansi.rgbColor(255, 255, 255, 255), null, ansi.TextAttributes.setLinkId(0, ids[remaining]));
+        try std.testing.expectEqual(renderer.RenderStatus.rendered, target.render(true));
+        try std.testing.expect(std.mem.find(u8, renderers[remaining].?.lastOutput(), glyphs[remaining]) != null);
+        try std.testing.expect(std.mem.find(u8, renderers[remaining].?.lastOutput(), urls[remaining]) != null);
+        renderers[remaining].?.deinit();
+        renderers[remaining] = null;
+        try std.testing.expectEqual(@as(u32, 0), pools[remaining].interned_live_ids.count());
+        try std.testing.expectEqual(@as(u32, 0), links[remaining].interned_live_ids.count());
+    }
+}
+
+test "standalone renderer construction failures preserve borrowed pools" {
+    const Probe = struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            var pool = gp.GraphemePool.init(std.testing.allocator);
+            defer pool.deinit();
+            var links = link.LinkPool.init(std.testing.allocator);
+            defer links.deinit();
+            const glyph_id = try pool.acquire("e\xcc\x81");
+            defer pool.decref(glyph_id) catch unreachable;
+            const link_id = try links.acquire("https://survivor.invalid");
+            defer links.decref(link_id) catch unreachable;
+            var env = std.process.Environ.Map.init(std.testing.allocator);
+            defer env.deinit();
+            const result = CliRenderer.createWithOptions(allocator, 4, 1, &pool, .{
+                .link_pool = &links,
+                .output = .memory,
+                .env_map = &env,
+                .clearOnShutdown = false,
+            });
+            if (result) |value| value.destroy() else |_| {}
+            try std.testing.expectEqual(@as(u32, 1), try pool.getRefcount(glyph_id));
+            try std.testing.expectEqual(@as(u32, 1), try links.getRefcount(link_id));
+            try std.testing.expectEqualStrings("e\xcc\x81", try pool.get(glyph_id));
+            try std.testing.expectEqualStrings("https://survivor.invalid", try links.get(link_id));
+            _ = try result;
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Probe.run, .{});
+}
 
 const DiscardTerminalWriter = struct {
     pub fn writeAll(_: *DiscardTerminalWriter, _: []const u8) !void {}
@@ -89,10 +172,10 @@ const SlowThreadSafeOutput = struct {
     }
 };
 test "renderer emits Kitty image once and leaves unchanged frame empty" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -124,10 +207,10 @@ test "renderer emits Kitty image once and leaves unchanged frame empty" {
 }
 
 test "renderer emits Sixel only with known pixel dimensions" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -156,12 +239,12 @@ test "renderer emits Sixel only with known pixel dimensions" {
 }
 
 test "renderer separates translucent Sixel cache entries by cell geometry" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var cached_renderer = try TestRenderer.create(std.testing.allocator, 2, 4, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var cached_renderer = try TestRenderer.create(std.testing.allocator, 2, 4, &pools.graphemes, &pools.links);
     defer cached_renderer.deinit();
-    var fresh_renderer = try TestRenderer.create(std.testing.allocator, 2, 4, pool);
+    var fresh_renderer = try TestRenderer.create(std.testing.allocator, 2, 4, &pools.graphemes, &pools.links);
     defer fresh_renderer.deinit();
     const pixels = [_]u8{ 255, 255, 255, 255 } ** 16;
     const value = try image.createFromRgba(std.testing.allocator, &pixels, 4, 4, 16);
@@ -188,10 +271,10 @@ test "renderer separates translucent Sixel cache entries by cell geometry" {
 }
 
 test "renderer does not copy identity Sixel geometry" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
 
     var source_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{});
@@ -212,10 +295,10 @@ test "renderer does not copy identity Sixel geometry" {
 }
 
 test "renderer repaints unchanged upper Sixel after an overlapping lower image changes" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
 
     const red = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
@@ -246,10 +329,10 @@ test "renderer repaints unchanged upper Sixel after an overlapping lower image c
 }
 
 test "renderer repaints overlapping Sixel images when their order changes" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
 
     const red = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
@@ -277,10 +360,10 @@ test "renderer repaints overlapping Sixel images when their order changes" {
 }
 
 test "renderer propagates Sixel repaint through an overlap chain" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 6, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 6, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.sixel = true;
 
@@ -315,10 +398,10 @@ test "renderer propagates Sixel repaint through an overlap chain" {
 }
 
 test "renderer repaints lower Sixel after removing an overlapping upper image" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
 
     const red = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
@@ -345,10 +428,10 @@ test "renderer repaints lower Sixel after removing an overlapping upper image" {
 }
 
 test "renderer repaints lower Sixel when an overlapping upper image becomes transparent" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
 
     const red = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
@@ -379,10 +462,10 @@ test "renderer repaints lower Sixel when an overlapping upper image becomes tran
 }
 
 test "renderer honors per-placement protocol overrides" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -399,10 +482,10 @@ test "renderer honors per-placement protocol overrides" {
 }
 
 test "renderer does not send forced Sixel to Apple Terminal" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 4, 2, pool, &.{
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links, &.{
         .{ .key = "TERM_PROGRAM", .value = "Apple_Terminal" },
     });
     defer test_renderer.deinit();
@@ -418,10 +501,10 @@ test "renderer does not send forced Sixel to Apple Terminal" {
 }
 
 test "renderer does not send forced Sixel through tmux XTVERSION" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 4, 2, pool, &.{
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links, &.{
         .{ .key = "TERM_PROGRAM", .value = "Apple_Terminal" },
     });
     defer test_renderer.deinit();
@@ -439,10 +522,10 @@ test "renderer does not send forced Sixel through tmux XTVERSION" {
 }
 
 test "renderer does not send forced Sixel to Kitty" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -457,10 +540,10 @@ test "renderer does not send forced Sixel to Kitty" {
 }
 
 test "renderer honors global image protocol override for auto placements" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -472,10 +555,10 @@ test "renderer honors global image protocol override for auto placements" {
 }
 
 test "renderer keeps unresolved Sixel fallback frames as no-ops" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -492,10 +575,10 @@ test "renderer keeps unresolved Sixel fallback frames as no-ops" {
 }
 
 test "renderer repaints a final blocks placement over Sixel" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -510,10 +593,10 @@ test "renderer repaints a final blocks placement over Sixel" {
 }
 
 test "renderer does not retransmit Sixel when overlay text changes" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -546,10 +629,10 @@ test "renderer does not retransmit Sixel when overlay text changes" {
 }
 
 test "renderer replays a wide grapheme that starts before a Sixel placement" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -567,11 +650,10 @@ test "renderer replays a wide grapheme that starts before a Sixel placement" {
 }
 
 test "renderer preserves terminal semantics when replaying cells over Sixel" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    const link_pool = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 3, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 3, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.sixel = true;
     test_renderer.renderer.terminal.caps.hyperlinks = true;
@@ -579,7 +661,7 @@ test "renderer preserves terminal semantics when replaying cells over Sixel" {
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
     const image_handle: u32 = 1;
-    const link_id = try link_pool.acquire("https://example.com/replayed");
+    const link_id = try pools.links.acquire("https://example.com/replayed");
     const linked_bold = ansi.TextAttributes.setLinkId(ansi.TextAttributes.BOLD, link_id);
 
     const next = test_renderer.renderer.getNextBuffer();
@@ -599,10 +681,10 @@ test "renderer preserves terminal semantics when replaying cells over Sixel" {
 }
 
 test "renderer preserves Malayalam report after Ghostty probe replies" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 80, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 80, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     try std.testing.expect(test_renderer.renderer.setTerminalEnvVar("TERM_PROGRAM", "ghostty"));
     try std.testing.expect(test_renderer.renderer.setTerminalEnvVar("TERM_PROGRAM_VERSION", "1.3.1"));
@@ -651,10 +733,10 @@ test "renderer preserves Malayalam report after Ghostty probe replies" {
 }
 
 test "renderer preserves wide grapheme when continuation and next cell colors match" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 6, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 6, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     try std.testing.expect(test_renderer.renderer.setTerminalEnvVar("TERM_PROGRAM", "ghostty"));
     try std.testing.expect(test_renderer.renderer.setTerminalEnvVar("TERM_PROGRAM_VERSION", "1.3.1"));
@@ -697,10 +779,10 @@ test "renderer preserves wide grapheme when continuation and next cell colors ma
 }
 
 fn expectPlaneCoversImage(protocol: image.RenderProtocol) !void {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -747,10 +829,10 @@ test "renderer keeps Kitty placement under an alpha-colored plane" {
 }
 
 test "renderer splits changed background runs around clean Kitty image cells" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 5, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 5, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -782,10 +864,10 @@ test "renderer redraws blocks after removing an alpha-colored plane" {
 }
 
 test "renderer clears old Sixel pixels when replacing an image" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const opaque_image = try image.createFromRgba(std.testing.allocator, &[_]u8{
         255, 0, 0, 255, 255, 0, 0, 255,
@@ -887,10 +969,10 @@ fn expectSinglePaintedSixelColor(output: []const u8, r: [2]u8, g: [2]u8, b: [2]u
 }
 
 test "renderer dims sixel placements by opacity instead of hiding them" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const red = try image.createFromRgba(std.testing.allocator, &[_]u8{
         255, 0, 0, 255, 255, 0, 0, 255,
@@ -937,10 +1019,10 @@ test "renderer dims sixel placements by opacity instead of hiding them" {
 }
 
 test "renderer materializes lazy ICC PNGs before applying Sixel opacity" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
 
     const encoded = std.mem.trim(u8, @embedFile("fixtures/display-p3.png.base64"), "\r\n");
@@ -964,10 +1046,10 @@ test "renderer materializes lazy ICC PNGs before applying Sixel opacity" {
 }
 
 test "renderer keeps image alpha holes transparent while dimming by opacity" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     // Left pixel opaque red, right pixel fully transparent.
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{
@@ -1014,14 +1096,14 @@ test "buffered backend grows and commits a complete large frame" {
 }
 
 fn createWithOptionsOnce(allocator: std.mem.Allocator, width: u32, height: u32) !void {
-    const pool = gp.initGlobalPool(allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(allocator);
+    defer pools.deinit();
 
     var memory = TestMemoryOutput.init(allocator);
     defer memory.deinit();
 
-    var cli_renderer = try CliRenderer.createWithOptions(allocator, width, height, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(allocator, width, height, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .output = .{ .buffered = memory.bufferedOutput() },
     });
     cli_renderer.destroy();
@@ -1046,16 +1128,15 @@ test "renderer - createWithOptions late allocation failure cleans up" {
 }
 
 test "renderer - create and destroy" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_renderer.deinit();
     const cli_renderer = test_renderer.renderer;
@@ -1065,12 +1146,10 @@ test "renderer - create and destroy" {
 }
 
 test "renderer - clipboard allocates one exact encoded sequence" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 80, 24, pool);
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 80, 24, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
 
     const payload = [_]u8{'A'} ** 2048;
@@ -1083,12 +1162,10 @@ test "renderer - clipboard allocates one exact encoded sequence" {
 }
 
 test "renderer - clipboard wraps OSC 52 in tmux DCS passthrough" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 80, 24, pool, &.{
+    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 80, 24, &pools.graphemes, &pools.links, &.{
         .{ .key = "TMUX", .value = "/tmp/tmux-1000/default,12345,0" },
     });
     defer test_renderer.deinit();
@@ -1105,12 +1182,10 @@ test "renderer - clipboard wraps OSC 52 in tmux DCS passthrough" {
 }
 
 test "renderer - clipboard chunks OSC 52 in screen DCS passthrough" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 80, 24, pool, &.{
+    var test_renderer = try TestRenderer.createWithEnv(std.testing.allocator, 80, 24, &pools.graphemes, &pools.links, &.{
         .{ .key = "STY", .value = "12345.pts-0.host" },
     });
     defer test_renderer.deinit();
@@ -1135,12 +1210,10 @@ test "renderer - clipboard chunks OSC 52 in screen DCS passthrough" {
 }
 
 test "renderer - simple text rendering to currentRenderBuffer" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("Hello World");
@@ -1152,7 +1225,8 @@ test "renderer - simple text rendering to currentRenderBuffer" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1178,12 +1252,10 @@ test "renderer - simple text rendering to currentRenderBuffer" {
 }
 
 test "renderer - multi-line text rendering" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("Line 1\nLine 2\nLine 3");
@@ -1195,7 +1267,8 @@ test "renderer - multi-line text rendering" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1220,12 +1293,10 @@ test "renderer - multi-line text rendering" {
 }
 
 test "renderer - emoji (wide grapheme) rendering" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("Hi 👋 there");
@@ -1237,7 +1308,8 @@ test "renderer - emoji (wide grapheme) rendering" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1278,12 +1350,10 @@ test "renderer - emoji (wide grapheme) rendering" {
 }
 
 test "renderer - CJK characters rendering" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("Hello 世界");
@@ -1295,7 +1365,8 @@ test "renderer - CJK characters rendering" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1332,12 +1403,10 @@ test "renderer - CJK characters rendering" {
 }
 
 test "renderer - mixed ASCII, emoji, and CJK" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("A 😀 世");
@@ -1349,7 +1418,8 @@ test "renderer - mixed ASCII, emoji, and CJK" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1390,16 +1460,15 @@ test "renderer - mixed ASCII, emoji, and CJK" {
 }
 
 test "renderer - resize updates dimensions" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1502,16 +1571,15 @@ test "renderer - resize allocation failures preserve both buffers and hit grids"
 }
 
 test "renderer - resize clears stale hit grid coordinates" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         4,
         2,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1528,16 +1596,15 @@ test "renderer - resize clears stale hit grid coordinates" {
 }
 
 test "renderer - background color setting" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1556,16 +1623,15 @@ test "renderer - background color setting" {
 }
 
 test "renderer - theme color query tracks pending background restore" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1576,12 +1642,10 @@ test "renderer - theme color query tracks pending background restore" {
 }
 
 test "renderer - empty text buffer renders correctly" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("");
@@ -1593,7 +1657,8 @@ test "renderer - empty text buffer renders correctly" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1604,12 +1669,10 @@ test "renderer - empty text buffer renders correctly" {
 }
 
 test "renderer - multiple renders update currentRenderBuffer" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     var view = try TextBufferView.init(std.testing.allocator, tb);
@@ -1619,7 +1682,8 @@ test "renderer - multiple renders update currentRenderBuffer" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1646,12 +1710,10 @@ test "renderer - multiple renders update currentRenderBuffer" {
 }
 
 test "renderer - 1000 frame render loop with owned styled text" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     var view = try TextBufferView.init(std.testing.allocator, tb);
@@ -1661,7 +1723,8 @@ test "renderer - 1000 frame render loop with owned styled text" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1670,7 +1733,7 @@ test "renderer - 1000 frame render loop with owned styled text" {
         std.testing.allocator,
         80,
         24,
-        .{ .pool = pool, .width_method = .unicode },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode },
     );
     defer opt_buffer.deinit();
 
@@ -1723,12 +1786,16 @@ test "renderer - 1000 frame render loop with owned styled text" {
 }
 
 test "renderer - grapheme pool refcounting with frame buffer fast path" {
-    const limited_pool = gp.initGlobalPoolWithOptions(std.testing.allocator, .{
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
+    var limited_pool_storage = gp.GraphemePool.initWithOptions(std.testing.allocator, .{
         .slots_per_page = [_]u32{ 2, 2, 2, 2, 2 },
     });
-    defer gp.deinitGlobalPool();
+    defer limited_pool_storage.deinit();
+    const limited_pool = &limited_pool_storage;
 
-    var tb = try TextBuffer.init(std.testing.allocator, limited_pool, link.initGlobalLinkPool(std.testing.allocator), .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, limited_pool, link_pool, .unicode);
     defer tb.deinit();
 
     var view = try TextBufferView.init(std.testing.allocator, tb);
@@ -1739,6 +1806,7 @@ test "renderer - grapheme pool refcounting with frame buffer fast path" {
         80,
         24,
         limited_pool,
+        link_pool,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1747,7 +1815,7 @@ test "renderer - grapheme pool refcounting with frame buffer fast path" {
         std.testing.allocator,
         80,
         24,
-        .{ .pool = limited_pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = link_pool, .pool = limited_pool, .width_method = .unicode, .respectAlpha = false },
     );
     defer frame_buffer.deinit();
 
@@ -1791,16 +1859,15 @@ test "renderer - grapheme pool refcounting with frame buffer fast path" {
 }
 
 test "renderer - unchanged grapheme should not churn IDs across frames" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         4,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1840,16 +1907,16 @@ test "renderer - unchanged grapheme should not churn IDs across frames" {
 }
 
 test "renderer - grows frame output instead of committing cells whose ANSI was dropped" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     const width: u32 = 1000;
     const height: u32 = 160;
     for ([_]bool{ false, true }) |threaded| {
         var test_cli_renderer = if (threaded)
-            try TestRenderer.createThreadSafe(std.testing.allocator, width, height, pool)
+            try TestRenderer.createThreadSafe(std.testing.allocator, width, height, &pools.graphemes, &pools.links)
         else
-            try TestRenderer.create(std.testing.allocator, width, height, pool);
+            try TestRenderer.create(std.testing.allocator, width, height, &pools.graphemes, &pools.links);
         defer test_cli_renderer.deinit();
         const cli_renderer = test_cli_renderer.renderer;
         if (threaded) cli_renderer.setUseThread(true);
@@ -1888,17 +1955,15 @@ test "renderer - grows frame output instead of committing cells whose ANSI was d
 }
 
 test "renderer - hyperlinks enabled with OSC 8 output" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var test_cli_renderer = try TestRenderer.createWithLinkPool(
+    var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
-        &local_link_pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1907,7 +1972,7 @@ test "renderer - hyperlinks enabled with OSC 8 output" {
     cli_renderer.terminal.caps.hyperlinks = true;
 
     // Allocate a link
-    const link_id = try local_link_pool.acquire("https://example.com");
+    const link_id = try pools.links.acquire("https://example.com");
     const attributes = ansi.TextAttributes.setLinkId(ansi.TextAttributes.BOLD, link_id);
 
     const next_buffer = cli_renderer.getNextBuffer();
@@ -1937,16 +2002,15 @@ test "renderer - hyperlinks enabled with OSC 8 output" {
 }
 
 test "renderer - hyperlinks disabled no OSC 8 output" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    const local_link_pool = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1955,10 +2019,11 @@ test "renderer - hyperlinks disabled no OSC 8 output" {
     cli_renderer.terminal.caps.hyperlinks = false;
 
     // Allocate a link
-    const link_id = try local_link_pool.acquire("https://example.com");
+    const link_id = try pools.links.acquire("https://example.com");
     const attributes = ansi.TextAttributes.setLinkId(0, link_id);
 
     const next_buffer = cli_renderer.getNextBuffer();
+    try std.testing.expect(next_buffer.link_pool == &pools.links);
 
     const fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
     const bg = ansi.rgbaFromFloats(0.0, 0.0, 0.0, 1.0);
@@ -1974,16 +2039,15 @@ test "renderer - hyperlinks disabled no OSC 8 output" {
 }
 
 test "renderer - link transition mid-line" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    const local_link_pool = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -1992,10 +2056,11 @@ test "renderer - link transition mid-line" {
     cli_renderer.terminal.caps.hyperlinks = true;
 
     const next_buffer = cli_renderer.getNextBuffer();
+    try std.testing.expect(next_buffer.link_pool == &pools.links);
 
     // Allocate two different links
-    const link_id1 = try local_link_pool.acquire("https://first.com");
-    const link_id2 = try local_link_pool.acquire("https://second.com");
+    const link_id1 = try pools.links.acquire("https://first.com");
+    const link_id2 = try pools.links.acquire("https://second.com");
 
     const attr1 = ansi.TextAttributes.setLinkId(0, link_id1);
     const attr2 = ansi.TextAttributes.setLinkId(0, link_id2);
@@ -2030,17 +2095,15 @@ test "renderer - link transition mid-line" {
 }
 
 test "renderer - hyperlink spanning multiple rows uses same id" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-
-    const link_pool = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2051,7 +2114,7 @@ test "renderer - hyperlink spanning multiple rows uses same id" {
     const next_buffer = cli_renderer.getNextBuffer();
 
     // Allocate a single link
-    const link_id = try link_pool.acquire("https://example.com/long-url");
+    const link_id = try pools.links.acquire("https://example.com/long-url");
     const attributes = ansi.TextAttributes.setLinkId(0, link_id);
 
     const fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
@@ -2081,16 +2144,15 @@ test "renderer - hyperlink spanning multiple rows uses same id" {
 }
 
 test "renderer - explicit default and indexed tags use ANSI default/indexed output" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         4,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2120,16 +2182,15 @@ test "renderer - explicit default and indexed tags use ANSI default/indexed outp
 }
 
 test "renderer - indexed snapshots fall back to rgb and explicit bg default resets without ansi256" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         2,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2154,16 +2215,15 @@ test "renderer - indexed snapshots fall back to rgb and explicit bg default rese
 }
 
 test "renderer - rgb colors fall back to ANSI256 mapping when rgb is unavailable" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         2,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2182,16 +2242,15 @@ test "renderer - rgb colors fall back to ANSI256 mapping when rgb is unavailable
 }
 
 test "renderer - rgb fallback uses published palette state" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         2,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2214,16 +2273,15 @@ test "renderer - rgb fallback uses published palette state" {
 }
 
 test "renderer - palette epoch changes force repaint and use new palette mapping" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         2,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2264,16 +2322,15 @@ test "renderer - palette epoch changes force repaint and use new palette mapping
 }
 
 test "renderer - transparent rgb backgrounds still emit 49 reset" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         2,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2294,16 +2351,15 @@ test "renderer - transparent rgb backgrounds still emit 49 reset" {
 // ============================================================================
 
 test "renderer - default cursor style emits reset cursor ANSI" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2318,12 +2374,10 @@ test "renderer - default cursor style emits reset cursor ANSI" {
 }
 
 test "renderer - explicit_cursor_positioning emits cursor move after wide graphemes" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("👋X");
@@ -2335,7 +2389,8 @@ test "renderer - explicit_cursor_positioning emits cursor move after wide graphe
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2354,12 +2409,10 @@ test "renderer - explicit_cursor_positioning emits cursor move after wide graphe
 }
 
 test "renderer - explicit_cursor_positioning produces more cursor moves" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
     try tb.setText("👋🎉🚀");
 
@@ -2370,7 +2423,8 @@ test "renderer - explicit_cursor_positioning produces more cursor moves" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer1.deinit();
     const cli_renderer1 = test_cli_renderer1.renderer;
@@ -2387,7 +2441,8 @@ test "renderer - explicit_cursor_positioning produces more cursor moves" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer2.deinit();
     const cli_renderer2 = test_cli_renderer2.renderer;
@@ -2429,12 +2484,10 @@ test "renderer - explicit_cursor_positioning produces more cursor moves" {
 }
 
 test "renderer - explicit_cursor_positioning with CJK characters" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
+    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
     defer tb.deinit();
 
     try tb.setText("世X");
@@ -2446,7 +2499,8 @@ test "renderer - explicit_cursor_positioning with CJK characters" {
         std.testing.allocator,
         80,
         24,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2465,16 +2519,15 @@ test "renderer - explicit_cursor_positioning with CJK characters" {
 }
 
 test "renderer - commitSplitFooterSnapshot writes append before footer repaint in one output" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         3,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2490,7 +2543,7 @@ test "renderer - commitSplitFooterSnapshot writes append before footer repaint i
         std.testing.allocator,
         11,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
 
@@ -2534,9 +2587,10 @@ test "renderer - commitSplitFooterSnapshot writes append before footer repaint i
 }
 
 test "renderer - pinned split scrollback repaints live native images after append" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -2548,7 +2602,7 @@ test "renderer - pinned split scrollback repaints live native images after appen
     try std.testing.expect(try next.drawImage(value, image_handle, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, .kitty));
     try std.testing.expectEqual(renderer.RenderStatus.rendered, test_renderer.renderer.render(true));
 
-    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .pool = pool });
+    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .link_pool = &pools.links, .pool = &pools.graphemes });
     defer snapshot.deinit();
     try snapshot.drawText("line", 0, 0, .{ 255, 255, 255, 255 }, null, 0);
 
@@ -2564,16 +2618,14 @@ test "renderer - pinned split scrollback repaints live native images after appen
 }
 
 test "renderer - split scrollback materializes image fallback cells" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
     const image_handle: u32 = 1;
-    const snapshot = try OptimizedBuffer.init(std.testing.allocator, 2, 1, .{ .pool = pool, .link_pool = &local_link_pool });
+    const snapshot = try OptimizedBuffer.init(std.testing.allocator, 2, 1, .{ .pool = &pools.graphemes, .link_pool = &pools.links });
     defer snapshot.deinit();
     try std.testing.expect(try snapshot.drawImage(value, image_handle, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, .auto));
     try snapshot.drawText("X", 1, 0, .{ 255, 255, 255, 255 }, null, 0);
@@ -2587,17 +2639,15 @@ test "renderer - split scrollback materializes image fallback cells" {
 }
 
 test "renderer - split scrollback uses native Kitty when Kitty is selected" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
     const image_handle: u32 = 1;
     test_renderer.renderer.terminal.processCapabilityResponse("\x1b_Gi=31337;OK\x1b\\");
-    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = pool, .link_pool = &local_link_pool });
+    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = &pools.graphemes, .link_pool = &pools.links });
     defer snapshot.deinit();
     snapshot.clear(ansi.rgbColor(1, 2, 3, 255), null);
     try std.testing.expect(try snapshot.drawImage(value, image_handle, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, .auto));
@@ -2616,10 +2666,8 @@ test "renderer - split scrollback uses native Kitty when Kitty is selected" {
 }
 
 test "renderer - split scrollback images remain addressable before and across pinning" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
     const image_handle: u32 = 1;
@@ -2627,11 +2675,11 @@ test "renderer - split scrollback images remain addressable before and across pi
     for ([_]bool{ false, true }) |sixel| {
         for ([_]u32{ 0, 2, 5, 6 }) |seed_rows| {
             for ([_]u32{ 1, 4, 6, 7 }) |height| {
-                var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, pool);
+                var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, &pools.graphemes, &pools.links);
                 defer test_renderer.deinit();
                 test_renderer.renderer.terminal.caps.kitty_graphics = !sixel;
                 test_renderer.renderer.terminal.caps.sixel = sixel;
-                const snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, height + 2, .{ .pool = pool, .link_pool = &local_link_pool });
+                const snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, height + 2, .{ .pool = &pools.graphemes, .link_pool = &pools.links });
                 defer snapshot.deinit();
                 try snapshot.drawText("top", 0, 0, .{ 255, 255, 255, 255 }, null, 0);
                 try std.testing.expect(try snapshot.drawImage(value, image_handle, 0, 1, 2, height, 4, height * 2, 0, 0, 1, 1, .auto));
@@ -2664,11 +2712,9 @@ test "renderer - split scrollback images remain addressable before and across pi
 }
 
 test "renderer - failed Kitty scrollback preparation does not publish the batch" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{
         255, 0, 0, 255, 0, 0, 255, 255,
@@ -2676,7 +2722,7 @@ test "renderer - failed Kitty scrollback preparation does not publish the batch"
     defer value.deinit();
     const image_handle: u32 = 1;
     test_renderer.renderer.terminal.processCapabilityResponse("\x1bP>|kitty(0.40.1)\x1b\\\x1b_Gi=31337;OK\x1b\\");
-    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = pool, .link_pool = &local_link_pool });
+    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = &pools.graphemes, .link_pool = &pools.links });
     defer snapshot.deinit();
     try std.testing.expect(try snapshot.drawImage(value, image_handle, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, .auto));
     _ = test_renderer.renderer.resetSplitScrollback(2, 2);
@@ -2703,17 +2749,15 @@ test "renderer - failed Kitty scrollback preparation does not publish the batch"
 }
 
 test "renderer - split scrollback emits native Sixel images when placement geometry is available" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 3, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
     const image_handle: u32 = 1;
     test_renderer.renderer.terminal.caps.sixel = true;
-    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = pool, .link_pool = &local_link_pool });
+    var snapshot = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = &pools.graphemes, .link_pool = &pools.links });
     defer snapshot.deinit();
     try std.testing.expect(try snapshot.drawImage(value, image_handle, 0, 0, 1, 1, 2, 2, 0, 0, 1, 1, .auto));
     _ = test_renderer.renderer.resetSplitScrollback(2, 2);
@@ -2727,7 +2771,7 @@ test "renderer - split scrollback emits native Sixel images when placement geome
     try std.testing.expect(std.mem.find(u8, output, ansi.ANSI.restoreCursorState) != null);
     try std.testing.expect(std.mem.find(u8, output, "█") == null);
 
-    var covered = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = pool, .link_pool = &local_link_pool });
+    var covered = try OptimizedBuffer.init(std.testing.allocator, 1, 1, .{ .pool = &pools.graphemes, .link_pool = &pools.links });
     defer covered.deinit();
     try std.testing.expect(try covered.drawImage(value, image_handle, 0, 0, 1, 1, 2, 2, 0, 0, 1, 1, .auto));
     try covered.drawText("X", 0, 0, .{ 255, 255, 255, 255 }, null, 0);
@@ -2738,16 +2782,15 @@ test "renderer - split scrollback emits native Sixel images when placement geome
 }
 
 test "renderer - commitSplitFooterSnapshot settling phase moves footer downward" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         3,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2763,7 +2806,7 @@ test "renderer - commitSplitFooterSnapshot settling phase moves footer downward"
         std.testing.allocator,
         6,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
 
@@ -2799,16 +2842,15 @@ test "renderer - commitSplitFooterSnapshot settling phase moves footer downward"
 }
 
 test "renderer - commitSplitFooterSnapshot multiline settling enables bounded scroll at pin" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         3,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2824,7 +2866,7 @@ test "renderer - commitSplitFooterSnapshot multiline settling enables bounded sc
         std.testing.allocator,
         6,
         2,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
 
@@ -2845,16 +2887,15 @@ test "renderer - commitSplitFooterSnapshot multiline settling enables bounded sc
 }
 
 test "renderer - commitSplitFooterSnapshot multiline short final row keeps continuation column" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         20,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2870,7 +2911,7 @@ test "renderer - commitSplitFooterSnapshot multiline short final row keeps conti
         std.testing.allocator,
         16,
         3,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer first_snapshot.deinit();
 
@@ -2886,7 +2927,7 @@ test "renderer - commitSplitFooterSnapshot multiline short final row keeps conti
         std.testing.allocator,
         1,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer second_snapshot.deinit();
 
@@ -2906,16 +2947,15 @@ test "renderer - commitSplitFooterSnapshot multiline short final row keeps conti
 }
 
 test "renderer - commitSplitFooterSnapshot exact-width continuation preserves autowrap" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         20,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2931,7 +2971,7 @@ test "renderer - commitSplitFooterSnapshot exact-width continuation preserves au
         std.testing.allocator,
         20,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer first_snapshot.deinit();
 
@@ -2944,7 +2984,7 @@ test "renderer - commitSplitFooterSnapshot exact-width continuation preserves au
         std.testing.allocator,
         8,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer second_snapshot.deinit();
 
@@ -2964,16 +3004,15 @@ test "renderer - commitSplitFooterSnapshot exact-width continuation preserves au
 }
 
 test "renderer - commitSplitFooterSnapshot does not emit continuation spaces for wide graphemes" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -2989,7 +3028,7 @@ test "renderer - commitSplitFooterSnapshot does not emit continuation spaces for
         std.testing.allocator,
         10,
         2,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
 
@@ -3012,16 +3051,15 @@ test "renderer - commitSplitFooterSnapshot does not emit continuation spaces for
 }
 
 test "renderer - repaintSplitFooter repaints footer without append payload" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         3,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3049,16 +3087,15 @@ test "renderer - repaintSplitFooter repaints footer without append payload" {
 }
 
 test "renderer - repaintSplitFooter applies pending viewport scroll transition in one frame" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         1,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3092,16 +3129,15 @@ test "renderer - repaintSplitFooter applies pending viewport scroll transition i
 }
 
 test "renderer - repaintSplitFooter viewport scroll uses explicit split scroll delta when gap already exists" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         8,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3125,16 +3161,15 @@ test "renderer - repaintSplitFooter viewport scroll uses explicit split scroll d
 }
 
 test "renderer - repaintSplitFooter applies pending stale row clear transition in one frame" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         3,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3164,19 +3199,17 @@ test "renderer - repaintSplitFooter applies pending stale row clear transition i
 }
 
 test "renderer - commitSplitFooterSnapshot appends styled snapshot with snapshot links before footer repaint" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var renderer_links = link.LinkPool.init(std.testing.allocator);
-    defer renderer_links.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
     var snapshot_links = link.LinkPool.init(std.testing.allocator);
     defer snapshot_links.deinit();
 
-    var test_cli_renderer = try TestRenderer.createWithLinkPool(
+    var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         16,
         4,
-        pool,
-        &renderer_links,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3185,7 +3218,7 @@ test "renderer - commitSplitFooterSnapshot appends styled snapshot with snapshot
     cli_renderer.terminal.caps.ansi256 = true;
     cli_renderer.terminal.caps.hyperlinks = true;
 
-    const renderer_link_id = try renderer_links.acquire("https://renderer.invalid");
+    const renderer_link_id = try pools.links.acquire("https://renderer.invalid");
     const snapshot_link_id = try snapshot_links.acquire("https://snapshot.example");
     try std.testing.expectEqual(renderer_link_id, snapshot_link_id);
 
@@ -3200,7 +3233,7 @@ test "renderer - commitSplitFooterSnapshot appends styled snapshot with snapshot
         std.testing.allocator,
         8,
         2,
-        .{ .pool = pool, .link_pool = &snapshot_links, .width_method = .unicode, .respectAlpha = false },
+        .{ .pool = &pools.graphemes, .link_pool = &snapshot_links, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
 
@@ -3229,16 +3262,15 @@ test "renderer - commitSplitFooterSnapshot appends styled snapshot with snapshot
 }
 
 test "renderer - commitSplitFooterSnapshot preserves indexed and default color tags" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         8,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3252,7 +3284,7 @@ test "renderer - commitSplitFooterSnapshot preserves indexed and default color t
         std.testing.allocator,
         2,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
 
@@ -3282,16 +3314,15 @@ test "renderer - commitSplitFooterSnapshot preserves indexed and default color t
 }
 
 test "renderer - commitSplitFooterSnapshot does not emit NUL padding for short rows" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         20,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3307,7 +3338,7 @@ test "renderer - commitSplitFooterSnapshot does not emit NUL padding for short r
         std.testing.allocator,
         16,
         2,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
 
@@ -3324,16 +3355,15 @@ test "renderer - commitSplitFooterSnapshot does not emit NUL padding for short r
 }
 
 test "renderer - batched split commits share single sync frame" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         16,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3349,7 +3379,7 @@ test "renderer - batched split commits share single sync frame" {
         std.testing.allocator,
         10,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer first_snapshot.deinit();
     first_snapshot.clear(ansi.rgbaFromFloats(0.0, 0.0, 0.0, 0.0), 32);
@@ -3359,7 +3389,7 @@ test "renderer - batched split commits share single sync frame" {
         std.testing.allocator,
         10,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer second_snapshot.deinit();
     second_snapshot.clear(ansi.rgbaFromFloats(0.0, 0.0, 0.0, 0.0), 32);
@@ -3396,16 +3426,15 @@ test "renderer - batched split commits share single sync frame" {
 }
 
 test "renderer - unchanged frame with unchanged cursor emits no output" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3422,16 +3451,15 @@ test "renderer - unchanged frame with unchanged cursor emits no output" {
 }
 
 test "renderer - buffered debug dump includes non-threaded last render" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var local_link_pool = link.LinkPool.init(std.testing.allocator);
-    defer local_link_pool.deinit();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var test_cli_renderer = try TestRenderer.create(
         std.testing.allocator,
         12,
         4,
-        pool,
+        &pools.graphemes,
+        &pools.links,
     );
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
@@ -3458,6 +3486,9 @@ test "renderer - buffered debug dump includes non-threaded last render" {
 const native_span_feed = @import("../native-span-feed.zig");
 
 test "FeedBackend - suspend from a published frame callback delivers mode exits" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     const Callback = struct {
         var target: ?*CliRenderer = null;
         fn notify(_: usize, event: u32, _: usize, _: u64) callconv(.c) void {
@@ -3467,13 +3498,14 @@ test "FeedBackend - suspend from a published frame callback delivers mode exits"
             cli.suspendRenderer();
         }
     };
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pool_storage = gp.GraphemePool.init(std.testing.allocator);
+    defer pool_storage.deinit();
+    const pool = &pool_storage;
+
     const feed = try native_span_feed.Stream.create(std.testing.allocator, null);
     defer feed.destroy();
     const cli = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, pool, .{
+        .link_pool = link_pool,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -3500,6 +3532,9 @@ test "FeedBackend - suspend from a published frame callback delivers mode exits"
 }
 
 test "FeedBackend - suspend from a published split batch callback preserves state" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     const Callback = struct {
         var target: ?*CliRenderer = null;
         fn notify(_: usize, event: u32, _: usize, _: u64) callconv(.c) void {
@@ -3509,13 +3544,14 @@ test "FeedBackend - suspend from a published split batch callback preserves stat
             cli.suspendRenderer();
         }
     };
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pool_storage = gp.GraphemePool.init(std.testing.allocator);
+    defer pool_storage.deinit();
+    const pool = &pool_storage;
+
     const feed = try native_span_feed.Stream.create(std.testing.allocator, null);
     defer feed.destroy();
     const cli = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, pool, .{
+        .link_pool = link_pool,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -3528,7 +3564,7 @@ test "FeedBackend - suspend from a published split batch callback preserves stat
     _ = cli.resetSplitScrollback(1, 4);
     cli.currentHitGrid[0] = 42;
     cli.nextHitGrid[0] = 43;
-    const snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .pool = pool });
+    const snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .link_pool = link_pool, .pool = pool });
     defer snapshot.deinit();
     try snapshot.drawText("kept", 0, 0, .{ 255, 255, 255, 255 }, null, 0);
     Callback.target = cli;
@@ -3560,17 +3596,17 @@ test "FeedBackend - suspend from a published split batch callback preserves stat
 }
 
 test "FeedBackend - shutdown cancels an unfinished split batch and retries rejected controls" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
     var options = native_span_feed.defaultOptions();
     options.chunk_size = 4096;
     options.initial_chunks = 1;
     options.max_bytes = 4096;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, options);
     defer feed.destroy();
-    const cli = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, pool, .{
+    const cli = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -3582,7 +3618,7 @@ test "FeedBackend - shutdown cancels an unfinished split batch and retries rejec
     cli.terminal.state.kitty_keyboard_flags = 5;
     _ = cli.resetSplitScrollback(1, 2);
     const previous = cli.splitScrollback;
-    const snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .pool = pool });
+    const snapshot = try OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .link_pool = &pools.links, .pool = &pools.graphemes });
     defer snapshot.deinit();
     try snapshot.drawText("lost", 0, 0, .{ 255, 255, 255, 255 }, null, 0);
     const first = cli.commitSplitFooterSnapshotBatched(snapshot, 4, false, true, 2, false, true, false);
@@ -3623,13 +3659,12 @@ test "FeedBackend - shutdown cancels an unfinished split batch and retries rejec
 }
 
 test "FeedBackend - renderer writes through feed" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     const feed = try native_span_feed.Stream.create(std.testing.allocator, null);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 80, 24, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 80, 24, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -3663,16 +3698,15 @@ test "FeedBackend - renderer writes through feed" {
 }
 
 test "FeedBackend - shouldSkipFrame when span queue saturated" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     // Create a feed with a very small span queue so we can saturate it easily.
     var opts = native_span_feed.defaultOptions();
     opts.span_queue_capacity = 2;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 80, 24, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 80, 24, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -3744,10 +3778,8 @@ test "FeedBackend - high water includes drained spans until all consumers releas
 }
 
 test "FeedBackend - split control batches bypass high water but retain atomic limits" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     for ([_]bool{ false, true }) |bounded| {
         var opts = native_span_feed.defaultOptions();
@@ -3757,13 +3789,15 @@ test "FeedBackend - split control batches bypass high water but retain atomic li
         opts.max_bytes = if (bounded) 64 else 0;
         const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
         defer feed.destroy();
-        const cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 20, 4, pool, .{
+        const cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 20, 4, &pools.graphemes, .{
+            .link_pool = &pools.links,
             .remote_mode = .remote,
             .output = .{ .feed = feed },
         });
         defer cli_renderer.destroy();
         const snapshot = try OptimizedBuffer.init(std.testing.allocator, 16, 1, .{
-            .pool = pool,
+            .link_pool = &pools.links,
+            .pool = &pools.graphemes,
             .width_method = .unicode,
         });
         defer snapshot.deinit();
@@ -3857,10 +3891,8 @@ test "FeedBackend - failed frame publishes no partial bytes" {
 }
 
 test "FeedBackend - failed split batch restores unpublished scrollback state" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var opts = native_span_feed.defaultOptions();
     opts.chunk_size = 64;
@@ -3869,7 +3901,8 @@ test "FeedBackend - failed split batch restores unpublished scrollback state" {
     opts.growth_policy = @intFromEnum(native_span_feed.GrowthPolicy.block);
     opts.auto_commit_on_full = 0;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 40, 4, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 40, 4, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -3880,7 +3913,7 @@ test "FeedBackend - failed split batch restores unpublished scrollback state" {
         std.testing.allocator,
         32,
         1,
-        .{ .pool = pool, .width_method = .unicode, .respectAlpha = false },
+        .{ .link_pool = &pools.links, .pool = &pools.graphemes, .width_method = .unicode, .respectAlpha = false },
     );
     defer snapshot.deinit();
     try snapshot.drawText("first split batch row", 0, 0, .{ 255, 255, 255, 255 }, null, 0);
@@ -3901,10 +3934,8 @@ test "FeedBackend - failed split batch restores unpublished scrollback state" {
 }
 
 test "FeedBackend - failed split repaint restores unpublished transition state" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var opts = native_span_feed.defaultOptions();
     opts.chunk_size = 32;
@@ -3913,7 +3944,8 @@ test "FeedBackend - failed split repaint restores unpublished transition state" 
     opts.growth_policy = @intFromEnum(native_span_feed.GrowthPolicy.block);
     opts.auto_commit_on_full = 0;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
         .clearOnShutdown = false,
@@ -3937,10 +3969,8 @@ test "FeedBackend - failed split repaint restores unpublished transition state" 
 }
 
 test "FeedBackend - failed ordinary render retries split transition" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var opts = native_span_feed.defaultOptions();
     opts.chunk_size = 32;
@@ -3949,7 +3979,8 @@ test "FeedBackend - failed ordinary render retries split transition" {
     opts.growth_policy = @intFromEnum(native_span_feed.GrowthPolicy.block);
     opts.auto_commit_on_full = 0;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 4, 2, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
         .clearOnShutdown = false,
@@ -3988,10 +4019,8 @@ test "FeedBackend - failed ordinary render retries split transition" {
 }
 
 test "FeedBackend - failed frame keeps the published hit grid and clears failed paint" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var opts = native_span_feed.defaultOptions();
     opts.chunk_size = 32;
@@ -4000,7 +4029,8 @@ test "FeedBackend - failed frame keeps the published hit grid and clears failed 
     opts.growth_policy = @intFromEnum(native_span_feed.GrowthPolicy.block);
     opts.auto_commit_on_full = 0;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 1, 1, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 1, 1, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
         .clearOnShutdown = false,
@@ -4032,10 +4062,8 @@ test "FeedBackend - failed frame keeps the published hit grid and clears failed 
 }
 
 test "FeedBackend - failed frame retries unsent terminal controls" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var opts = native_span_feed.defaultOptions();
     opts.chunk_size = 32;
@@ -4044,7 +4072,8 @@ test "FeedBackend - failed frame retries unsent terminal controls" {
     opts.growth_policy = @intFromEnum(native_span_feed.GrowthPolicy.block);
     opts.auto_commit_on_full = 0;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 1, 1, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 1, 1, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
         .clearOnShutdown = false,
@@ -4086,10 +4115,8 @@ test "FeedBackend - failed frame retries unsent terminal controls" {
 }
 
 test "FeedBackend - failed Sixel frame does not publish an unterminated DCS" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     var opts = native_span_feed.defaultOptions();
     opts.chunk_size = 256;
@@ -4098,7 +4125,8 @@ test "FeedBackend - failed Sixel frame does not publish an unterminated DCS" {
     opts.growth_policy = @intFromEnum(native_span_feed.GrowthPolicy.block);
     opts.auto_commit_on_full = 0;
     const feed = try native_span_feed.Stream.create(std.testing.allocator, opts);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 8, 4, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 8, 4, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -4197,13 +4225,12 @@ test "FeedBackend - writeOutMultiple publishes no partial batch" {
 }
 
 test "FeedBackend - supportsThreading is false" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
     const feed = try native_span_feed.Stream.create(std.testing.allocator, null);
-    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 80, 24, pool, .{
+    var cli_renderer = try CliRenderer.createWithOptions(std.testing.allocator, 80, 24, &pools.graphemes, .{
+        .link_pool = &pools.links,
         .remote_mode = .remote,
         .output = .{ .feed = feed },
     });
@@ -4217,17 +4244,19 @@ test "FeedBackend - supportsThreading is false" {
 }
 
 test "two renderers on buffered backend have independent buffers" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     // Independent output buffers prevent concurrent renderers from clobbering
     // each other's output.
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pool_storage = gp.GraphemePool.init(std.testing.allocator);
+    defer pool_storage.deinit();
+    const pool = &pool_storage;
 
-    var test_r1 = try TestRenderer.create(std.testing.allocator, 80, 24, pool);
+    var test_r1 = try TestRenderer.create(std.testing.allocator, 80, 24, pool, link_pool);
     defer test_r1.deinit();
     const r1 = test_r1.renderer;
-    var test_r2 = try TestRenderer.create(std.testing.allocator, 80, 24, pool);
+    var test_r2 = try TestRenderer.create(std.testing.allocator, 80, 24, pool, link_pool);
     defer test_r2.deinit();
     const r2 = test_r2.renderer;
 
@@ -4252,12 +4281,10 @@ test "two renderers on buffered backend have independent buffers" {
 }
 
 test "threaded buffered destroy: no stale write after shutdown ANSI" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    _ = link.initGlobalLinkPool(std.testing.allocator);
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
 
-    var test_cli_renderer = try TestRenderer.createThreadSafe(std.testing.allocator, 80, 24, pool);
+    var test_cli_renderer = try TestRenderer.createThreadSafe(std.testing.allocator, 80, 24, &pools.graphemes, &pools.links);
     defer test_cli_renderer.deinit();
     const cli_renderer = test_cli_renderer.renderer;
 
@@ -4399,10 +4426,10 @@ test "buffered backend frees grown buffers cleanly on deinit" {
 }
 
 test "renderer scales kitty transmission alpha by placement opacity" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 200, 100, 50, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -4445,10 +4472,10 @@ test "renderer scales kitty transmission alpha by placement opacity" {
 }
 
 test "renderer bounds sixel cache entries and evicts least recently used payloads" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.sixel = true;
 
@@ -4486,10 +4513,10 @@ test "renderer bounds sixel cache entries and evicts least recently used payload
 }
 
 test "renderer treats fully transparent sixel placements as empty without failing" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 0 }, 1, 1, 4);
     defer value.deinit();
@@ -4513,10 +4540,10 @@ test "renderer treats fully transparent sixel placements as empty without failin
 }
 
 test "renderer retransmits sixel placements on a forced full repaint" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 4, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer value.deinit();
@@ -4538,10 +4565,10 @@ test "renderer retransmits sixel placements on a forced full repaint" {
 }
 
 test "renderer leaves clean text alone when graphics content changes" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const first = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer first.deinit();
@@ -4571,10 +4598,10 @@ test "renderer leaves clean text alone when graphics content changes" {
 }
 
 test "renderer clears dirty sixel cells as one batched space run" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 2, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 2, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const first = try image.createFromRgba(std.testing.allocator, &[_]u8{ 255, 0, 0, 255 }, 1, 1, 4);
     defer first.deinit();
@@ -4600,10 +4627,10 @@ test "renderer clears dirty sixel cells as one batched space run" {
 }
 
 test "renderer downscales large kitty stills to their placement pixel size" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     // 64x64 source shown at 16x16 pixels: 16x the pixel area.
     const pixels = try std.testing.allocator.alloc(u8, 64 * 64 * 4);
@@ -4646,10 +4673,10 @@ test "renderer downscales large kitty stills to their placement pixel size" {
 }
 
 test "renderer transmits small kitty images at native size" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const value = try image.createFromRgba(std.testing.allocator, &([_]u8{ 9, 8, 7, 255 } ** 64), 8, 8, 32);
     defer value.deinit();
@@ -4667,10 +4694,10 @@ test "renderer transmits small kitty images at native size" {
 }
 
 test "renderer reuses the kitty transmit across source rectangle changes" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 8, 4, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     const pixels = try std.testing.allocator.alloc(u8, 64 * 64 * 4);
     defer std.testing.allocator.free(pixels);
@@ -4713,10 +4740,10 @@ test "renderer reuses the kitty transmit across source rectangle changes" {
 }
 
 test "renderer does not publish a frame when image dirty preparation fails" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.sixel = true;
 
@@ -4745,10 +4772,10 @@ test "renderer does not publish a frame when image dirty preparation fails" {
 }
 
 test "renderer does not publish a frame when Sixel preparation fails" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.sixel = true;
 
@@ -4778,10 +4805,10 @@ test "renderer does not publish a frame when Sixel preparation fails" {
 }
 
 test "renderer does not publish Kitty output when image state staging fails" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 1, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.kitty_graphics = true;
 
@@ -4810,10 +4837,10 @@ test "renderer does not publish Kitty output when image state staging fails" {
 }
 
 test "renderer clears an upper sixel hole when its lower image moves away" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
-    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, pool);
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var test_renderer = try TestRenderer.create(std.testing.allocator, 2, 1, &pools.graphemes, &pools.links);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.sixel = true;
 

@@ -274,9 +274,9 @@ test "Context stored controls have printable-equivalent framebuffer and terminal
         }) |case| {
             const owner = try context.Context.init(std.testing.allocator, std.testing.io, .{});
             defer owner.deinit() catch unreachable;
-            var actual = try TestRenderer.createWithLinkPool(std.testing.allocator, 8, 4, &owner.graphemes, &owner.links);
+            var actual = try TestRenderer.create(std.testing.allocator, 8, 4, &owner.graphemes, &owner.links);
             defer actual.deinit();
-            var expected = try TestRenderer.createWithLinkPool(std.testing.allocator, 8, 4, &owner.graphemes, &owner.links);
+            var expected = try TestRenderer.create(std.testing.allocator, 8, 4, &owner.graphemes, &owner.links);
             defer expected.deinit();
             for ([_]*TestRenderer{ &actual, &expected }, [_][]const u8{ case.source, case.printable }) |fixture, source| {
                 const text = try owner.createTextBuffer(method);

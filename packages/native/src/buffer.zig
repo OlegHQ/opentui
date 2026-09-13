@@ -549,7 +549,7 @@ pub const OptimizedBuffer = struct {
         pool: *gp.GraphemePool,
         width_method: utf8.WidthMethod = .unicode,
         id: []const u8 = "unnamed buffer",
-        link_pool: ?*link.LinkPool = null,
+        link_pool: *link.LinkPool,
         logger: *const logger.Logger = logger.processLogger(),
     };
 
@@ -566,8 +566,7 @@ pub const OptimizedBuffer = struct {
             return BufferError.InvalidDimensions;
         }
 
-        const lp = options.link_pool orelse link.initGlobalLinkPool(allocator);
-        const storage = try BufferStorage.init(allocator, width, height, 1, options.pool, lp);
+        const storage = try BufferStorage.init(allocator, width, height, 1, options.pool, options.link_pool);
         errdefer storage.retire();
 
         const self = allocator.create(OptimizedBuffer) catch return BufferError.OutOfMemory;
@@ -584,7 +583,7 @@ pub const OptimizedBuffer = struct {
             .blendBackdropColor = options.blendBackdropColor,
             .allocator = allocator,
             .pool = options.pool,
-            .link_pool = lp,
+            .link_pool = options.link_pool,
             .logger = options.logger,
             .grapheme_tracker = &storage.grapheme_tracker,
             .link_tracker = &storage.link_tracker,

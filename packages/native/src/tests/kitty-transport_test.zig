@@ -1,4 +1,5 @@
 const std = @import("std");
+const link = @import("../link.zig");
 const builtin = @import("builtin");
 const kitty = @import("../kitty-transport.zig");
 const image = @import("../image.zig");
@@ -205,12 +206,15 @@ const FileReferenceOutput = struct {
 const ExpiryCase = enum { before_deadline, crosses_during_create, already_expired };
 
 fn checkRawKittyExpiry(case: ExpiryCase) !void {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     const renderer = @import("../renderer.zig");
     const gp = @import("../grapheme.zig");
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
-    defer @import("../link.zig").deinitGlobalLinkPool();
+
     var temporary = std.testing.tmpDir(.{ .iterate = true });
     defer temporary.cleanup();
     var directory: [512]u8 = undefined;
@@ -221,6 +225,7 @@ fn checkRawKittyExpiry(case: ExpiryCase) !void {
     var supplied: FileIo = .{};
     var output: FileReferenceOutput = .{};
     const cli = try renderer.CliRenderer.createWithOptions(std.testing.allocator, 3, 1, &pool, .{
+        .link_pool = link_pool,
         .io = supplied.io(),
         .env_map = &environment,
         .output = .{ .buffered = .{ .ctx = &output, .write_fn = FileReferenceOutput.write } },

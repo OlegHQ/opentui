@@ -1,4 +1,5 @@
 const std = @import("std");
+const TestPools = @import("../tests/test-pools.zig").TestPools;
 const bench_utils = @import("../bench-utils.zig");
 const renderer = @import("../renderer.zig");
 const buffer = @import("../buffer.zig");
@@ -61,13 +62,14 @@ fn runPlacementScenario(
     io: std.Io,
     allocator: std.mem.Allocator,
     pool: *gp.GraphemePool,
+    link_pool: *link.LinkPool,
     protocol: Protocol,
     image_width: u32,
     image_height: u32,
     animate: bool,
     text_change: bool,
 ) !FrameCost {
-    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool);
+    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool, link_pool);
     defer test_renderer.deinit();
     switch (protocol) {
         .kitty => test_renderer.renderer.terminal.caps.kitty_graphics = true,
@@ -126,8 +128,8 @@ fn runPlacementScenario(
     return cost;
 }
 
-fn runLargeStillTransmit(io: std.Io, allocator: std.mem.Allocator, pool: *gp.GraphemePool) !FrameCost {
-    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool);
+fn runLargeStillTransmit(io: std.Io, allocator: std.mem.Allocator, pool: *gp.GraphemePool, link_pool: *link.LinkPool) !FrameCost {
+    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool, link_pool);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.kitty_graphics = true;
 
@@ -201,9 +203,10 @@ fn runStaticKittyPlacementCount(
     io: std.Io,
     allocator: std.mem.Allocator,
     pool: *gp.GraphemePool,
+    link_pool: *link.LinkPool,
     count: usize,
 ) !FrameCost {
-    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool);
+    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool, link_pool);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.kitty_graphics = true;
 
@@ -250,9 +253,10 @@ fn runDirtySixelOverlapCount(
     io: std.Io,
     allocator: std.mem.Allocator,
     pool: *gp.GraphemePool,
+    link_pool: *link.LinkPool,
     count: usize,
 ) !FrameCost {
-    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, 1, 1, pool);
+    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, 1, 1, pool, link_pool);
     defer test_renderer.deinit();
     test_renderer.renderer.terminal.caps.sixel = true;
 
@@ -313,10 +317,11 @@ fn runSplitImageCommit(
     io: std.Io,
     allocator: std.mem.Allocator,
     pool: *gp.GraphemePool,
+    link_pool: *link.LinkPool,
     protocol: Protocol,
     placement_count: usize,
 ) !FrameCost {
-    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool);
+    var test_renderer = try test_renderer_mod.TestRenderer.create(allocator, TERM_WIDTH, TERM_HEIGHT, pool, link_pool);
     defer test_renderer.deinit();
     switch (protocol) {
         .kitty => test_renderer.renderer.terminal.caps.kitty_graphics = true,
@@ -330,7 +335,7 @@ fn runSplitImageCommit(
     defer value.deinit();
     const image_handle: u32 = 1;
 
-    const snapshot = try buffer.OptimizedBuffer.init(allocator, 40, 20, .{ .pool = pool });
+    const snapshot = try buffer.OptimizedBuffer.init(allocator, 40, 20, .{ .link_pool = link_pool, .pool = pool });
     defer snapshot.deinit();
     const render_protocol: image.RenderProtocol = switch (protocol) {
         .kitty => .kitty,
@@ -403,9 +408,8 @@ fn runSplitImageCommit(
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, show_mem: bool, bench_filter: ?[]const u8) ![]bench_utils.BenchResult {
     _ = show_mem;
-    const pool = gp.initGlobalPool(allocator);
-    defer gp.deinitGlobalPool();
-    defer link.deinitGlobalLinkPool();
+    var pools = TestPools.init(allocator);
+    defer pools.deinit();
 
     var results: std.ArrayListUnmanaged(bench_utils.BenchResult) = .empty;
 
@@ -425,7 +429,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, show_mem: bool, bench_filte
     };
     for (scenarios) |scenario| {
         if (!bench_utils.matchesBenchFilter(scenario.name, bench_filter)) continue;
-        const cost = try runPlacementScenario(io, allocator, pool, scenario.protocol, 320, 200, scenario.animate, scenario.text_change);
+        const cost = try runPlacementScenario(io, allocator, &pools.graphemes, &pools.links, scenario.protocol, 320, 200, scenario.animate, scenario.text_change);
         try results.append(allocator, .{
             .name = try std.fmt.allocPrint(allocator, "{s} ({d} bytes/frame)", .{ scenario.name, cost.bytesPerFrame() }),
             .min_ns = cost.stats.min_ns,
@@ -440,7 +444,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, show_mem: bool, bench_filte
     }
 
     if (bench_utils.matchesBenchFilter("kitty large still transmit", bench_filter)) {
-        const cost = try runLargeStillTransmit(io, allocator, pool);
+        const cost = try runLargeStillTransmit(io, allocator, &pools.graphemes, &pools.links);
         try results.append(allocator, .{
             .name = try std.fmt.allocPrint(allocator, "kitty large still transmit ({d} bytes/frame)", .{cost.bytesPerFrame()}),
             .min_ns = cost.stats.min_ns,
@@ -477,7 +481,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, show_mem: bool, bench_filte
     for ([_]usize{ 8, 32, 128, 512, 2048, 4096 }) |count| {
         const name = try std.fmt.allocPrint(allocator, "kitty static {d} placements", .{count});
         if (!bench_utils.matchesBenchFilter(name, bench_filter)) continue;
-        const cost = try runStaticKittyPlacementCount(io, allocator, pool, count);
+        const cost = try runStaticKittyPlacementCount(io, allocator, &pools.graphemes, &pools.links, count);
         try results.append(allocator, .{
             .name = try std.fmt.allocPrint(allocator, "{s} ({d} bytes/frame)", .{ name, cost.bytesPerFrame() }),
             .min_ns = cost.stats.min_ns,
@@ -494,7 +498,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, show_mem: bool, bench_filte
     for ([_]usize{ 8, 32, 128, 512, 2048, 4096 }) |count| {
         const name = try std.fmt.allocPrint(allocator, "sixel dirty overlap {d} transparent placements", .{count});
         if (!bench_utils.matchesBenchFilter(name, bench_filter)) continue;
-        const cost = try runDirtySixelOverlapCount(io, allocator, pool, count);
+        const cost = try runDirtySixelOverlapCount(io, allocator, &pools.graphemes, &pools.links, count);
         try results.append(allocator, .{
             .name = try std.fmt.allocPrint(allocator, "{s} ({d} bytes/frame)", .{ name, cost.bytesPerFrame() }),
             .min_ns = cost.stats.min_ns,
@@ -520,7 +524,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, show_mem: bool, bench_filte
     };
     for (split_scenarios) |scenario| {
         if (!bench_utils.matchesBenchFilter(scenario.name, bench_filter)) continue;
-        const cost = try runSplitImageCommit(io, allocator, pool, scenario.protocol, scenario.placements);
+        const cost = try runSplitImageCommit(io, allocator, &pools.graphemes, &pools.links, scenario.protocol, scenario.placements);
         try results.append(allocator, .{
             .name = try std.fmt.allocPrint(allocator, "{s} ({d} bytes/frame)", .{ scenario.name, cost.bytesPerFrame() }),
             .min_ns = cost.stats.min_ns,

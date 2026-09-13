@@ -64,7 +64,7 @@ comptime {
     assert(CHAR_FLAG_GRAPHEME != CHAR_FLAG_CONTINUATION);
 }
 
-/// Global slab-allocated pool for grapheme clusters (byte slices)
+/// Slab-allocated pool for grapheme clusters (byte slices)
 /// This is total overkill probably, but fun
 /// ID layout (26-bit payload):
 /// [ class (3 bits) | generation (7 bits) | slot_index (16 bits) ]
@@ -613,31 +613,6 @@ pub fn encodedCharWidth(c: u32) u32 {
         return charRightExtent(c) + 1;
     } else {
         return 1;
-    }
-}
-
-pub fn initGlobalPool(allocator: std.mem.Allocator) *GraphemePool {
-    return initGlobalPoolWithOptions(allocator, .{});
-}
-
-/// Process-wide pool for native tests and constructors that omit an owner.
-/// Context instances keep their own pools.
-var global_pool: ?GraphemePool = null;
-
-pub fn initGlobalPoolWithOptions(
-    allocator: std.mem.Allocator,
-    options: GraphemePool.InitOptions,
-) *GraphemePool {
-    if (global_pool == null) {
-        global_pool = GraphemePool.initWithOptions(allocator, options);
-    }
-    return &global_pool.?;
-}
-
-pub fn deinitGlobalPool() void {
-    if (global_pool) |*pool| {
-        pool.deinit();
-        global_pool = null;
     }
 }
 

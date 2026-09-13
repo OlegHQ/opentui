@@ -1,9 +1,9 @@
 const std = @import("std");
+const TestPools = @import("../tests/test-pools.zig").TestPools;
 const ansi = @import("../ansi.zig");
 const bench_utils = @import("../bench-utils.zig");
 const text_buffer_mod = @import("../text-buffer.zig");
 const syntax_style_mod = @import("../syntax-style.zig");
-const gp = @import("../grapheme.zig");
 const link = @import("../link.zig");
 
 const BenchResult = bench_utils.BenchResult;
@@ -65,8 +65,8 @@ fn benchSetStyledTextOperations(
     defer arena.deinit();
     const global_alloc = arena.allocator();
 
-    const pool = gp.initGlobalPool(global_alloc);
-    const link_pool = link.initGlobalLinkPool(global_alloc);
+    var pools = TestPools.init(global_alloc);
+    defer pools.deinit();
 
     // Tokens and gap chunks grow with the number of lines, as in parsed JSON.
     inline for (.{ 200, 1000, 5000 }) |line_count| {
@@ -85,7 +85,7 @@ fn benchSetStyledTextOperations(
             }
             var stats: BenchStats = .{};
             for (0..5) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
                 const style = try SyntaxStyle.init(allocator);
                 defer style.deinit();
@@ -117,7 +117,7 @@ fn benchSetStyledTextOperations(
             const fg_color = rgba(1.0, 1.0, 1.0, 1.0);
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);
@@ -155,7 +155,7 @@ fn benchSetStyledTextOperations(
             const magenta = rgba(1.0, 0.0, 1.0, 1.0);
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);
@@ -198,7 +198,7 @@ fn benchSetStyledTextOperations(
             const number_color = rgba(0.7, 1.0, 0.7, 1.0);
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);
@@ -241,7 +241,7 @@ fn benchSetStyledTextOperations(
             const color = rgba(1.0, 0.5, 0.5, 1.0);
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);
@@ -272,7 +272,7 @@ fn benchSetStyledTextOperations(
             var stats: BenchStats = .{};
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);
@@ -319,8 +319,8 @@ fn benchHighlightOperations(
     defer arena.deinit();
     const global_alloc = arena.allocator();
 
-    const pool = gp.initGlobalPool(global_alloc);
-    const link_pool = link.initGlobalLinkPool(global_alloc);
+    var pools = TestPools.init(global_alloc);
+    defer pools.deinit();
 
     // Baseline: 1000 sequential addHighlightByCharRange calls (unbatched)
     {
@@ -329,7 +329,7 @@ fn benchHighlightOperations(
             var stats: BenchStats = .{};
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);
@@ -372,7 +372,7 @@ fn benchHighlightOperations(
             var stats: BenchStats = .{};
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);
@@ -441,7 +441,7 @@ fn benchHighlightOperations(
             }
 
             for (0..iterations) |_| {
-                const tb = try TextBuffer.init(allocator, pool, link_pool, .wcwidth);
+                const tb = try TextBuffer.init(allocator, &pools.graphemes, &pools.links, .wcwidth);
                 defer tb.deinit();
 
                 const style = try SyntaxStyle.init(allocator);

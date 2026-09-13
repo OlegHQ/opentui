@@ -1,4 +1,5 @@
 const std = @import("std");
+const TestPools = @import("../tests/test-pools.zig").TestPools;
 const ansi = @import("../ansi.zig");
 const buffer = @import("../buffer.zig");
 const gp = @import("../grapheme.zig");
@@ -7,10 +8,13 @@ const EmbeddedTerminal = @import("main.zig").EmbeddedTerminal;
 const ghostty = @import("ghostty.zig");
 
 test "embedded terminal retries every row after composition allocation failure" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
     var pool = gp.GraphemePool.init(failing.allocator());
     defer pool.deinit();
-    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 3, .{ .pool = &pool });
+    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 3, .{ .link_pool = link_pool, .pool = &pool });
     defer target.deinit();
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 4, .rows = 3 });
     defer terminal.deinit();
@@ -32,9 +36,12 @@ test "embedded terminal retries every row after composition allocation failure" 
 }
 
 test "embedded terminal clips extreme signed origins without overflow" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
-    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 3, .{ .pool = &pool });
+    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 3, .{ .link_pool = link_pool, .pool = &pool });
     defer target.deinit();
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 4, .rows = 3 });
     defer terminal.deinit();
@@ -56,11 +63,14 @@ test "embedded terminal clips extreme signed origins without overflow" {
 }
 
 test "embedded terminal checked composition preserves widths backgrounds and clean rows" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
-    const legacy = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 3, .{ .pool = &pool });
+    const legacy = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 3, .{ .link_pool = link_pool, .pool = &pool });
     defer legacy.deinit();
-    const checked = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 3, .{ .pool = &pool, .width_method = .wcwidth });
+    const checked = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 3, .{ .link_pool = link_pool, .pool = &pool, .width_method = .wcwidth });
     defer checked.deinit();
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 8, .rows = 3 });
     defer terminal.deinit();
@@ -95,11 +105,14 @@ test "embedded terminal checked composition preserves widths backgrounds and cle
 }
 
 test "embedded terminal checked composition preserves parser-accepted control cells" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
-    const legacy = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .pool = &pool });
+    const legacy = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .link_pool = link_pool, .pool = &pool });
     defer legacy.deinit();
-    const checked = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .pool = &pool });
+    const checked = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .link_pool = link_pool, .pool = &pool });
     defer checked.deinit();
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 4, .rows = 1 });
     defer terminal.deinit();
@@ -116,9 +129,12 @@ test "embedded terminal checked composition preserves parser-accepted control ce
 }
 
 test "embedded terminal checked composition skips oversized clipped graphemes" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
-    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .pool = &pool });
+    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 4, 1, .{ .link_pool = link_pool, .pool = &pool });
     defer target.deinit();
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 4, .rows = 1 });
     defer terminal.deinit();
@@ -129,9 +145,12 @@ test "embedded terminal checked composition skips oversized clipped graphemes" {
 }
 
 test "embedded terminal checked composition rejects cell bounds before changing accepted cells" {
+    var link_pool_storage = link.LinkPool.init(std.testing.allocator);
+    defer link_pool_storage.deinit();
+    const link_pool = &link_pool_storage;
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
-    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 2, .{ .pool = &pool });
+    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 2, .{ .link_pool = link_pool, .pool = &pool });
     defer target.deinit();
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 8, .rows = 3 });
     defer terminal.deinit();
@@ -219,9 +238,10 @@ test "embedded terminal checked composition owns cells and retries after every a
 }
 
 test "embedded terminal composes dirty rows into an OptimizedBuffer" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 12, 4, .{ .pool = pool });
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 12, 4, .{ .link_pool = &pools.links, .pool = &pools.graphemes });
     defer target.deinit();
     target.clear(ansi.rgbColor(0, 0, 0, 255), null);
 
@@ -249,9 +269,10 @@ test "embedded terminal composes dirty rows into an OptimizedBuffer" {
 }
 
 test "embedded terminal redraws changed rows and clips composition" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 5, 2, .{ .pool = pool });
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 5, 2, .{ .link_pool = &pools.links, .pool = &pools.graphemes });
     defer target.deinit();
 
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 4, .rows = 2 });
@@ -276,9 +297,10 @@ test "embedded terminal redraws changed rows and clips composition" {
 }
 
 test "embedded terminal exposes cursor state" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 20, 4, .{ .pool = pool });
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 20, 4, .{ .link_pool = &pools.links, .pool = &pools.graphemes });
     defer target.deinit();
 
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 20, .rows = 4 });
@@ -311,9 +333,10 @@ test "embedded terminal supports lifecycle, resize, and viewport scroll" {
 }
 
 test "embedded terminal selects rendered cells and extracts text" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 2, .{ .pool = pool });
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 2, .{ .link_pool = &pools.links, .pool = &pools.graphemes });
     defer target.deinit();
 
     const terminal = try EmbeddedTerminal.init(std.testing.io, std.testing.allocator, .{ .cols = 8, .rows = 2 });
@@ -338,9 +361,10 @@ test "embedded terminal selects rendered cells and extracts text" {
 }
 
 test "embedded terminal selection highlights text without unused cells" {
-    const pool = gp.initGlobalPool(std.testing.allocator);
-    defer gp.deinitGlobalPool();
-    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 3, .{ .pool = pool });
+    var pools = TestPools.init(std.testing.allocator);
+    defer pools.deinit();
+
+    var target = try buffer.OptimizedBuffer.init(std.testing.allocator, 8, 3, .{ .link_pool = &pools.links, .pool = &pools.graphemes });
     defer target.deinit();
 
     const cases = [_]struct {
