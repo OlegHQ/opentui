@@ -4,6 +4,7 @@ const gp = @import("../grapheme.zig");
 const link = @import("../link.zig");
 const iter_mod = @import("../text-buffer-iterators.zig");
 const TextAttributes = @import("../ansi.zig").TextAttributes;
+const owned_styled = @import("owned-styled-text.zig");
 
 const TextBuffer = text_buffer.UnifiedTextBuffer;
 
@@ -113,13 +114,8 @@ test "TextBuffer CJK layout cache survives history and multiple views" {
     try std.testing.expectEqual(@as(u32, 1), first.getVirtualLineCount());
     try tb.setText(original);
     try std.testing.expectEqual(@as(u32, 11), second.getVirtualLineCount());
-    try tb.setStyledText(&.{.{
-        .text_ptr = replacement.ptr,
-        .text_len = replacement.len,
-        .fg_ptr = null,
-        .bg_ptr = null,
-        .attributes = 0,
-    }});
+    const styled = try owned_styled.replace(tb, null, &.{.{ .text = replacement }});
+    defer styled.style.deinit();
     try std.testing.expectEqual(@as(u32, 10), first.getVirtualLineCount());
     try std.testing.expectEqual(@as(u32, 8), second.getVirtualLineCount());
 }
@@ -1096,7 +1092,7 @@ test "TextBuffer setText - preserves previously registered memory buffers" {
     try std.testing.expectEqualStrings("Previous", out_buffer[0..written]);
 }
 
-test "TextBuffer setStyledText - preserves previously registered memory buffers" {
+test "TextBuffer owned styled replacement preserves previously registered memory buffers" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     const link_pool = link.initGlobalLinkPool(std.testing.allocator);
@@ -1105,30 +1101,14 @@ test "TextBuffer setStyledText - preserves previously registered memory buffers"
     var tb = try TextBuffer.init(std.testing.allocator, pool, link_pool, .unicode);
     defer tb.deinit();
 
-    // Register a memory buffer before setStyledText
     const preserved_text = "Preserved data";
     const preserved_mem_id = try tb.registerMemBuffer(preserved_text, false);
 
-    // Use setStyledText (which now calls clear() not reset())
-    const chunk1_text = "Styled ";
-    const chunk2_text = "Text";
-    const chunks = [_]text_buffer.StyledChunk{
-        .{
-            .text_ptr = chunk1_text.ptr,
-            .text_len = chunk1_text.len,
-            .fg_ptr = null,
-            .bg_ptr = null,
-            .attributes = 0,
-        },
-        .{
-            .text_ptr = chunk2_text.ptr,
-            .text_len = chunk2_text.len,
-            .fg_ptr = null,
-            .bg_ptr = null,
-            .attributes = 0,
-        },
-    };
-    try tb.setStyledText(&chunks);
+    const styled = try owned_styled.replace(tb, null, &.{
+        .{ .text = "Styled " },
+        .{ .text = "Text" },
+    });
+    defer styled.style.deinit();
 
     try std.testing.expectEqual(@as(u32, 1), tb.getLineCount());
 
@@ -1746,17 +1726,18 @@ fn runPlainTextOperation(tb: *TextBuffer, operation: PlainTextOperation, text: [
     return mem_id;
 }
 
-fn setupPlainTextHistory(tb: *TextBuffer, style: *text_buffer.SyntaxStyle) !void {
-    tb.setSyntaxStyle(style);
-    try tb.setStyledText(&.{.{
-        .text_ptr = "old\ttext\nsecond".ptr,
-        .text_len = "old\ttext\nsecond".len,
-        .fg_ptr = null,
-        .bg_ptr = null,
-        .attributes = 0,
-        .link_ptr = "https://example.com/plain".ptr,
-        .link_len = "https://example.com/plain".len,
-    }});
+fn setupPlainTextHistory(tb: *TextBuffer, style: *text_buffer.SyntaxStyle) !u8 {
+    const text = "old\ttext\nsecond";
+    const copy = try tb.global_allocator.dupe(u8, text);
+    errdefer tb.global_allocator.free(copy);
+    var prepared_links = link.LinkTracker.init(tb.global_allocator, tb.link_pool);
+    defer prepared_links.deinit();
+    const link_id = try prepared_links.trackUrl("https://example.com/plain");
+    const style_id = try style.registerStyle("chunk0", null, null, TextAttributes.setLinkId(0, link_id));
+    const mem_id = try tb.replaceOwnedStyledText(copy, null, style, &.{.{
+        .byte_count = @intCast(text.len),
+        .style_id = style_id,
+    }}, &prepared_links);
     try tb.rope().store_undo("base");
     try tb.append(" tail");
     try tb.rope().store_undo("tail");
@@ -1764,6 +1745,7 @@ fn setupPlainTextHistory(tb: *TextBuffer, style: *text_buffer.SyntaxStyle) !void
     _ = try tb.undo("last");
     try tb.addHighlight(0, 2, 4, 42, 2, 7);
     try tb.addHighlight(1, 0, 2, 43, 2, 8);
+    return mem_id;
 }
 
 test "TextBuffer plain replacement registration limit preserves the live document" {
@@ -1775,7 +1757,7 @@ test "TextBuffer plain replacement registration limit preserves the live documen
     defer style.deinit();
     const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, .unicode);
     defer tb.deinit();
-    try setupPlainTextHistory(tb, style);
+    _ = try setupPlainTextHistory(tb, style);
     while (tb.mem_registry.buffers.items.len < 255) _ = try tb.registerMemBuffer("spare", false);
     const view = try tb.registerView();
     tb.clearViewDirty(view);
@@ -1850,9 +1832,9 @@ fn checkPlainTextAllocationFailures(operation: PlainTextOperation) !void {
                 var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
                 const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
                 defer tb.deinit();
-                try setupPlainTextHistory(tb, style);
+                const history_mem_id = try setupPlainTextHistory(tb, style);
                 const mem_id = switch (operation) {
-                    .replace_slot, .owned_slot => tb.styled_text_mem_id.?,
+                    .replace_slot, .owned_slot => history_mem_id,
                     .from_mem, .with_undo => try tb.registerMemBuffer(input, false),
                     else => 0,
                 };
@@ -2182,11 +2164,6 @@ test "TextBuffer owned styled replacement matches concatenated chunk ranges" {
     };
     for ([_]@import("../utf8.zig").WidthMethod{ .unicode, .wcwidth, .no_zwj, .unicode_wide }) |method| {
         for (cases) |parts| {
-            const legacy_style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
-            defer legacy_style.deinit();
-            const legacy = try TextBuffer.init(std.testing.allocator, &pool, &links, method);
-            defer legacy.deinit();
-            legacy.setSyntaxStyle(legacy_style);
             const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
             defer style.deinit();
             const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, method);
@@ -2197,42 +2174,61 @@ test "TextBuffer owned styled replacement matches concatenated chunk ranges" {
                 .tab_width = tb.tabWidth(),
                 .width_method = method,
             };
-            var legacy_chunks: [4]text_buffer.StyledChunk = undefined;
             var chunks: [4]text_buffer.OwnedStyledChunk = undefined;
+            var starts: [4]u32 = undefined;
+            var ends: [4]u32 = undefined;
+            var attributes: [4]u32 = undefined;
             var byte_end: usize = 0;
             for (parts, 0..) |part, i| {
-                const attributes: u32 = @intCast(i + 1);
-                legacy_chunks[i] = .{
-                    .text_ptr = part.ptr,
-                    .text_len = part.len,
-                    .fg_ptr = null,
-                    .bg_ptr = null,
-                    .attributes = attributes,
-                };
-                const char_pos = width_cursor.columns;
+                attributes[i] = @intCast(i + 1);
+                starts[i] = width_cursor.columns;
                 byte_end += part.len;
-                const char_end = width_cursor.advanceTo(byte_end);
+                ends[i] = width_cursor.advanceTo(byte_end);
                 var name_buffer: [32]u8 = undefined;
                 const name = try std.fmt.bufPrint(&name_buffer, "chunk{d}", .{i});
                 chunks[i] = .{
                     .byte_count = @intCast(part.len),
-                    .style_id = if (char_end == char_pos) 0 else try style.registerStyle(name, null, null, attributes),
+                    .style_id = if (ends[i] == starts[i]) 0 else try style.registerStyle(name, null, null, attributes[i]),
                 };
             }
-            try legacy.setStyledText(legacy_chunks[0..parts.len]);
             _ = tb.replaceOwnedStyledText(copy, null, style, chunks[0..parts.len], null) catch |err| {
                 std.testing.allocator.free(copy);
                 return err;
             };
-            try std.testing.expectEqual(legacy.getLength(), tb.getLength());
-            try std.testing.expectEqual(legacy.getLineCount(), tb.getLineCount());
-            var expected: [64]u8 = undefined;
             var actual: [64]u8 = undefined;
-            try std.testing.expectEqualStrings(expected[0..legacy.getPlainTextIntoBuffer(&expected)], actual[0..tb.getPlainTextIntoBuffer(&actual)]);
-            for (0..tb.getLineCount()) |line| {
-                try std.testing.expectEqualDeep(legacy.getLineHighlights(line), tb.getLineHighlights(line));
-                try std.testing.expectEqualDeep(legacy.getLineSpans(line), tb.getLineSpans(line));
+            const written = tb.getPlainTextIntoBuffer(&actual);
+            if (std.mem.indexOfScalar(u8, copy, '\r') == null) {
+                try std.testing.expectEqualStrings(copy, actual[0..written]);
             }
+            var line_col: u32 = 0;
+            for (0..tb.getLineCount()) |line| {
+                const line_width = tb.lineWidthAt(@intCast(line));
+                const highlights = tb.getLineHighlights(line);
+                const spans = tb.getLineSpans(line);
+                try std.testing.expectEqual(highlights.len, spans.len);
+                var expected_count: usize = 0;
+                for (0..parts.len) |i| {
+                    if (ends[i] == starts[i]) continue;
+                    const start = @max(starts[i], line_col);
+                    const end = @min(ends[i], line_col + line_width);
+                    if (start >= end) continue;
+                    try std.testing.expectEqual(start - line_col, highlights[expected_count].col_start);
+                    try std.testing.expectEqual(end - line_col, highlights[expected_count].col_end);
+                    try std.testing.expect(highlights[expected_count].internal);
+                    try std.testing.expectEqual(@as(u8, 1), highlights[expected_count].priority);
+                    try std.testing.expectEqual(
+                        attributes[i],
+                        style.resolveById(highlights[expected_count].style_id).?.attributes,
+                    );
+                    try std.testing.expectEqual(highlights[expected_count].col_start, spans[expected_count].col);
+                    try std.testing.expectEqual(highlights[expected_count].col_end, spans[expected_count].next_col);
+                    try std.testing.expectEqual(highlights[expected_count].style_id, spans[expected_count].style_id);
+                    expected_count += 1;
+                }
+                try std.testing.expectEqual(expected_count, highlights.len);
+                line_col += line_width;
+            }
+            try std.testing.expectEqual(width_cursor.columns, line_col);
         }
     }
 }
@@ -2354,34 +2350,24 @@ test "TextBuffer plain replacement textToSegments measures supplied bytes with i
 test "TextBuffer clear and reset retire multipage links without pool allocation" {
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
-    const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
     for ([_]bool{ false, true }) |reset| {
         var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
         var links = link.LinkPool.init(failing.allocator());
         defer links.deinit();
         const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, .unicode);
         defer tb.deinit();
-        tb.setSyntaxStyle(style);
         var urls: [130][64]u8 = undefined;
-        var chunks: [130]text_buffer.StyledChunk = undefined;
-        for (&chunks, &urls, 0..) |*chunk, *url_buffer, index| {
+        var parts: [130]owned_styled.Part = undefined;
+        for (&parts, &urls, 0..) |*part, *url_buffer, index| {
             const url = try std.fmt.bufPrint(url_buffer, "https://retirement.invalid/{d}", .{index});
-            chunk.* = .{
-                .text_ptr = "A".ptr,
-                .text_len = 1,
-                .fg_ptr = null,
-                .bg_ptr = null,
-                .attributes = 0,
-                .link_ptr = url.ptr,
-                .link_len = url.len,
-            };
+            part.* = .{ .text = "A", .url = url };
         }
-        try tb.setStyledText(&chunks);
+        var styled = try owned_styled.replace(tb, null, &parts);
+        defer styled.style.deinit();
         const num_slots = links.num_slots;
         try std.testing.expect(num_slots > links.slots_per_page);
-        try std.testing.expectEqual(chunks.len, tb.link_tracker.?.getLinkCount());
-        try std.testing.expectEqual(chunks.len, links.interned_live_ids.count());
+        try std.testing.expectEqual(parts.len, tb.link_tracker.?.getLinkCount());
+        try std.testing.expectEqual(parts.len, links.interned_live_ids.count());
         const alloc_index = failing.alloc_index;
         const resize_index = failing.resize_index;
         failing.fail_index = alloc_index;
@@ -2398,9 +2384,11 @@ test "TextBuffer clear and reset retire multipage links without pool allocation"
 
         failing.fail_index = std.math.maxInt(usize);
         failing.resize_fail_index = std.math.maxInt(usize);
-        try tb.setStyledText(&chunks);
-        try std.testing.expectEqual(chunks.len, tb.getLength());
-        try std.testing.expectEqual(chunks.len, tb.link_tracker.?.getLinkCount());
+        const previous = styled;
+        styled = try owned_styled.replace(tb, if (reset) null else previous.mem_id, &parts);
+        previous.style.deinit();
+        try std.testing.expectEqual(parts.len, tb.getLength());
+        try std.testing.expectEqual(parts.len, tb.link_tracker.?.getLinkCount());
         try std.testing.expectEqual(num_slots, links.num_slots);
         try tb.clear();
         try std.testing.expectEqual(num_slots, links.getFreeSlotCount());
@@ -2414,18 +2402,11 @@ test "TextBuffer clear failure preserves text, highlights, links, and view state
     defer links.deinit();
     const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, .unicode);
     defer tb.deinit();
-    const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
-    try tb.setStyledText(&.{.{
-        .text_ptr = "old".ptr,
-        .text_len = 3,
-        .fg_ptr = null,
-        .bg_ptr = null,
-        .attributes = 0,
-        .link_ptr = "https://example.com".ptr,
-        .link_len = "https://example.com".len,
+    const styled = try owned_styled.replace(tb, null, &.{.{
+        .text = "old",
+        .url = "https://example.com",
     }});
+    defer styled.style.deinit();
     const replacement = try tb.registerMemBuffer("replacement", false);
     const view = try tb.registerView();
     tb.clearViewDirty(view);
@@ -2444,7 +2425,6 @@ test "TextBuffer clear failure preserves text, highlights, links, and view state
     try std.testing.expectError(error.OutOfMemory, tb.clear());
     try std.testing.expectError(error.OutOfMemory, tb.setText("replacement"));
     try std.testing.expectError(error.OutOfMemory, tb.setTextFromMemId(replacement));
-    try std.testing.expectError(error.OutOfMemory, tb.setStyledText(&.{}));
     try std.testing.expectEqual(old_root, tb.rope().root);
     try std.testing.expectEqual(old_version, tb.rope().version);
     try std.testing.expectEqual(old_epoch, tb.getContentEpoch());
@@ -2533,7 +2513,7 @@ test "TextBuffer reset allocation failure preserves the document and allows retr
         var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
         const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
         defer tb.deinit();
-        try setupPlainTextHistory(tb, style);
+        _ = try setupPlainTextHistory(tb, style);
         const view = try tb.registerView();
         tb.clearViewDirty(view);
         const before = TextState.capture(tb);
@@ -2563,56 +2543,7 @@ test "TextBuffer reset allocation failure preserves the document and allows retr
     return error.MissingSuccessfulReset;
 }
 
-test "TextBuffer styled replacement remains valid after allocation failures" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    var fail_offset: usize = 0;
-    while (true) : (fail_offset += 1) {
-        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-        const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
-        defer tb.deinit();
-        var chunk: text_buffer.StyledChunk = .{
-            .text_ptr = "old".ptr,
-            .text_len = 3,
-            .fg_ptr = null,
-            .bg_ptr = null,
-            .attributes = 0,
-        };
-        try tb.setStyledText(&.{chunk});
-        const old_root = tb.rope().root;
-        const old_bytes = tb.styled_buffer.?.ptr;
-        chunk.text_ptr = "replacement".ptr;
-        chunk.text_len = "replacement".len;
-        failing.fail_index = failing.alloc_index + fail_offset;
-        failing.resize_fail_index = failing.resize_index;
-        const result = tb.setStyledText(&.{chunk});
-        failing.fail_index = std.math.maxInt(usize);
-        failing.resize_fail_index = std.math.maxInt(usize);
-        var actual: [16]u8 = undefined;
-        if (result) {
-            const length = tb.getPlainTextIntoBuffer(&actual);
-            try std.testing.expectEqualStrings("replacement", actual[0..length]);
-            break;
-        } else |err| {
-            try std.testing.expectEqual(error.OutOfMemory, err);
-            try std.testing.expectEqual(@as(u32, 1), tb.getLineCount());
-            const length = tb.getPlainTextIntoBuffer(&actual);
-            if (tb.styled_buffer.?.ptr == old_bytes) {
-                try std.testing.expectEqual(old_root, tb.rope().root);
-                try std.testing.expectEqualStrings("old", actual[0..length]);
-            } else {
-                try std.testing.expectEqual(@as(usize, 0), length);
-            }
-            try tb.setStyledText(&.{chunk});
-            const recovered_length = tb.getPlainTextIntoBuffer(&actual);
-            try std.testing.expectEqualStrings("replacement", actual[0..recovered_length]);
-        }
-    }
-}
-
-test "TextBuffer setStyledText - repeated calls with SyntaxStyle (crash reproduction)" {
+test "TextBuffer owned styled replacement - repeated calls retain bounded arena" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     const link_pool = link.initGlobalLinkPool(std.testing.allocator);
@@ -2621,58 +2552,25 @@ test "TextBuffer setStyledText - repeated calls with SyntaxStyle (crash reproduc
     var tb = try TextBuffer.init(std.testing.allocator, pool, link_pool, .unicode);
     defer tb.deinit();
 
-    // Create a SyntaxStyle (similar to what Text.ts does)
-    const ss = @import("../syntax-style.zig");
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-
-    tb.setSyntaxStyle(style);
-
     const iterations = 10000;
     const initial_arena = tb.getArenaAllocatedBytes();
+    var current: ?owned_styled.Result = null;
+    defer if (current) |c| c.style.deinit();
 
-    // Simulate what styled-text-demo does - call setStyledText repeatedly
     var iteration: u32 = 0;
     while (iteration < iterations) : (iteration += 1) {
-        // Create styled chunks similar to the demo
-        const text1 = "System Stats: ";
-        const text2 = "Frame: ";
         var frame_buf: [32]u8 = undefined;
         const frame_text = try std.fmt.bufPrint(&frame_buf, "{}", .{iteration});
-
-        const chunks = [_]text_buffer.StyledChunk{
-            .{
-                .text_ptr = text1.ptr,
-                .text_len = text1.len,
-                .fg_ptr = null,
-                .bg_ptr = null,
-                .attributes = 1, // bold
-            },
-            .{
-                .text_ptr = text2.ptr,
-                .text_len = text2.len,
-                .fg_ptr = null,
-                .bg_ptr = null,
-                .attributes = 0,
-            },
-            .{
-                .text_ptr = frame_text.ptr,
-                .text_len = frame_text.len,
-                .fg_ptr = null,
-                .bg_ptr = null,
-                .attributes = 0,
-            },
-        };
-
-        try tb.setStyledText(&chunks);
+        try owned_styled.replaceInPlace(tb, &current, &.{
+            .{ .text = "System Stats: ", .attributes = 1 },
+            .{ .text = "Frame: " },
+            .{ .text = frame_text },
+        });
         try std.testing.expectEqual(@as(u32, 1), tb.getLineCount());
     }
 
     const final_arena = tb.getArenaAllocatedBytes();
     const arena_growth = final_arena - initial_arena;
-
-    // Arena should not grow significantly - setStyledText should reuse memory
-    // Max 50KB growth is reasonable for rope structure
     const max_expected_growth = 50000;
     try std.testing.expect(arena_growth < max_expected_growth);
 }

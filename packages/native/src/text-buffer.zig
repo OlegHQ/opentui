@@ -11,7 +11,6 @@ const ansi = @import("ansi.zig");
 const link = @import("link.zig");
 
 const utf8 = @import("utf8.zig");
-const utils = @import("utils.zig");
 
 const logger = @import("logger.zig");
 
@@ -33,24 +32,6 @@ pub const RenderClusterInfo = seg_mod.RenderClusterInfo;
 pub const SyntaxStyle = ss.SyntaxStyle;
 
 pub const TextBuffer = UnifiedTextBuffer;
-
-/// A styled text chunk passed from TypeScript across the FFI boundary.
-/// Each chunk carries raw text bytes, optional packed RGBA colors, text
-/// attributes, and an optional hyperlink URL.
-///
-/// The color pointers point to 4 consecutive u16 values in the packed RGBA
-/// format defined by ansi.zig. Use utils.ptrToRGBA to read them.
-pub const StyledChunk = extern struct {
-    text_ptr: [*]const u8,
-    text_len: usize,
-    /// Optional foreground color as 4 packed u16 values (see ansi.RGBA).
-    fg_ptr: ?[*]const u16,
-    /// Optional background color as 4 packed u16 values (see ansi.RGBA).
-    bg_ptr: ?[*]const u16,
-    attributes: u32,
-    link_ptr: ?[*]const u8 = null,
-    link_len: usize = 0,
-};
 
 /// Consecutive nonempty ranges of the copied text, with caller-prepared style IDs.
 pub const OwnedStyledChunk = struct {
@@ -97,10 +78,6 @@ pub const UnifiedTextBuffer = struct {
     internal_highlight_count: usize,
     highlight_batch_depth: u32,
     dirty_span_lines: std.AutoHashMap(usize, void),
-
-    styled_text_mem_id: ?u8,
-    styled_buffer: ?[]u8,
-    styled_capacity: usize,
 
     tab_width: u8,
     // Persistent roots carry the tab-width generation used for their cached
@@ -319,9 +296,6 @@ pub const UnifiedTextBuffer = struct {
             .internal_highlight_count = 0,
             .highlight_batch_depth = 0,
             .dirty_span_lines = dirty_span_lines,
-            .styled_text_mem_id = null,
-            .styled_buffer = null,
-            .styled_capacity = 0,
             .tab_width = 2,
             .tab_metrics_generation = 1,
         };
@@ -368,12 +342,6 @@ pub const UnifiedTextBuffer = struct {
         // Free dirty span lines hashmap
         self.dirty_span_lines.deinit();
         self.dirty_span_lines = std.AutoHashMap(usize, void).init(self.global_allocator);
-
-        // Free persistent styled text buffer
-        if (self.styled_buffer) |buf| {
-            self.global_allocator.free(buf);
-        }
-        self.styled_buffer = null;
 
         if (self.link_tracker) |*tracker| {
             tracker.deinit();
@@ -531,14 +499,6 @@ pub const UnifiedTextBuffer = struct {
         }
         self.line_spans.clearRetainingCapacity();
 
-        // Free persistent styled text buffer
-        if (self.styled_buffer) |buf| {
-            self.global_allocator.free(buf);
-        }
-        self.styled_buffer = null;
-        self.styled_text_mem_id = null;
-        self.styled_capacity = 0;
-
         self.layout_cache.clear();
         self.arena.deinit();
         self.arena.* = replacement_arena;
@@ -589,14 +549,6 @@ pub const UnifiedTextBuffer = struct {
 
     pub fn getSyntaxStyle(self: *const Self) ?*const SyntaxStyle {
         return self.syntax_style;
-    }
-
-    fn getLinkTracker(self: *Self) *link.LinkTracker {
-        if (self.link_tracker == null) {
-            self.link_tracker = link.LinkTracker.init(self.global_allocator, self.link_pool);
-        }
-
-        return &self.link_tracker.?;
     }
 
     fn clearLinkRefs(self: *Self) void {
@@ -1048,7 +1000,7 @@ pub const UnifiedTextBuffer = struct {
         self.markAllViewsDirty();
     }
 
-    /// Internal setText that doesn't call clear (for use by setStyledText)
+    /// Replace rope content from an already-registered memory id without clearing.
     fn setTextInternal(self: *Self, mem_id: u8, text: []const u8) TextBufferError!void {
         if (text.len == 0) {
             self.markAllViewsDirty();
@@ -1679,131 +1631,6 @@ pub const UnifiedTextBuffer = struct {
             count += @intCast(hl_list.items.len);
         }
         return count;
-    }
-
-    /// Set styled text from chunks with individual styling
-    /// Accepts StyledChunk array for FFI compatibility
-    /// TODO: This is for backward compatibility, there should be a better way to do this.
-    pub fn setStyledText(
-        self: *Self,
-        chunks: []const StyledChunk,
-    ) TextBufferError!void {
-        if (chunks.len == 0) {
-            try self.clear();
-            self.clearAllHighlights();
-            return;
-        }
-
-        // Calculate total text length
-        var total_len: usize = 0;
-        for (chunks) |chunk| {
-            total_len += chunk.text_len;
-        }
-
-        if (total_len == 0) {
-            try self.clear();
-            self.clearAllHighlights();
-            return;
-        }
-
-        // Prepare a valid empty rope before releasing the old arena.
-        {
-            var replacement_arena = std.heap.ArenaAllocator.init(self.global_allocator);
-            errdefer replacement_arena.deinit();
-            const replacement_rope = try UnifiedRope.init(replacement_arena.allocator());
-            const new_buffer: ?[]u8 = if (total_len > self.styled_capacity)
-                try self.global_allocator.alloc(u8, total_len)
-            else
-                null;
-            self.clearLinkRefs();
-            self.clearAllHighlights();
-            self.layout_cache.clear();
-            self.arena.deinit();
-            self.arena.* = replacement_arena;
-            self._rope = replacement_rope;
-            self._rope.allocator = self.allocator;
-            self._rope.marker_cache = UnifiedRope.MarkerCache.init(self.allocator);
-            if (new_buffer) |new_buf| {
-                if (self.styled_buffer) |old_buf| {
-                    self.global_allocator.free(old_buf);
-                }
-                self.styled_buffer = new_buf;
-                self.styled_capacity = total_len;
-            }
-            self.markAllViewsDirty();
-        }
-
-        const full_text = self.styled_buffer.?[0..total_len];
-
-        var offset: usize = 0;
-        for (chunks) |chunk| {
-            if (chunk.text_len > 0) {
-                const chunk_text = chunk.text_ptr[0..chunk.text_len];
-                @memcpy(full_text[offset .. offset + chunk.text_len], chunk_text);
-                offset += chunk.text_len;
-            }
-        }
-
-        if (self.styled_text_mem_id) |mem_id| {
-            try self.mem_registry.replace(mem_id, full_text, false);
-        } else {
-            const mem_id = try self.mem_registry.register(full_text, false);
-            self.styled_text_mem_id = mem_id;
-        }
-
-        try self.setTextInternal(self.styled_text_mem_id.?, full_text);
-
-        if (self.syntax_style) |style| {
-            var seen_link_ids: std.AutoHashMapUnmanaged(u32, void) = .empty;
-            defer seen_link_ids.deinit(self.global_allocator);
-
-            self.startHighlightsTransaction();
-            defer self.endHighlightsTransaction();
-
-            var width_cursor = utf8.TextWidthCursor{
-                .text = full_text,
-                .tab_width = self.tab_width,
-                .width_method = self.width_method,
-            };
-            var byte_end: usize = 0;
-            for (chunks, 0..) |chunk, i| {
-                const char_pos = width_cursor.columns;
-                byte_end += chunk.text_len;
-                const char_end = width_cursor.advanceTo(byte_end);
-
-                if (char_end > char_pos) {
-                    const fg = if (chunk.fg_ptr) |fgPtr| utils.ptrToRGBA(fgPtr) else null;
-                    const bg = if (chunk.bg_ptr) |bgPtr| utils.ptrToRGBA(bgPtr) else null;
-
-                    var attributes = chunk.attributes;
-                    if (chunk.link_ptr) |link_ptr| {
-                        if (chunk.link_len > 0) {
-                            const tracker = self.getLinkTracker();
-                            const url = link_ptr[0..chunk.link_len];
-                            const link_id = tracker.pool.alloc(url) catch 0;
-                            if (link_id != 0) {
-                                const maybe_seen = seen_link_ids.getOrPut(self.global_allocator, link_id) catch null;
-                                const should_track = if (maybe_seen) |seen| !seen.found_existing else true;
-                                if (should_track) {
-                                    tracker.addCellRef(link_id);
-                                }
-                                attributes = ansi.TextAttributes.setLinkId(attributes, link_id);
-                            }
-                        }
-                    }
-
-                    var style_name_buf: [64]u8 = undefined;
-                    const style_name = std.fmt.bufPrint(&style_name_buf, "chunk{d}", .{i}) catch continue;
-                    const style_id = (@constCast(style)).registerStyleDefinition(style_name, .{
-                        .fg = fg,
-                        .bg = bg,
-                        .attributes = attributes,
-                    }) catch continue;
-
-                    self.addHighlightByCharRangeInternal(char_pos, char_end, style_id, 1, 0, true) catch {};
-                }
-            }
-        }
     }
 
     /// Load text from a file path (relative to cwd)

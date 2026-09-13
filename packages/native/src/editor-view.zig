@@ -52,6 +52,8 @@ pub const EditorView = struct {
 
     placeholder_buffer: ?*UnifiedTextBuffer,
     placeholder_syntax_style: ?*ss.SyntaxStyle,
+    /// Preferred registry slot for the placeholder's owned input bytes.
+    placeholder_mem_id: ?u8,
     placeholder_active: bool,
 
     // Memory management
@@ -96,6 +98,7 @@ pub const EditorView = struct {
             },
             .placeholder_buffer = null,
             .placeholder_syntax_style = null,
+            .placeholder_mem_id = null,
             .placeholder_active = false,
             .global_allocator = global_allocator,
         };
@@ -938,41 +941,20 @@ pub const EditorView = struct {
     // Placeholder - Visual Only
     // ============================================================================
 
-    pub fn setPlaceholderStyledText(self: *EditorView, chunks: []const tb.StyledChunk) !void {
-        if (chunks.len == 0) {
-            if (self.placeholder_active) {
-                self.text_buffer_view.switchToOriginalBuffer();
-                self.placeholder_active = false;
-            }
-            if (self.placeholder_syntax_style) |style| {
-                style.deinit();
-                self.placeholder_syntax_style = null;
-            }
-            if (self.placeholder_buffer) |placeholder| {
-                placeholder.deinit();
-                self.placeholder_buffer = null;
-            }
-            return;
+    pub fn clearPlaceholder(self: *EditorView) void {
+        if (self.placeholder_active) {
+            self.text_buffer_view.switchToOriginalBuffer();
+            self.placeholder_active = false;
         }
-
-        const placeholder = self.placeholder_buffer orelse try UnifiedTextBuffer.initWithOptions(
-            self.global_allocator,
-            self.edit_buffer.tb.pool,
-            self.edit_buffer.tb.link_pool,
-            self.edit_buffer.tb.width_method,
-            .{ .io = self.edit_buffer.tb.io, .logger = self.edit_buffer.tb.logger },
-        );
-        errdefer if (self.placeholder_buffer == null) placeholder.deinit();
-        const style = self.placeholder_syntax_style orelse try ss.SyntaxStyle.init(self.global_allocator);
-        errdefer if (self.placeholder_syntax_style == null) style.deinit();
-        if (self.placeholder_buffer == null) placeholder.setSyntaxStyle(style);
-        // Legacy replacement can change the rope before an allocation fails.
-        if (self.placeholder_active) self.text_buffer_view.virtual_lines_dirty = true;
-        try placeholder.setStyledText(chunks);
-        self.placeholder_buffer = placeholder;
-        self.placeholder_syntax_style = style;
-
-        self.updatePlaceholderVisibility();
+        if (self.placeholder_syntax_style) |style| {
+            style.deinit();
+            self.placeholder_syntax_style = null;
+        }
+        if (self.placeholder_buffer) |placeholder| {
+            placeholder.deinit();
+            self.placeholder_buffer = null;
+        }
+        self.placeholder_mem_id = null;
     }
 
     /// Consume registry-allocator bytes and a fresh style only on success; move prepared links.
@@ -992,9 +974,9 @@ pub const EditorView = struct {
             .{ .io = self.edit_buffer.tb.io, .logger = self.edit_buffer.tb.logger },
         );
         errdefer if (self.placeholder_buffer == null) placeholder.deinit();
-        placeholder.styled_text_mem_id = try placeholder.replaceOwnedStyledText(
+        const mem_id = try placeholder.replaceOwnedStyledText(
             text,
-            placeholder.styled_text_mem_id,
+            self.placeholder_mem_id,
             style,
             chunks,
             prepared_links,
@@ -1002,6 +984,7 @@ pub const EditorView = struct {
         const previous_style = self.placeholder_syntax_style;
         self.placeholder_buffer = placeholder;
         self.placeholder_syntax_style = style;
+        self.placeholder_mem_id = mem_id;
         if (previous_style) |previous| previous.deinit();
 
         if (self.placeholder_active) {

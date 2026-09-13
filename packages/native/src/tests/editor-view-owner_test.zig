@@ -2,20 +2,16 @@ const std = @import("std");
 const testing = std.testing;
 const EditorView = @import("../editor-view.zig").EditorView;
 const EditBuffer = @import("../edit-buffer.zig").EditBuffer;
-const text_buffer = @import("../text-buffer.zig");
 const gp = @import("../grapheme.zig");
 const link = @import("../link.zig");
 const logger = @import("../logger.zig");
-
-test "EditorView - styled placeholder inherits owner I/O and logger" {
-    try expectPlaceholderOwner(false);
-}
+const owned_styled = @import("owned-styled-text.zig");
 
 test "EditorView - owned placeholder inherits owner I/O and logger" {
-    try expectPlaceholderOwner(true);
+    try expectPlaceholderOwner();
 }
 
-fn expectPlaceholderOwner(owned: bool) !void {
+fn expectPlaceholderOwner() !void {
     const LegacyProbe = struct {
         var calls: u32 = 0;
 
@@ -42,25 +38,7 @@ fn expectPlaceholderOwner(owned: bool) !void {
     const ev = try EditorView.init(testing.allocator, eb, 10, 2);
     defer ev.deinit();
 
-    if (owned) {
-        const style = try text_buffer.SyntaxStyle.init(testing.allocator);
-        errdefer style.deinit();
-        const style_id = try style.registerStyle("hint", null, null, 0);
-        const bytes = try testing.allocator.dupe(u8, "hint");
-        errdefer testing.allocator.free(bytes);
-        try ev.setPlaceholderOwnedStyledText(bytes, style, &.{.{
-            .byte_count = @intCast(bytes.len),
-            .style_id = style_id,
-        }}, null);
-    } else {
-        try ev.setPlaceholderStyledText(&.{.{
-            .text_ptr = "hint",
-            .text_len = 4,
-            .fg_ptr = null,
-            .bg_ptr = null,
-            .attributes = 0,
-        }});
-    }
+    try owned_styled.setPlaceholder(ev, &.{.{ .text = "hint" }});
 
     const placeholder = ev.placeholder_buffer.?;
     placeholder.debugLogRope();
@@ -106,7 +84,7 @@ test "EditorView - logical line queries reuse prepared storage until content or 
     ev.setViewportSize(3, 2);
     try testing.expectEqualSlices(u32, &.{ 3, 3 }, ev.getLogicalLineInfo().line_width_cols);
     try eb.setText("");
-    try ev.setPlaceholderStyledText(&.{.{ .text_ptr = "hint", .text_len = 4, .fg_ptr = null, .bg_ptr = null, .attributes = 0 }});
+    try owned_styled.setPlaceholder(ev, &.{.{ .text = "hint" }});
     try testing.expectEqualSlices(u32, &.{ 3, 1 }, ev.getLogicalLineInfo().line_width_cols);
     try eb.setText("x");
     try testing.expectEqualSlices(u32, &.{1}, ev.getLogicalLineInfo().line_width_cols);
@@ -157,60 +135,5 @@ test "EditorView - rejected selected deletion preserves selection and local endp
         try testing.expect(ev.getSelection() == null);
         try testing.expect(ev.text_buffer_view.selection_endpoints == null);
         try testing.expect(!ev.selection_updates_cursor);
-    }
-}
-
-test "EditorView - failed active legacy placeholder replacement refreshes logical lines" {
-    var fail_offset: usize = 0;
-    while (true) : (fail_offset += 1) {
-        var failing = testing.FailingAllocator.init(testing.allocator, .{});
-        const allocator = failing.allocator();
-        var pool = gp.GraphemePool.init(allocator);
-        defer pool.deinit();
-        var links = link.LinkPool.init(allocator);
-        defer links.deinit();
-        const eb = try EditBuffer.init(allocator, &pool, &links, .unicode, null);
-        defer eb.deinit();
-        const ev = try EditorView.init(allocator, eb, 20, 2);
-        defer ev.deinit();
-        try ev.setPlaceholderStyledText(&.{.{
-            .text_ptr = "hint",
-            .text_len = 4,
-            .fg_ptr = null,
-            .bg_ptr = null,
-            .attributes = 0,
-        }});
-        try testing.expectEqualSlices(u32, &.{4}, ev.getLogicalLineInfo().line_width_cols);
-        try testing.expect(ev.placeholder_active);
-        try testing.expect(!ev.text_buffer_view.virtual_lines_dirty);
-
-        failing.fail_index = failing.alloc_index + fail_offset;
-        failing.resize_fail_index = failing.resize_index;
-        const result = ev.setPlaceholderStyledText(&.{.{
-            .text_ptr = "replacement\nsecond",
-            .text_len = 18,
-            .fg_ptr = null,
-            .bg_ptr = null,
-            .attributes = 0,
-        }});
-        failing.fail_index = std.math.maxInt(usize);
-        failing.resize_fail_index = std.math.maxInt(usize);
-        if (result) |_| {
-            break;
-        } else |err| {
-            try testing.expectEqual(error.OutOfMemory, err);
-            try testing.expect(failing.has_induced_failure);
-        }
-
-        const queried = try testing.allocator.dupe(u32, ev.getLogicalLineInfo().line_width_cols);
-        defer testing.allocator.free(queried);
-        ev.text_buffer_view.virtual_lines_dirty = true;
-        const rebuilt = ev.getLogicalLineInfo().line_width_cols;
-        if (!std.mem.eql(u32, queried, rebuilt)) {
-            std.debug.print("placeholder failure offset {d}: queried={any}, rebuilt={any}\n", .{
-                fail_offset, queried, rebuilt,
-            });
-        }
-        try testing.expectEqualSlices(u32, rebuilt, queried);
     }
 }

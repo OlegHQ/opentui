@@ -7,6 +7,7 @@ const opt_buffer_mod = @import("../buffer.zig");
 const ansi = @import("../ansi.zig");
 const gp = @import("../grapheme.zig");
 const link = @import("../link.zig");
+const owned_styled = @import("owned-styled-text.zig");
 
 const EditorView = editor_view.EditorView;
 const EditBuffer = edit_buffer.EditBuffer;
@@ -2318,38 +2319,14 @@ test "EditorView - placeholder with styled text renders with correct highlights"
     var ev = try EditorView.init(std.testing.allocator, eb, 80, 24);
     defer ev.deinit();
 
-    const text_part1 = "Enter ";
-    const text_part2 = "something";
-    const text_part3 = " here";
-
     const fg_gray = ansi.rgbaFromFloats(0.5, 0.5, 0.5, 1.0);
     const fg_blue = ansi.rgbaFromFloats(0.3, 0.5, 0.9, 1.0);
 
-    const chunks = [_]text_buffer.StyledChunk{
-        .{
-            .text_ptr = text_part1.ptr,
-            .text_len = text_part1.len,
-            .fg_ptr = @ptrCast(&fg_gray),
-            .bg_ptr = null,
-            .attributes = 0,
-        },
-        .{
-            .text_ptr = text_part2.ptr,
-            .text_len = text_part2.len,
-            .fg_ptr = @ptrCast(&fg_blue),
-            .bg_ptr = null,
-            .attributes = 0,
-        },
-        .{
-            .text_ptr = text_part3.ptr,
-            .text_len = text_part3.len,
-            .fg_ptr = @ptrCast(&fg_gray),
-            .bg_ptr = null,
-            .attributes = 0,
-        },
-    };
-
-    try ev.setPlaceholderStyledText(&chunks);
+    try owned_styled.setPlaceholder(ev, &.{
+        .{ .text = "Enter ", .fg = fg_gray },
+        .{ .text = "something", .fg = fg_blue },
+        .{ .text = " here", .fg = fg_gray },
+    });
 
     var out_buffer: [100]u8 = undefined;
     const written = eb.getText(&out_buffer);
@@ -2933,15 +2910,8 @@ test "EditorView - placeholder initialization rejection leaves no published owne
         defer ev.deinit();
         const view = ev.getTextBufferView();
         const lines = ev.getVirtualLines();
-        const chunks = [_]text_buffer.StyledChunk{.{
-            .text_ptr = "hint",
-            .text_len = 4,
-            .fg_ptr = null,
-            .bg_ptr = null,
-            .attributes = 1,
-        }};
         failing.fail_index = failing.alloc_index + fail_offset;
-        const result = ev.setPlaceholderStyledText(&chunks);
+        const result = owned_styled.setPlaceholder(ev, &.{.{ .text = "hint", .attributes = 1 }});
         failing.fail_index = std.math.maxInt(usize);
         if (result) |_| {
             return;
@@ -3046,7 +3016,7 @@ test "EditorView - placeholder owned replacement preserves accepted state on all
             try std.testing.expectEqual(&dependent, ev.measure_dependents.?);
             try std.testing.expectEqual(@as(u64, 1), links.getLiveSlotCount());
             try std.testing.expectEqual(@as(usize, 1), ev.placeholder_buffer.?.mem_registry.buffers.items.len);
-            try ev.setPlaceholderStyledText(&.{});
+            ev.clearPlaceholder();
             try std.testing.expectEqual(eb.tb, ev.getTextBuffer());
             try std.testing.expectEqual(ev, dependent.measure_target.editor_view);
             try std.testing.expectEqual(@as(u64, 0), links.getLiveSlotCount());
@@ -3068,13 +3038,6 @@ test "EditorView - placeholder owned rejection retains caller inputs and legacy 
     defer ev.deinit();
     const background = ansi.indexedColor(254, 228, 228, 228);
     eb.tb.setDefaultBg(background);
-    const old = [_]text_buffer.StyledChunk{.{
-        .text_ptr = "legacy",
-        .text_len = 6,
-        .fg_ptr = null,
-        .bg_ptr = null,
-        .attributes = 1,
-    }};
     const style = try text_buffer.SyntaxStyle.init(allocator);
     var transferred = false;
     defer if (!transferred) style.deinit();
@@ -3085,7 +3048,7 @@ test "EditorView - placeholder owned rejection retains caller inputs and legacy 
     const copy = try allocator.dupe(u8, "H\u{754c}");
     defer if (!transferred) allocator.free(copy);
     for ([_]bool{ false, true }) |has_previous| {
-        if (has_previous) try ev.setPlaceholderStyledText(&old);
+        if (has_previous) try owned_styled.setPlaceholder(ev, &.{.{ .text = "legacy", .attributes = 1 }});
         const old_buffer = ev.placeholder_buffer;
         const old_style = ev.placeholder_syntax_style;
         const active = ev.getTextBuffer();
@@ -3121,9 +3084,9 @@ test "EditorView - placeholder owned rejection retains caller inputs and legacy 
     }
     try std.testing.expectEqual(background, output.get(5, 0).?.bg);
     try std.testing.expectEqual(background, output.get(0, 1).?.bg);
-    try ev.setPlaceholderStyledText(&old);
+    try owned_styled.setPlaceholder(ev, &.{.{ .text = "legacy", .attributes = 1 }});
     try std.testing.expectEqualStrings("legacy", actual[0..ev.getTextBuffer().getTextRange(0, std.math.maxInt(u32), &actual)]);
-    try ev.setPlaceholderStyledText(&.{});
+    ev.clearPlaceholder();
     try std.testing.expectEqual(eb.tb, ev.getTextBuffer());
 }
 
@@ -3139,16 +3102,10 @@ test "EditorView - placeholder shows when empty" {
     var ev = try EditorView.init(std.testing.allocator, eb, 80, 10);
     defer ev.deinit();
 
-    const text = "Enter text here...";
-    const gray_color = ansi.rgbaFromFloats(0.4, 0.4, 0.4, 1.0);
-    const chunks = [_]text_buffer.StyledChunk{.{
-        .text_ptr = text.ptr,
-        .text_len = text.len,
-        .fg_ptr = @ptrCast(&gray_color),
-        .bg_ptr = null,
-        .attributes = 0,
-    }};
-    try ev.setPlaceholderStyledText(&chunks);
+    try owned_styled.setPlaceholder(ev, &.{.{
+        .text = "Enter text here...",
+        .fg = ansi.rgbaFromFloats(0.4, 0.4, 0.4, 1.0),
+    }});
 
     var out_buffer: [100]u8 = undefined;
     const text_len = eb.getText(&out_buffer);
@@ -3171,21 +3128,14 @@ test "EditorView - placeholder cleared when set to empty" {
     var ev = try EditorView.init(std.testing.allocator, eb, 80, 10);
     defer ev.deinit();
 
-    const text = "Placeholder";
-    const gray_color = ansi.rgbaFromFloats(0.4, 0.4, 0.4, 1.0);
-    const chunks = [_]text_buffer.StyledChunk{.{
-        .text_ptr = text.ptr,
-        .text_len = text.len,
-        .fg_ptr = @ptrCast(&gray_color),
-        .bg_ptr = null,
-        .attributes = 0,
-    }};
-    try ev.setPlaceholderStyledText(&chunks);
+    try owned_styled.setPlaceholder(ev, &.{.{
+        .text = "Placeholder",
+        .fg = ansi.rgbaFromFloats(0.4, 0.4, 0.4, 1.0),
+    }});
 
     try std.testing.expect(ev.placeholder_buffer != null);
 
-    const empty_chunks: [0]text_buffer.StyledChunk = .{};
-    try ev.setPlaceholderStyledText(&empty_chunks);
+    ev.clearPlaceholder();
 
     try std.testing.expect(ev.placeholder_buffer == null);
 }
@@ -3202,29 +3152,13 @@ test "EditorView - placeholder with styled text" {
     var ev = try EditorView.init(std.testing.allocator, eb, 80, 10);
     defer ev.deinit();
 
-    const text1 = "Hello ";
-    const text2 = "World";
     const red_color = ansi.rgbaFromFloats(1.0, 0.0, 0.0, 1.0);
     const blue_color = ansi.rgbaFromFloats(0.0, 0.0, 1.0, 1.0);
 
-    const chunks = [_]text_buffer.StyledChunk{
-        .{
-            .text_ptr = text1.ptr,
-            .text_len = text1.len,
-            .fg_ptr = @ptrCast(&red_color),
-            .bg_ptr = null,
-            .attributes = 0,
-        },
-        .{
-            .text_ptr = text2.ptr,
-            .text_len = text2.len,
-            .fg_ptr = @ptrCast(&blue_color),
-            .bg_ptr = null,
-            .attributes = 0,
-        },
-    };
-
-    try ev.setPlaceholderStyledText(&chunks);
+    try owned_styled.setPlaceholder(ev, &.{
+        .{ .text = "Hello ", .fg = red_color },
+        .{ .text = "World", .fg = blue_color },
+    });
 
     try std.testing.expect(ev.placeholder_buffer != null);
     const placeholder = ev.placeholder_buffer.?;
@@ -3243,16 +3177,10 @@ test "EditorView - placeholder renders to buffer when empty" {
     var ev = try EditorView.init(std.testing.allocator, eb, 80, 10);
     defer ev.deinit();
 
-    const placeholder_text = "Type something...";
-    const gray_color = ansi.rgbaFromFloats(0.5, 0.5, 0.5, 1.0);
-    const placeholder_chunks = [_]text_buffer.StyledChunk{.{
-        .text_ptr = placeholder_text.ptr,
-        .text_len = placeholder_text.len,
-        .fg_ptr = @ptrCast(&gray_color),
-        .bg_ptr = null,
-        .attributes = 0,
-    }};
-    try ev.setPlaceholderStyledText(&placeholder_chunks);
+    try owned_styled.setPlaceholder(ev, &.{.{
+        .text = "Type something...",
+        .fg = ansi.rgbaFromFloats(0.5, 0.5, 0.5, 1.0),
+    }});
 
     try std.testing.expect(ev.placeholder_buffer != null);
     try std.testing.expect(ev.placeholder_active);
@@ -3304,21 +3232,6 @@ test "EditorView - placeholder shrink clears tail and preserves background" {
     const fg = ansi.rgbaFromFloats(0.6, 0.6, 0.6, 1.0);
     const panel_bg = ansi.rgbaFromFloats(0.14, 0.14, 0.16, 1.0);
 
-    const long_chunks = [_]text_buffer.StyledChunk{.{
-        .text_ptr = long_text.ptr,
-        .text_len = long_text.len,
-        .fg_ptr = @ptrCast(&fg),
-        .bg_ptr = null,
-        .attributes = 0,
-    }};
-    const short_chunks = [_]text_buffer.StyledChunk{.{
-        .text_ptr = short_text.ptr,
-        .text_len = short_text.len,
-        .fg_ptr = @ptrCast(&fg),
-        .bg_ptr = null,
-        .attributes = 0,
-    }};
-
     var opt_buffer = try opt_buffer_mod.OptimizedBuffer.init(
         std.testing.allocator,
         120,
@@ -3334,7 +3247,7 @@ test "EditorView - placeholder shrink clears tail and preserves background" {
         opt_buffer.set(x, 0, .{ .char = 32, .fg = fg, .bg = panel_bg, .attributes = 0 });
     }
 
-    try ev.setPlaceholderStyledText(&long_chunks);
+    try owned_styled.setPlaceholder(ev, &.{.{ .text = long_text, .fg = fg }});
     opt_buffer.drawEditorView(ev, 0, 0);
 
     x = 0;
@@ -3342,7 +3255,7 @@ test "EditorView - placeholder shrink clears tail and preserves background" {
         opt_buffer.set(x, 0, .{ .char = 32, .fg = fg, .bg = panel_bg, .attributes = 0 });
     }
 
-    try ev.setPlaceholderStyledText(&short_chunks);
+    try owned_styled.setPlaceholder(ev, &.{.{ .text = short_text, .fg = fg }});
     opt_buffer.drawEditorView(ev, 0, 0);
 
     var out_buffer: [1600]u8 = undefined;
@@ -3407,18 +3320,11 @@ test "EditorView - placeholder uses original default background fill" {
     var ev = try EditorView.init(std.testing.allocator, eb, 6, 2);
     defer ev.deinit();
 
-    const placeholder_text = "hint";
-    const placeholder_fg = ansi.rgbaFromFloats(0.5, 0.5, 0.5, 1.0);
-    const placeholder_chunks = [_]text_buffer.StyledChunk{.{
-        .text_ptr = placeholder_text.ptr,
-        .text_len = placeholder_text.len,
-        .fg_ptr = @ptrCast(&placeholder_fg),
-        .bg_ptr = null,
-        .attributes = 0,
-    }};
-
     eb.tb.setDefaultBg(ansi.indexedColor(254, 228, 228, 228));
-    try ev.setPlaceholderStyledText(&placeholder_chunks);
+    try owned_styled.setPlaceholder(ev, &.{.{
+        .text = "hint",
+        .fg = ansi.rgbaFromFloats(0.5, 0.5, 0.5, 1.0),
+    }});
 
     var opt_buffer = try opt_buffer_mod.OptimizedBuffer.init(
         std.testing.allocator,

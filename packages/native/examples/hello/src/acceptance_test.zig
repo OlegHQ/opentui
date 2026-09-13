@@ -60,7 +60,6 @@ test "styled text renders through the public Zig module without JavaScript" {
     defer text_buffer.deinit();
     const syntax_style = try opentui.text_buffer.SyntaxStyle.init(allocator);
     defer syntax_style.deinit();
-    text_buffer.setSyntaxStyle(syntax_style);
     const view = try opentui.UnifiedTextBufferView.init(allocator, text_buffer);
     defer view.deinit();
     view.setViewport(.{ .x = 0, .y = 0, .width = 8, .height = 1 });
@@ -68,25 +67,25 @@ test "styled text renders through the public Zig module without JavaScript" {
     const amber = opentui.rgbColor(255, 180, 40, 255);
     const cyan = opentui.rgbColor(80, 220, 255, 255);
     const link_url = "https://opentui.com/native";
-    const chunks = [_]opentui.text_buffer.StyledChunk{
-        .{
-            .text_ptr = "Open".ptr,
-            .text_len = "Open".len,
-            .fg_ptr = @ptrCast(&amber),
-            .bg_ptr = null,
-            .attributes = opentui.TextAttributes.BOLD,
-        },
-        .{
-            .text_ptr = "TUI".ptr,
-            .text_len = "TUI".len,
-            .fg_ptr = @ptrCast(&cyan),
-            .bg_ptr = null,
-            .attributes = opentui.TextAttributes.UNDERLINE,
-            .link_ptr = link_url.ptr,
-            .link_len = link_url.len,
-        },
+    var link_tracker = opentui.LinkTracker.init(allocator, &links);
+    defer link_tracker.deinit();
+    const link_id = try link_tracker.trackUrl(link_url);
+    const open_id = try syntax_style.registerStyle("open", amber, null, opentui.TextAttributes.BOLD);
+    const tui_id = try syntax_style.registerStyle(
+        "tui",
+        cyan,
+        null,
+        opentui.TextAttributes.setLinkId(opentui.TextAttributes.UNDERLINE, link_id),
+    );
+    const text = try allocator.dupe(u8, "OpenTUI");
+    var transferred = false;
+    errdefer if (!transferred) allocator.free(text);
+    const chunks = [_]opentui.text_buffer.OwnedStyledChunk{
+        .{ .byte_count = 4, .style_id = open_id },
+        .{ .byte_count = 3, .style_id = tui_id },
     };
-    try text_buffer.setStyledText(&chunks);
+    _ = try text_buffer.replaceOwnedStyledText(text, null, syntax_style, &chunks, &link_tracker);
+    transferred = true;
 
     renderer.getNextBuffer().drawTextBuffer(view, 0, 0);
     try std.testing.expectEqual(opentui.renderer.RenderStatus.rendered, renderer.render(true));

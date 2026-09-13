@@ -5,13 +5,13 @@ const text_buffer = @import("../text-buffer.zig");
 const text_buffer_view = @import("../text-buffer-view.zig");
 const buffer = @import("../buffer.zig");
 const gp = @import("../grapheme.zig");
-const ss = @import("../syntax-style.zig");
 const link = @import("../link.zig");
 const ansi = @import("../ansi.zig");
 const image = @import("../image.zig");
 const ghostty_vt = @import("../ghostty-vt.zig");
 const test_renderer_mod = @import("test-renderer.zig");
 const terminal_image_test = @import("terminal-image_test.zig");
+const owned_styled = @import("owned-styled-text.zig");
 
 const CliRenderer = renderer.CliRenderer;
 const TextBuffer = text_buffer.TextBuffer;
@@ -1643,7 +1643,7 @@ test "renderer - multiple renders update currentRenderBuffer" {
     try std.testing.expectEqual(@as(u32, 'W'), first_cell.?.char);
 }
 
-test "renderer - 1000 frame render loop with setStyledText" {
+test "renderer - 1000 frame render loop with owned styled text" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     var local_link_pool = link.LinkPool.init(std.testing.allocator);
@@ -1651,10 +1651,6 @@ test "renderer - 1000 frame render loop with setStyledText" {
 
     var tb = try TextBuffer.init(std.testing.allocator, pool, &local_link_pool, .unicode);
     defer tb.deinit();
-
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
 
     var view = try TextBufferView.init(std.testing.allocator, tb);
     defer view.deinit();
@@ -1685,21 +1681,18 @@ test "renderer - 1000 frame render loop with setStyledText" {
 
     const fg_color = ansi.rgbaFromFloats(1.0, 0.8, 0.6, 1.0);
     const bg_color = ansi.rgbaFromFloats(0.1, 0.1, 0.2, 1.0);
+    var current: ?owned_styled.Result = null;
+    defer if (current) |c| c.style.deinit();
 
     var frame: u32 = 0;
     while (frame < 1000) : (frame += 1) {
         const text_idx = frame % frame_texts.len;
         const text = frame_texts[text_idx];
-
-        const chunks = [_]text_buffer.StyledChunk{.{
-            .text_ptr = text.ptr,
-            .text_len = text.len,
-            .fg_ptr = @ptrCast(&fg_color),
-            .bg_ptr = @ptrCast(&bg_color),
-            .attributes = 0,
-        }};
-
-        try tb.setStyledText(&chunks);
+        try owned_styled.replaceInPlace(tb, &current, &.{.{
+            .text = text,
+            .fg = fg_color,
+            .bg = bg_color,
+        }});
         opt_buffer.clear(ansi.rgbaFromFloats(0.0, 0.0, 0.0, 1.0), 32);
         opt_buffer.drawTextBuffer(view, 0, 0);
 
@@ -1736,10 +1729,6 @@ test "renderer - grapheme pool refcounting with frame buffer fast path" {
     var tb = try TextBuffer.init(std.testing.allocator, limited_pool, link.initGlobalLinkPool(std.testing.allocator), .unicode);
     defer tb.deinit();
 
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
-
     var view = try TextBufferView.init(std.testing.allocator, tb);
     defer view.deinit();
 
@@ -1763,15 +1752,13 @@ test "renderer - grapheme pool refcounting with frame buffer fast path" {
     const fg_color = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
     const bg_color = ansi.rgbaFromFloats(0.0, 0.0, 0.0, 0.0);
 
-    const text_with_emoji = "👋";
-    const chunks = [_]text_buffer.StyledChunk{.{
-        .text_ptr = text_with_emoji.ptr,
-        .text_len = text_with_emoji.len,
-        .fg_ptr = @ptrCast(&fg_color),
-        .bg_ptr = @ptrCast(&bg_color),
-        .attributes = 0,
-    }};
-    try tb.setStyledText(&chunks);
+    var current: ?owned_styled.Result = null;
+    defer if (current) |c| c.style.deinit();
+    try owned_styled.replaceInPlace(tb, &current, &.{.{
+        .text = "👋",
+        .fg = fg_color,
+        .bg = bg_color,
+    }});
     frame_buffer.clear(ansi.rgbaFromFloats(0.0, 0.0, 0.0, 1.0), 32);
     frame_buffer.drawTextBuffer(view, 0, 0);
 
@@ -1785,15 +1772,11 @@ test "renderer - grapheme pool refcounting with frame buffer fast path" {
 
     var i: usize = 0;
     while (i < 10) : (i += 1) {
-        const new_text = "🎉🚀💯";
-        const new_chunks = [_]text_buffer.StyledChunk{.{
-            .text_ptr = new_text.ptr,
-            .text_len = new_text.len,
-            .fg_ptr = @ptrCast(&fg_color),
-            .bg_ptr = @ptrCast(&bg_color),
-            .attributes = 0,
-        }};
-        try tb.setStyledText(&new_chunks);
+        try owned_styled.replaceInPlace(tb, &current, &.{.{
+            .text = "🎉🚀💯",
+            .fg = fg_color,
+            .bg = bg_color,
+        }});
         frame_buffer.drawTextBuffer(view, 0, 0);
         frame_buffer.clear(ansi.rgbaFromFloats(0.0, 0.0, 0.0, 1.0), 32);
     }

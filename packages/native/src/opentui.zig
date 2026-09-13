@@ -20,6 +20,7 @@ pub const CliRenderer = renderer.CliRenderer;
 pub const Context = context.Context;
 pub const GraphemePool = @import("grapheme.zig").GraphemePool;
 pub const LinkPool = @import("link.zig").LinkPool;
+pub const LinkTracker = @import("link.zig").LinkTracker;
 pub const NativeRenderable = native_renderable.NativeRenderable;
 pub const OptimizedBuffer = buffer.OptimizedBuffer;
 pub const RGBA = ansi.RGBA;

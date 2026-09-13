@@ -12,7 +12,7 @@ const TextBufferView = text_buffer_view.TextBufferView;
 const OptimizedBuffer = buffer.OptimizedBuffer;
 const RGBA = text_buffer.RGBA;
 const WrapMode = text_buffer.WrapMode;
-const StyledChunk = text_buffer.StyledChunk;
+const owned_styled = @import("owned-styled-text.zig");
 
 fn resolvedRow(allocator: std.mem.Allocator, opt_buffer: *const OptimizedBuffer, pool: *gp.GraphemePool, y: u32) ![]u8 {
     var row: std.ArrayListUnmanaged(u8) = .empty;
@@ -1136,7 +1136,7 @@ test "drawTextBuffer - wrapping with mixed ASCII and Unicode" {
     try std.testing.expect(virtual_lines.len > 1);
 }
 
-test "setStyledText - basic rendering with single chunk" {
+test "owned styled text - basic rendering with single chunk" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     const link_pool = link.initGlobalLinkPool(std.testing.allocator);
@@ -1145,22 +1145,11 @@ test "setStyledText - basic rendering with single chunk" {
     var tb = try TextBuffer.init(std.testing.allocator, pool, link_pool, .unicode);
     defer tb.deinit();
 
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
-
-    const text = "Hello World";
-    const fg_color = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
-
-    const chunks = [_]StyledChunk{.{
-        .text_ptr = text.ptr,
-        .text_len = text.len,
-        .fg_ptr = @ptrCast(&fg_color),
-        .bg_ptr = null,
-        .attributes = 0,
-    }};
-
-    try tb.setStyledText(&chunks);
+    const styled = try owned_styled.replace(tb, null, &.{.{
+        .text = "Hello World",
+        .fg = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0),
+    }});
+    defer styled.style.deinit();
 
     var out_buffer: [100]u8 = undefined;
     const written = tb.getPlainTextIntoBuffer(&out_buffer);
@@ -1169,7 +1158,7 @@ test "setStyledText - basic rendering with single chunk" {
     try std.testing.expectEqualStrings("Hello World", result);
 }
 
-test "setStyledText - multiple chunks render correctly" {
+test "owned styled text - multiple chunks render correctly" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     const link_pool = link.initGlobalLinkPool(std.testing.allocator);
@@ -1178,20 +1167,12 @@ test "setStyledText - multiple chunks render correctly" {
     var tb = try TextBuffer.init(std.testing.allocator, pool, link_pool, .unicode);
     defer tb.deinit();
 
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
-
-    const text0 = "Hello ";
-    const text1 = "World";
     const fg_color = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
-
-    const chunks = [_]StyledChunk{
-        .{ .text_ptr = text0.ptr, .text_len = text0.len, .fg_ptr = @ptrCast(&fg_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = text1.ptr, .text_len = text1.len, .fg_ptr = @ptrCast(&fg_color), .bg_ptr = null, .attributes = 0 },
-    };
-
-    try tb.setStyledText(&chunks);
+    const styled = try owned_styled.replace(tb, null, &.{
+        .{ .text = "Hello ", .fg = fg_color },
+        .{ .text = "World", .fg = fg_color },
+    });
+    defer styled.style.deinit();
 
     var out_buffer: [100]u8 = undefined;
     const written = tb.getPlainTextIntoBuffer(&out_buffer);
@@ -2597,7 +2578,7 @@ test "drawTextBuffer - wide glyph skips every crossed highlight boundary" {
     try std.testing.expectEqualDeep(green_color, output.get(2, 0).?.fg);
 }
 
-test "setStyledText - scalar-split grapheme keeps the following token color" {
+test "owned styled text - scalar-split grapheme keeps the following token color" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     const link_pool = link.initGlobalLinkPool(std.testing.allocator);
@@ -2607,20 +2588,17 @@ test "setStyledText - scalar-split grapheme keeps the following token color" {
     inline for (.{ .wcwidth, .unicode, .no_zwj, .unicode_wide }) |method| {
         const tb = try TextBuffer.init(std.testing.allocator, pool, link_pool, method);
         defer tb.deinit();
-        const style = try ss.SyntaxStyle.init(std.testing.allocator);
-        defer style.deinit();
-        tb.setSyntaxStyle(style);
+        const styled = try owned_styled.replace(tb, null, &.{
+            .{ .text = "👩", .fg = red },
+            .{ .text = "\u{200d}", .fg = red },
+            .{ .text = "💻", .fg = red },
+            .{ .text = "X", .fg = green },
+        });
+        defer styled.style.deinit();
         const view = try TextBufferView.init(std.testing.allocator, tb);
         defer view.deinit();
         const output = try OptimizedBuffer.init(std.testing.allocator, 12, 1, .{ .pool = pool, .width_method = method });
         defer output.deinit();
-        const chunks = [_]StyledChunk{
-            .{ .text_ptr = "👩".ptr, .text_len = "👩".len, .fg_ptr = @ptrCast(&red), .bg_ptr = null, .attributes = 0 },
-            .{ .text_ptr = "\u{200d}".ptr, .text_len = "\u{200d}".len, .fg_ptr = @ptrCast(&red), .bg_ptr = null, .attributes = 0 },
-            .{ .text_ptr = "💻".ptr, .text_len = "💻".len, .fg_ptr = @ptrCast(&red), .bg_ptr = null, .attributes = 0 },
-            .{ .text_ptr = "X".ptr, .text_len = 1, .fg_ptr = @ptrCast(&green), .bg_ptr = null, .attributes = 0 },
-        };
-        try tb.setStyledText(&chunks);
         output.clear(ansi.rgbaFromFloats(0, 0, 0, 1), 32);
         output.drawTextBuffer(view, 0, 0);
         const cell = output.get(tb.measureText("👩‍💻"), 0).?;
@@ -2629,7 +2607,7 @@ test "setStyledText - scalar-split grapheme keeps the following token color" {
     }
 }
 
-test "setStyledText - highlight positioning with Unicode text" {
+test "owned styled text - highlight positioning with Unicode text" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     const link_pool = link.initGlobalLinkPool(std.testing.allocator);
@@ -2640,10 +2618,6 @@ test "setStyledText - highlight positioning with Unicode text" {
 
     var view = try TextBufferView.init(std.testing.allocator, tb);
     defer view.deinit();
-
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
 
     // Text: "Say नमस्ते please."
     // Layout: "Say " (4 cols) + "नमस्ते" (4 cols) + " " (1 col) + "please" (6 cols) + "." (1 col)
@@ -2657,15 +2631,14 @@ test "setStyledText - highlight positioning with Unicode text" {
     const fg_normal = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
     const bg_highlight = ansi.rgbaFromFloats(0.0, 1.0, 0.0, 1.0); // Green background
 
-    const chunks = [_]StyledChunk{
-        .{ .text_ptr = text_part1.ptr, .text_len = text_part1.len, .fg_ptr = @ptrCast(&fg_normal), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = text_part2.ptr, .text_len = text_part2.len, .fg_ptr = @ptrCast(&fg_normal), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = text_part3.ptr, .text_len = text_part3.len, .fg_ptr = @ptrCast(&fg_normal), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = text_part4.ptr, .text_len = text_part4.len, .fg_ptr = @ptrCast(&fg_normal), .bg_ptr = @ptrCast(&bg_highlight), .attributes = 0 },
-        .{ .text_ptr = text_part5.ptr, .text_len = text_part5.len, .fg_ptr = @ptrCast(&fg_normal), .bg_ptr = null, .attributes = 0 },
-    };
-
-    try tb.setStyledText(&chunks);
+    const styled = try owned_styled.replace(tb, null, &.{
+        .{ .text = text_part1, .fg = fg_normal },
+        .{ .text = text_part2, .fg = fg_normal },
+        .{ .text = text_part3, .fg = fg_normal },
+        .{ .text = text_part4, .fg = fg_normal, .bg = bg_highlight },
+        .{ .text = text_part5, .fg = fg_normal },
+    });
+    defer styled.style.deinit();
 
     // Verify the text content
     var out_buffer: [100]u8 = undefined;
@@ -2934,7 +2907,7 @@ test "drawTextBuffer - syntax highlighting with horizontal viewport offset" {
     try std.testing.expect(!is_red_3);
 }
 
-test "drawTextBuffer - setStyledText with multiple colors and horizontal scrolling" {
+test "drawTextBuffer - owned styled text with multiple colors and horizontal scrolling" {
     const pool = gp.initGlobalPool(std.testing.allocator);
     defer gp.deinitGlobalPool();
     const link_pool = link.initGlobalLinkPool(std.testing.allocator);
@@ -2946,41 +2919,23 @@ test "drawTextBuffer - setStyledText with multiple colors and horizontal scrolli
     var view = try TextBufferView.init(std.testing.allocator, tb);
     defer view.deinit();
 
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
-
-    // Simulate what code renderable does with setStyledText
-    // Text will be: "const x = function(y) { return y * 2; }"
-    // But split into colored chunks like syntax highlighting
-
-    const chunk1_text = "const";
-    const chunk2_text = " x = ";
-    const chunk3_text = "function";
-    const chunk4_text = "(y) { ";
-    const chunk5_text = "return";
-    const chunk6_text = " y * ";
-    const chunk7_text = "2";
-    const chunk8_text = "; }";
-
     const red_color = ansi.rgbaFromFloats(1.0, 0.0, 0.0, 1.0);
     const white_color = ansi.rgbaFromFloats(1.0, 1.0, 1.0, 1.0);
     const green_color = ansi.rgbaFromFloats(0.0, 1.0, 0.0, 1.0);
     const blue_color = ansi.rgbaFromFloats(0.0, 0.0, 1.0, 1.0);
     const yellow_color = ansi.rgbaFromFloats(1.0, 1.0, 0.0, 1.0);
 
-    const chunks = [_]StyledChunk{
-        .{ .text_ptr = chunk1_text.ptr, .text_len = chunk1_text.len, .fg_ptr = @ptrCast(&red_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = chunk2_text.ptr, .text_len = chunk2_text.len, .fg_ptr = @ptrCast(&white_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = chunk3_text.ptr, .text_len = chunk3_text.len, .fg_ptr = @ptrCast(&green_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = chunk4_text.ptr, .text_len = chunk4_text.len, .fg_ptr = @ptrCast(&white_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = chunk5_text.ptr, .text_len = chunk5_text.len, .fg_ptr = @ptrCast(&blue_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = chunk6_text.ptr, .text_len = chunk6_text.len, .fg_ptr = @ptrCast(&white_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = chunk7_text.ptr, .text_len = chunk7_text.len, .fg_ptr = @ptrCast(&yellow_color), .bg_ptr = null, .attributes = 0 },
-        .{ .text_ptr = chunk8_text.ptr, .text_len = chunk8_text.len, .fg_ptr = @ptrCast(&white_color), .bg_ptr = null, .attributes = 0 },
-    };
-
-    try tb.setStyledText(&chunks);
+    const styled = try owned_styled.replace(tb, null, &.{
+        .{ .text = "const", .fg = red_color },
+        .{ .text = " x = ", .fg = white_color },
+        .{ .text = "function", .fg = green_color },
+        .{ .text = "(y) { ", .fg = white_color },
+        .{ .text = "return", .fg = blue_color },
+        .{ .text = " y * ", .fg = white_color },
+        .{ .text = "2", .fg = yellow_color },
+        .{ .text = "; }", .fg = white_color },
+    });
+    defer styled.style.deinit();
 
     view.setWrapMode(.none);
     view.setWrapWidth(null);

@@ -5,9 +5,9 @@ const gp = @import("../grapheme.zig");
 const link = @import("../link.zig");
 const ss = @import("../syntax-style.zig");
 const utf8 = @import("../utf8.zig");
+const owned_styled = @import("owned-styled-text.zig");
 
 const TextBuffer = text_buffer.UnifiedTextBuffer;
-const RGBA = text_buffer.RGBA;
 const Highlight = text_buffer.Highlight;
 
 test "TextBuffer styled seek - JSON tokens retain every line span" {
@@ -17,28 +17,21 @@ test "TextBuffer styled seek - JSON tokens retain every line span" {
     defer link.deinitGlobalLinkPool();
     const tb = try TextBuffer.init(std.testing.allocator, pool, link_pool, .wcwidth);
     defer tb.deinit();
-    const style = try ss.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    tb.setSyntaxStyle(style);
     const line_count = 200;
-    const chunks = try std.testing.allocator.alloc(text_buffer.StyledChunk, line_count * 5);
-    defer std.testing.allocator.free(chunks);
+    var parts: [line_count * 5]owned_styled.Part = undefined;
     for (0..line_count) |row| {
         for ([_][]const u8{ "  ", "\"field\"", ": ", "123", ",\n" }, 0..) |text, token| {
-            chunks[row * 5 + token] = .{
-                .text_ptr = text.ptr,
-                .text_len = text.len,
-                .fg_ptr = null,
-                .bg_ptr = null,
-                .attributes = @intCast(token),
-            };
+            parts[row * 5 + token] = .{ .text = text, .attributes = @intCast(token) };
         }
     }
+    var current: ?owned_styled.Result = null;
+    defer if (current) |c| c.style.deinit();
     for (0..2) |_| {
-        try tb.setStyledText(chunks);
+        try owned_styled.replaceInPlace(tb, &current, &parts);
+        const style = current.?.style;
         try std.testing.expectEqual(line_count + 1, tb.getLineCount());
-        try std.testing.expectEqual(chunks.len, tb.getHighlightCount());
-        try std.testing.expectEqual(chunks.len, style.getStyleCount());
+        try std.testing.expectEqual(parts.len, tb.getHighlightCount());
+        try std.testing.expectEqual(parts.len, style.getStyleCount());
         for (0..line_count) |row| {
             const highlights = tb.getLineHighlights(row);
             const spans = tb.line_spans.items[row].items;
@@ -101,24 +94,18 @@ test "TextBuffer styled seek - display widths multiline chunks and links" {
     for (std.enums.values(utf8.WidthMethod)) |method| {
         const tb = try TextBuffer.init(std.testing.allocator, pool, link_pool, method);
         defer tb.deinit();
-        const style = try ss.SyntaxStyle.init(std.testing.allocator);
-        defer style.deinit();
-        tb.setSyntaxStyle(style);
+        var current: ?owned_styled.Result = null;
+        defer if (current) |c| c.style.deinit();
         for ([_]u8{ 2, 4 }) |tab_width| {
             tb.setTabWidth(tab_width);
-            var chunks: [5]text_buffer.StyledChunk = undefined;
-            for ([_][]const u8{ "\n\n", first ++ "\n\n" ++ emoji, "", "\n" ++ combining ++ "\n\tX", "\n\n" }, 0..) |text, i| {
-                chunks[i] = .{
-                    .text_ptr = text.ptr,
-                    .text_len = text.len,
-                    .fg_ptr = @ptrCast(&fg),
-                    .bg_ptr = @ptrCast(&bg),
-                    .attributes = 3,
-                    .link_ptr = url.ptr,
-                    .link_len = url.len,
-                };
-            }
-            try tb.setStyledText(&chunks);
+            try owned_styled.replaceInPlace(tb, &current, &.{
+                .{ .text = "\n\n", .fg = fg, .bg = bg, .attributes = 3, .url = url },
+                .{ .text = first ++ "\n\n" ++ emoji, .fg = fg, .bg = bg, .attributes = 3, .url = url },
+                .{ .text = "", .fg = fg, .bg = bg, .attributes = 3, .url = url },
+                .{ .text = "\n" ++ combining ++ "\n\tX", .fg = fg, .bg = bg, .attributes = 3, .url = url },
+                .{ .text = "\n\n", .fg = fg, .bg = bg, .attributes = 3, .url = url },
+            });
+            const style = current.?.style;
             try std.testing.expectEqual(9, tb.getLineCount());
             try std.testing.expectEqual(4, tb.getHighlightCount());
             try std.testing.expectEqual(2, style.getStyleCount());
@@ -192,15 +179,16 @@ test "TextBuffer styled text - failed growth keeps storage safe to reuse" {
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
     const tb = try TextBuffer.init(failing.allocator(), pool, link_pool, .unicode);
     defer tb.deinit();
-    const small = [_]text_buffer.StyledChunk{.{ .text_ptr = "a".ptr, .text_len = 1, .fg_ptr = null, .bg_ptr = null, .attributes = 0 }};
-    const large = [_]text_buffer.StyledChunk{.{ .text_ptr = "larger".ptr, .text_len = 6, .fg_ptr = null, .bg_ptr = null, .attributes = 0 }};
-    try tb.setStyledText(&small);
+    var current: ?owned_styled.Result = null;
+    defer if (current) |c| c.style.deinit();
+    try owned_styled.replaceInPlace(tb, &current, &.{.{ .text = "a" }});
 
     failing.fail_index = failing.alloc_index;
-    try std.testing.expectError(error.OutOfMemory, tb.setStyledText(&large));
+    try std.testing.expectError(error.OutOfMemory, owned_styled.replace(tb, current.?.mem_id, &.{.{ .text = "larger" }}));
     failing.fail_index = std.math.maxInt(usize);
-    try tb.setStyledText(&small);
     var output: [1]u8 = undefined;
+    try std.testing.expectEqualStrings("a", output[0..tb.getPlainTextIntoBuffer(&output)]);
+    try owned_styled.replaceInPlace(tb, &current, &.{.{ .text = "a" }});
     try std.testing.expectEqualStrings("a", output[0..tb.getPlainTextIntoBuffer(&output)]);
 }
 
@@ -461,11 +449,8 @@ test "TextBuffer removal rejection - mixed refs preserve accepted highlights and
             for (0..32) |fail_index| {
                 const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, .wcwidth);
                 defer tb.deinit();
-                const style = try ss.SyntaxStyle.init(std.testing.allocator);
-                defer style.deinit();
-                tb.setSyntaxStyle(style);
-                const text = "abcdef\nabcdef";
-                try tb.setStyledText(&.{.{ .text_ptr = text.ptr, .text_len = text.len, .fg_ptr = null, .bg_ptr = null, .attributes = 1 }});
+                const styled = try owned_styled.replace(tb, null, &.{.{ .text = "abcdef\nabcdef", .attributes = 1 }});
+                defer styled.style.deinit();
                 for (0..2) |line_idx| try tb.addHighlight(line_idx, 2, 6, 9, 2, 200);
                 const highlights = try std.testing.allocator.dupe(Highlight, tb.getLineHighlights(0));
                 defer std.testing.allocator.free(highlights);

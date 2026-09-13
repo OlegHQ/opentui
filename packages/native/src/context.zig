@@ -3509,7 +3509,7 @@ pub const Context = struct {
         }
         if (offset != bytes.len) return error.InvalidOptions;
         if (chunks.len == 0) {
-            try view.view.setPlaceholderStyledText(&.{});
+            view.view.clearPlaceholder();
             view.invalidate();
             return;
         }
