@@ -1,7 +1,7 @@
 // Generated from packages/native/include/opentui.h and scripts/native-abi-pointers.ts.
 // Run `bun run generate:abi` in packages/core. Do not edit.
 // Inspect audit input: bun scripts/native-abi.ts --audit
-// ABI audit SHA-256: 574c990e7633af5f74d9ab59ab98163e4d58a25756df45609f5a9f85de44f2d6
+// ABI audit SHA-256: 6d0071251d43381b1d7a08b4a1ade71e583b8f067f7e94f28ad2c233fc1f6e1c
 
 export const nativeSymbols = {
   ot_scene_set_hooks: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
@@ -254,6 +254,27 @@ export const nativeSymbols = {
   ot_session_cancel: { args: ["ptr", "buffer"], returns: "i32" },
   ot_session_get_state: { args: ["ptr", "buffer", "buffer"], returns: "i32" },
   ot_session_destroy: { args: ["ptr", "buffer"], returns: "i32" },
+  ot_clipboard_service_create: { args: ["ptr", "u32", "u32", "ptr", "u32"], returns: "i32" },
+  ot_clipboard_service_begin_shutdown: { args: ["ptr"], returns: "u8" },
+  ot_clipboard_service_poll_shutdown: { args: ["ptr"], returns: "u8" },
+  ot_clipboard_service_destroy: { args: ["ptr"], returns: "u8" },
+  ot_clipboard_service_drain: { args: ["ptr"], returns: "u8" },
+  ot_clipboard_read_operation_start: {
+    args: ["ptr", "buffer", "u32", "u8", "u32", "u32", "u32", "u32", "buffer"],
+    returns: "u8",
+  },
+  ot_clipboard_write_operation_start: { args: ["ptr", "buffer", "u32", "u8", "u32", "buffer"], returns: "u8" },
+  ot_clipboard_clear_operation_start: { args: ["ptr", "u8", "u32", "buffer"], returns: "u8" },
+  ot_clipboard_operation_poll: { args: ["ptr", "buffer"], returns: "u8" },
+  ot_clipboard_operation_cancel: { args: ["ptr", "buffer"], returns: "u8" },
+  ot_clipboard_operation_result_mime_length: { args: ["ptr", "buffer", "buffer"], returns: "u8" },
+  ot_clipboard_operation_result_mime_copy: { args: ["ptr", "buffer", "buffer", "u32"], returns: "u8" },
+  ot_clipboard_operation_result_data_length: { args: ["ptr", "buffer", "buffer"], returns: "u8" },
+  ot_clipboard_operation_result_data_copy: { args: ["ptr", "buffer", "buffer", "u32"], returns: "u8" },
+  ot_clipboard_operation_result_error_code: { args: ["ptr", "buffer", "buffer"], returns: "u8" },
+  ot_clipboard_operation_result_diagnostic_length: { args: ["ptr", "buffer", "buffer"], returns: "u8" },
+  ot_clipboard_operation_result_diagnostic_copy: { args: ["ptr", "buffer", "buffer", "u32"], returns: "u8" },
+  ot_clipboard_operation_destroy: { args: ["ptr", "buffer"], returns: "u8" },
 } as const
 
 export const nativeCallbacks = {
@@ -1628,6 +1649,37 @@ export const nativeConstants = {
   OT_PUMP_CLOSED: 4,
   OT_DIAGNOSTIC_MESSAGE_BYTES: 4096,
   OT_DIAGNOSTIC_TRUNCATED: 1,
+  OT_CLIPBOARD_OPERATION_PENDING: 0,
+  OT_CLIPBOARD_OPERATION_READ: 1,
+  OT_CLIPBOARD_OPERATION_EMPTY: 2,
+  OT_CLIPBOARD_OPERATION_WRITTEN: 3,
+  OT_CLIPBOARD_OPERATION_CLEARED: 4,
+  OT_CLIPBOARD_OPERATION_UNSUPPORTED: 5,
+  OT_CLIPBOARD_OPERATION_CANCELLED: 6,
+  OT_CLIPBOARD_OPERATION_TIMED_OUT: 7,
+  OT_CLIPBOARD_OPERATION_LIMIT_EXCEEDED: 8,
+  OT_CLIPBOARD_OPERATION_FAILED: 9,
+  OT_CLIPBOARD_OPERATION_INVALID_HANDLE: 10,
+  OT_CLIPBOARD_START_OK: 0,
+  OT_CLIPBOARD_START_INVALID_SERVICE: 1,
+  OT_CLIPBOARD_START_SHUTTING_DOWN: 2,
+  OT_CLIPBOARD_START_LIMIT_EXCEEDED: 3,
+  OT_CLIPBOARD_START_INVALID_ARGUMENT: 4,
+  OT_CLIPBOARD_START_OUT_OF_MEMORY: 5,
+  OT_CLIPBOARD_CANCEL_REQUESTED: 0,
+  OT_CLIPBOARD_CANCEL_ALREADY_TERMINAL: 1,
+  OT_CLIPBOARD_CANCEL_INVALID_HANDLE: 2,
+  OT_CLIPBOARD_COPY_OK: 0,
+  OT_CLIPBOARD_COPY_BUFFER_TOO_SMALL: 1,
+  OT_CLIPBOARD_COPY_INVALID_HANDLE: 2,
+  OT_CLIPBOARD_COPY_INVALID_STATE: 3,
+  OT_CLIPBOARD_COPY_INVALID_ARGUMENT: 4,
+  OT_CLIPBOARD_DESTROY_DESTROYED: 0,
+  OT_CLIPBOARD_DESTROY_NOT_READY: 1,
+  OT_CLIPBOARD_DESTROY_INVALID_HANDLE: 2,
+  OT_CLIPBOARD_SHUTDOWN_PENDING: 0,
+  OT_CLIPBOARD_SHUTDOWN_READY: 1,
+  OT_CLIPBOARD_SHUTDOWN_INVALID_HANDLE: 2,
 } as const
 
 export const nativeStyleEnumMaxima = [2, 3, 5, 8, 8, 8, 2, 2, 2, 1, 1] as const

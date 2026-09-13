@@ -591,16 +591,16 @@ describe("borrowed pointer call sites", () => {
   test("clipboard calls pass transient request and output buffers as object values", () => {
     withStubbedSymbols(
       {
-        clipboardServiceCreate: () => 0,
-        clipboardServiceDestroy: () => 0,
-        clipboardReadOperationStart: () => 0,
-        clipboardWriteOperationStart: () => 0,
-        clipboardClearOperationStart: () => 0,
-        clipboardOperationResultMimeLength: () => 0,
-        clipboardOperationResultMimeCopy: () => 0,
-        clipboardOperationResultDataCopy: () => 0,
-        clipboardOperationResultErrorCode: () => 0,
-        clipboardOperationResultDiagnosticCopy: () => 0,
+        ot_clipboard_service_create: () => 0,
+        ot_clipboard_service_destroy: () => 0,
+        ot_clipboard_read_operation_start: () => 0,
+        ot_clipboard_write_operation_start: () => 0,
+        ot_clipboard_clear_operation_start: () => 0,
+        ot_clipboard_operation_result_mime_length: () => 0,
+        ot_clipboard_operation_result_mime_copy: () => 0,
+        ot_clipboard_operation_result_data_copy: () => 0,
+        ot_clipboard_operation_result_error_code: () => 0,
+        ot_clipboard_operation_result_diagnostic_copy: () => 0,
       },
       (calls) => {
         const service = lib.clipboardServiceCreate(4, 5, "seat0")!
@@ -614,18 +614,18 @@ describe("borrowed pointer call sites", () => {
         lib.clipboardOperationResultDiagnosticCopy(1 as any, new Uint8Array(2))
         lib.clipboardServiceDestroy(service)
 
-        expect(calls.clipboardServiceCreate![0]![3]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardReadOperationStart![0]![1]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardReadOperationStart![0]!.slice(4, 8)).toEqual([16, 32, 64, 100])
-        expect(calls.clipboardReadOperationStart![0]![8]).toBeInstanceOf(BigUint64Array)
-        expect(calls.clipboardWriteOperationStart![0]![1]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardWriteOperationStart![0]![5]).toBeInstanceOf(BigUint64Array)
-        expect(calls.clipboardClearOperationStart![0]![3]).toBeInstanceOf(BigUint64Array)
-        expect(calls.clipboardOperationResultMimeLength![0]![2]).toBeInstanceOf(Uint32Array)
-        expect(calls.clipboardOperationResultMimeCopy![0]![2]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardOperationResultDataCopy![0]![2]).toBeInstanceOf(Uint8Array)
-        expect(calls.clipboardOperationResultErrorCode![0]![2]).toBeInstanceOf(Uint32Array)
-        expect(calls.clipboardOperationResultDiagnosticCopy![0]![2]).toBeInstanceOf(Uint8Array)
+        expect(calls.ot_clipboard_service_create![0]![3]).toBeInstanceOf(Uint8Array)
+        expect(calls.ot_clipboard_read_operation_start![0]![1]).toBeInstanceOf(Uint8Array)
+        expect(calls.ot_clipboard_read_operation_start![0]!.slice(4, 8)).toEqual([16, 32, 64, 100])
+        expect(calls.ot_clipboard_read_operation_start![0]![8]).toBeInstanceOf(BigUint64Array)
+        expect(calls.ot_clipboard_write_operation_start![0]![1]).toBeInstanceOf(Uint8Array)
+        expect(calls.ot_clipboard_write_operation_start![0]![5]).toBeInstanceOf(BigUint64Array)
+        expect(calls.ot_clipboard_clear_operation_start![0]![3]).toBeInstanceOf(BigUint64Array)
+        expect(calls.ot_clipboard_operation_result_mime_length![0]![2]).toBeInstanceOf(Uint32Array)
+        expect(calls.ot_clipboard_operation_result_mime_copy![0]![2]).toBeInstanceOf(Uint8Array)
+        expect(calls.ot_clipboard_operation_result_data_copy![0]![2]).toBeInstanceOf(Uint8Array)
+        expect(calls.ot_clipboard_operation_result_error_code![0]![2]).toBeInstanceOf(Uint32Array)
+        expect(calls.ot_clipboard_operation_result_diagnostic_copy![0]![2]).toBeInstanceOf(Uint8Array)
       },
     )
   })

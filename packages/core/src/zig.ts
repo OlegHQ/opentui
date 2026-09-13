@@ -770,52 +770,52 @@ export type ClipboardServiceHandle = number & { readonly __nativeHandle: "clipbo
 export type ClipboardOperationHandle = number & { readonly __nativeHandle: "clipboard_operation" }
 
 export enum NativeClipboardOperationStatus {
-  Pending = 0,
-  Read = 1,
-  Empty = 2,
-  Written = 3,
-  Cleared = 4,
-  Unsupported = 5,
-  Cancelled = 6,
-  TimedOut = 7,
-  LimitExceeded = 8,
-  Failed = 9,
-  InvalidHandle = 10,
+  Pending = nativeConstants.OT_CLIPBOARD_OPERATION_PENDING,
+  Read = nativeConstants.OT_CLIPBOARD_OPERATION_READ,
+  Empty = nativeConstants.OT_CLIPBOARD_OPERATION_EMPTY,
+  Written = nativeConstants.OT_CLIPBOARD_OPERATION_WRITTEN,
+  Cleared = nativeConstants.OT_CLIPBOARD_OPERATION_CLEARED,
+  Unsupported = nativeConstants.OT_CLIPBOARD_OPERATION_UNSUPPORTED,
+  Cancelled = nativeConstants.OT_CLIPBOARD_OPERATION_CANCELLED,
+  TimedOut = nativeConstants.OT_CLIPBOARD_OPERATION_TIMED_OUT,
+  LimitExceeded = nativeConstants.OT_CLIPBOARD_OPERATION_LIMIT_EXCEEDED,
+  Failed = nativeConstants.OT_CLIPBOARD_OPERATION_FAILED,
+  InvalidHandle = nativeConstants.OT_CLIPBOARD_OPERATION_INVALID_HANDLE,
 }
 
 export enum NativeClipboardStartStatus {
-  Ok = 0,
-  InvalidService = 1,
-  ShuttingDown = 2,
-  LimitExceeded = 3,
-  InvalidArgument = 4,
-  OutOfMemory = 5,
+  Ok = nativeConstants.OT_CLIPBOARD_START_OK,
+  InvalidService = nativeConstants.OT_CLIPBOARD_START_INVALID_SERVICE,
+  ShuttingDown = nativeConstants.OT_CLIPBOARD_START_SHUTTING_DOWN,
+  LimitExceeded = nativeConstants.OT_CLIPBOARD_START_LIMIT_EXCEEDED,
+  InvalidArgument = nativeConstants.OT_CLIPBOARD_START_INVALID_ARGUMENT,
+  OutOfMemory = nativeConstants.OT_CLIPBOARD_START_OUT_OF_MEMORY,
 }
 
 export enum NativeClipboardCancelStatus {
-  Requested = 0,
-  AlreadyTerminal = 1,
-  InvalidHandle = 2,
+  Requested = nativeConstants.OT_CLIPBOARD_CANCEL_REQUESTED,
+  AlreadyTerminal = nativeConstants.OT_CLIPBOARD_CANCEL_ALREADY_TERMINAL,
+  InvalidHandle = nativeConstants.OT_CLIPBOARD_CANCEL_INVALID_HANDLE,
 }
 
 export enum NativeClipboardCopyStatus {
-  Ok = 0,
-  BufferTooSmall = 1,
-  InvalidHandle = 2,
-  InvalidState = 3,
-  InvalidArgument = 4,
+  Ok = nativeConstants.OT_CLIPBOARD_COPY_OK,
+  BufferTooSmall = nativeConstants.OT_CLIPBOARD_COPY_BUFFER_TOO_SMALL,
+  InvalidHandle = nativeConstants.OT_CLIPBOARD_COPY_INVALID_HANDLE,
+  InvalidState = nativeConstants.OT_CLIPBOARD_COPY_INVALID_STATE,
+  InvalidArgument = nativeConstants.OT_CLIPBOARD_COPY_INVALID_ARGUMENT,
 }
 
 export enum NativeClipboardDestroyStatus {
-  Destroyed = 0,
-  NotReady = 1,
-  InvalidHandle = 2,
+  Destroyed = nativeConstants.OT_CLIPBOARD_DESTROY_DESTROYED,
+  NotReady = nativeConstants.OT_CLIPBOARD_DESTROY_NOT_READY,
+  InvalidHandle = nativeConstants.OT_CLIPBOARD_DESTROY_INVALID_HANDLE,
 }
 
 export enum NativeClipboardShutdownStatus {
-  Pending = 0,
-  Ready = 1,
-  InvalidHandle = 2,
+  Pending = nativeConstants.OT_CLIPBOARD_SHUTDOWN_PENDING,
+  Ready = nativeConstants.OT_CLIPBOARD_SHUTDOWN_READY,
+  InvalidHandle = nativeConstants.OT_CLIPBOARD_SHUTDOWN_INVALID_HANDLE,
 }
 
 export type EmbeddedTerminalCursor = {
@@ -1976,78 +1976,6 @@ function getOpenTUILib(libPath?: string) {
     setLogCallback: {
       args: ["ptr"],
       returns: "void",
-    },
-    clipboardServiceCreate: {
-      args: ["ptr", "u32", "u32", "ptr", "u32"],
-      returns: "i32",
-    },
-    clipboardServiceBeginShutdown: {
-      args: ["ptr"],
-      returns: "u8",
-    },
-    clipboardServicePollShutdown: {
-      args: ["ptr"],
-      returns: "u8",
-    },
-    clipboardServiceDestroy: {
-      args: ["ptr"],
-      returns: "u8",
-    },
-    clipboardServiceDrain: {
-      args: ["ptr"],
-      returns: "u8",
-    },
-    clipboardReadOperationStart: {
-      args: ["ptr", "buffer", "u32", "u8", "u32", "u32", "u32", "u32", "buffer"],
-      returns: "u8",
-    },
-    clipboardWriteOperationStart: {
-      args: ["ptr", "buffer", "u32", "u8", "u32", "buffer"],
-      returns: "u8",
-    },
-    clipboardClearOperationStart: {
-      args: ["ptr", "u8", "u32", "buffer"],
-      returns: "u8",
-    },
-    clipboardOperationPoll: {
-      args: ["ptr", "buffer"],
-      returns: "u8",
-    },
-    clipboardOperationCancel: {
-      args: ["ptr", "buffer"],
-      returns: "u8",
-    },
-    clipboardOperationResultMimeLength: {
-      args: ["ptr", "buffer", "buffer"],
-      returns: "u8",
-    },
-    clipboardOperationResultMimeCopy: {
-      args: ["ptr", "buffer", "buffer", "u32"],
-      returns: "u8",
-    },
-    clipboardOperationResultDataLength: {
-      args: ["ptr", "buffer", "buffer"],
-      returns: "u8",
-    },
-    clipboardOperationResultDataCopy: {
-      args: ["ptr", "buffer", "buffer", "u32"],
-      returns: "u8",
-    },
-    clipboardOperationResultErrorCode: {
-      args: ["ptr", "buffer", "buffer"],
-      returns: "u8",
-    },
-    clipboardOperationResultDiagnosticLength: {
-      args: ["ptr", "buffer", "buffer"],
-      returns: "u8",
-    },
-    clipboardOperationResultDiagnosticCopy: {
-      args: ["ptr", "buffer", "buffer", "u32"],
-      returns: "u8",
-    },
-    clipboardOperationDestroy: {
-      args: ["ptr", "buffer"],
-      returns: "u8",
     },
 
     getArenaAllocatedBytes: {
@@ -7213,9 +7141,15 @@ export class FFIRenderLib {
     const context = this.tryCreateStandaloneContext(Math.min(operations + 1, 0xffff))
     if (!context) return null
     try {
-      const pointer = this.nativeContextPointer(context, "clipboardServiceCreate")
+      const pointer = this.nativeContextPointer(context, "ot_clipboard_service_create")
       if (
-        this.opentui.symbols.clipboardServiceCreate(pointer, operations, transfers, seat, seat?.byteLength ?? 0) !== 0
+        this.opentui.symbols.ot_clipboard_service_create(
+          pointer,
+          operations,
+          transfers,
+          seat,
+          seat?.byteLength ?? 0,
+        ) !== 0
       ) {
         this.releaseContext(context)
         return null
@@ -7239,17 +7173,17 @@ export class FFIRenderLib {
   }
 
   public clipboardServiceBeginShutdown(service: ClipboardServiceHandle): NativeClipboardShutdownStatus {
-    return this.opentui.symbols.clipboardServiceBeginShutdown(this.clipboardContext(service))
+    return this.opentui.symbols.ot_clipboard_service_begin_shutdown(this.clipboardContext(service))
   }
 
   public clipboardServicePollShutdown(service: ClipboardServiceHandle): NativeClipboardShutdownStatus {
-    return this.opentui.symbols.clipboardServicePollShutdown(this.clipboardContext(service))
+    return this.opentui.symbols.ot_clipboard_service_poll_shutdown(this.clipboardContext(service))
   }
 
   public clipboardServiceDestroy(service: ClipboardServiceHandle): NativeClipboardDestroyStatus {
     const context = this.clipboardServices.get(service)
     if (!context) return NativeClipboardDestroyStatus.InvalidHandle
-    const status = this.opentui.symbols.clipboardServiceDestroy(this.clipboardContext(service))
+    const status = this.opentui.symbols.ot_clipboard_service_destroy(this.clipboardContext(service))
     if (status === NativeClipboardDestroyStatus.Destroyed) {
       this.releaseContext(context)
       this.clipboardServices.delete(service)
@@ -7261,7 +7195,7 @@ export class FFIRenderLib {
   }
 
   public clipboardServiceDrain(service: ClipboardServiceHandle): number {
-    return this.opentui.symbols.clipboardServiceDrain(this.clipboardContext(service))
+    return this.opentui.symbols.ot_clipboard_service_drain(this.clipboardContext(service))
   }
 
   private clipboardStart(
@@ -7293,7 +7227,7 @@ export class FFIRenderLib {
     maxConversionBytes: number,
     timeoutMs: number,
   ): { status: NativeClipboardStartStatus; operation: ClipboardOperationHandle | null } {
-    return this.clipboardStart(service, this.opentui.symbols.clipboardReadOperationStart, [
+    return this.clipboardStart(service, this.opentui.symbols.ot_clipboard_read_operation_start, [
       request,
       toSafeFFIU32Length(request.byteLength, "clipboard read request"),
       selection,
@@ -7310,7 +7244,7 @@ export class FFIRenderLib {
     selection: number,
     timeoutMs: number,
   ): { status: NativeClipboardStartStatus; operation: ClipboardOperationHandle | null } {
-    return this.clipboardStart(service, this.opentui.symbols.clipboardWriteOperationStart, [
+    return this.clipboardStart(service, this.opentui.symbols.ot_clipboard_write_operation_start, [
       textUtf8,
       toSafeFFIU32Length(textUtf8.byteLength, "clipboard write text"),
       selection,
@@ -7323,18 +7257,18 @@ export class FFIRenderLib {
     selection: number,
     timeoutMs: number,
   ): { status: NativeClipboardStartStatus; operation: ClipboardOperationHandle | null } {
-    return this.clipboardStart(service, this.opentui.symbols.clipboardClearOperationStart, [
+    return this.clipboardStart(service, this.opentui.symbols.ot_clipboard_clear_operation_start, [
       selection,
       toSafeFFIU32Length(timeoutMs, "clipboard clear timeout"),
     ])
   }
 
   public clipboardOperationPoll(operation: ClipboardOperationHandle): NativeClipboardOperationStatus {
-    return this.opentui.symbols.clipboardOperationPoll(...this.clipboardOperationArgs(operation))
+    return this.opentui.symbols.ot_clipboard_operation_poll(...this.clipboardOperationArgs(operation))
   }
 
   public clipboardOperationCancel(operation: ClipboardOperationHandle): NativeClipboardCancelStatus {
-    return this.opentui.symbols.clipboardOperationCancel(...this.clipboardOperationArgs(operation))
+    return this.opentui.symbols.ot_clipboard_operation_cancel(...this.clipboardOperationArgs(operation))
   }
 
   private clipboardResultLength(
@@ -7350,7 +7284,7 @@ export class FFIRenderLib {
     status: NativeClipboardCopyStatus
     length: number
   } {
-    return this.clipboardResultLength(this.opentui.symbols.clipboardOperationResultMimeLength, operation)
+    return this.clipboardResultLength(this.opentui.symbols.ot_clipboard_operation_result_mime_length, operation)
   }
 
   public clipboardOperationResultMimeCopy(
@@ -7359,7 +7293,7 @@ export class FFIRenderLib {
   ): NativeClipboardCopyStatus {
     const capacity = toSafeFFIU32Length(output.byteLength, "clipboard MIME output")
     void output.buffer
-    return this.opentui.symbols.clipboardOperationResultMimeCopy(
+    return this.opentui.symbols.ot_clipboard_operation_result_mime_copy(
       ...this.clipboardOperationArgs(operation),
       output,
       capacity,
@@ -7370,7 +7304,7 @@ export class FFIRenderLib {
     status: NativeClipboardCopyStatus
     length: number
   } {
-    return this.clipboardResultLength(this.opentui.symbols.clipboardOperationResultDataLength, operation)
+    return this.clipboardResultLength(this.opentui.symbols.ot_clipboard_operation_result_data_length, operation)
   }
 
   public clipboardOperationResultDataCopy(
@@ -7379,7 +7313,7 @@ export class FFIRenderLib {
   ): NativeClipboardCopyStatus {
     const capacity = toSafeFFIU32Length(output.byteLength, "clipboard data output")
     void output.buffer
-    return this.opentui.symbols.clipboardOperationResultDataCopy(
+    return this.opentui.symbols.ot_clipboard_operation_result_data_copy(
       ...this.clipboardOperationArgs(operation),
       output,
       capacity,
@@ -7391,7 +7325,7 @@ export class FFIRenderLib {
     errorCode: number
   } {
     const output = new Uint32Array(1)
-    const status = this.opentui.symbols.clipboardOperationResultErrorCode(
+    const status = this.opentui.symbols.ot_clipboard_operation_result_error_code(
       ...this.clipboardOperationArgs(operation),
       output,
     )
@@ -7402,7 +7336,7 @@ export class FFIRenderLib {
     status: NativeClipboardCopyStatus
     length: number
   } {
-    return this.clipboardResultLength(this.opentui.symbols.clipboardOperationResultDiagnosticLength, operation)
+    return this.clipboardResultLength(this.opentui.symbols.ot_clipboard_operation_result_diagnostic_length, operation)
   }
 
   public clipboardOperationResultDiagnosticCopy(
@@ -7411,7 +7345,7 @@ export class FFIRenderLib {
   ): NativeClipboardCopyStatus {
     const capacity = toSafeFFIU32Length(output.byteLength, "clipboard diagnostic output")
     void output.buffer
-    return this.opentui.symbols.clipboardOperationResultDiagnosticCopy(
+    return this.opentui.symbols.ot_clipboard_operation_result_diagnostic_copy(
       ...this.clipboardOperationArgs(operation),
       output,
       capacity,
@@ -7419,7 +7353,7 @@ export class FFIRenderLib {
   }
 
   public clipboardOperationDestroy(operation: ClipboardOperationHandle): NativeClipboardDestroyStatus {
-    const status = this.opentui.symbols.clipboardOperationDestroy(...this.clipboardOperationArgs(operation))
+    const status = this.opentui.symbols.ot_clipboard_operation_destroy(...this.clipboardOperationArgs(operation))
     if (status === NativeClipboardDestroyStatus.Destroyed) this.clipboardOperations.delete(operation)
     return status
   }

@@ -16,6 +16,7 @@ const unicode_transport = @import("context-unicode-abi.zig");
 const terminal_transport = @import("context-terminal-abi.zig");
 const output_transport = @import("context-output-abi.zig");
 const image_transport = @import("context-image-abi.zig");
+const clipboard_transport = @import("clipboard-abi.zig");
 pub const ot_edit_buffer_command = editor_transport.ot_edit_buffer_command;
 
 pub const ContextHandle = struct {
@@ -4423,7 +4424,16 @@ pub fn export_symbols() void {
         if (!std.mem.startsWith(u8, declaration.name, "ot_")) continue;
         if (@typeInfo(@TypeOf(@field(c, declaration.name))) != .@"fn") continue;
         const implementation = find: {
-            for (.{ @This(), editor_transport, text_transport, unicode_transport, terminal_transport, output_transport, image_transport }) |module| {
+            for (.{
+                @This(),
+                editor_transport,
+                text_transport,
+                unicode_transport,
+                terminal_transport,
+                output_transport,
+                image_transport,
+                clipboard_transport,
+            }) |module| {
                 if (@hasDecl(module, declaration.name)) break :find &@field(module, declaration.name);
             }
             @compileError("Missing checked ABI implementation: " ++ declaration.name);

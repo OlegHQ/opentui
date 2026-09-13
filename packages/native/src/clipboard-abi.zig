@@ -1,3 +1,4 @@
+const std = @import("std");
 const c = @import("context_abi_c");
 const abi = @import("context-abi.zig");
 const handles = @import("context-handles.zig");
@@ -15,13 +16,21 @@ fn serviceHandle(table: *handles.Table) ?Handle {
     return table.next(.clipboard_service, &cursor);
 }
 
-export fn clipboardServiceCreate(
+fn outHandle(out: ?*c.ot_handle) ?*Handle {
+    return @ptrCast(out);
+}
+
+fn operationHandle(operation: ?*const c.ot_handle) ?Handle {
+    return if (operation) |ptr| abi.handleFromC(ptr.*) else null;
+}
+
+pub fn ot_clipboard_service_create(
     context: ?*ContextHandle,
     max_operations: u32,
     max_provider_transfers: u32,
     wayland_seat_pointer: ?[*]const u8,
     wayland_seat_length: u32,
-) i32 {
+) callconv(.c) i32 {
     if (abi.sessionContextStatus(context) != c.OT_OK) return -1;
     _ = context.?.core.createClipboardService(
         max_operations,
@@ -32,31 +41,31 @@ export fn clipboardServiceCreate(
     return 0;
 }
 
-export fn clipboardServiceBeginShutdown(context: ?*ContextHandle) u8 {
+pub fn ot_clipboard_service_begin_shutdown(context: ?*ContextHandle) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.ShutdownStatus.invalid_handle);
     const service = serviceHandle(table) orelse return @intFromEnum(clipboard.ShutdownStatus.invalid_handle);
     return @intFromEnum(clipboard.beginServiceShutdown(table, service));
 }
 
-export fn clipboardServicePollShutdown(context: ?*ContextHandle) u8 {
+pub fn ot_clipboard_service_poll_shutdown(context: ?*ContextHandle) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.ShutdownStatus.invalid_handle);
     const service = serviceHandle(table) orelse return @intFromEnum(clipboard.ShutdownStatus.invalid_handle);
     return @intFromEnum(clipboard.pollServiceShutdown(table, service));
 }
 
-export fn clipboardServiceDestroy(context: ?*ContextHandle) u8 {
+pub fn ot_clipboard_service_destroy(context: ?*ContextHandle) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.DestroyStatus.invalid_handle);
     const service = serviceHandle(table) orelse return @intFromEnum(clipboard.DestroyStatus.invalid_handle);
     return @intFromEnum(clipboard.destroyService(table, service));
 }
 
-export fn clipboardServiceDrain(context: ?*ContextHandle) u8 {
+pub fn ot_clipboard_service_drain(context: ?*ContextHandle) callconv(.c) u8 {
     const table = objects(context) orelse return 2;
     const service = serviceHandle(table) orelse return 2;
     return clipboard.drainService(table, service);
 }
 
-export fn clipboardReadOperationStart(
+pub fn ot_clipboard_read_operation_start(
     context: ?*ContextHandle,
     request_pointer: ?[*]const u8,
     request_length: u32,
@@ -65,8 +74,8 @@ export fn clipboardReadOperationStart(
     max_image_pixels: u32,
     max_conversion_bytes: u32,
     timeout_ms: u32,
-    out_operation_handle: ?*Handle,
-) u8 {
+    out_operation: ?*c.ot_handle,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.StartStatus.invalid_service);
     const service = serviceHandle(table) orelse return @intFromEnum(clipboard.StartStatus.invalid_service);
     return @intFromEnum(clipboard.startReadOperation(
@@ -79,18 +88,18 @@ export fn clipboardReadOperationStart(
         max_image_pixels,
         max_conversion_bytes,
         timeout_ms,
-        out_operation_handle,
+        outHandle(out_operation),
     ));
 }
 
-export fn clipboardWriteOperationStart(
+pub fn ot_clipboard_write_operation_start(
     context: ?*ContextHandle,
     text_pointer: ?[*]const u8,
     text_length: u32,
     selection: u8,
     timeout_ms: u32,
-    out_operation_handle: ?*Handle,
-) u8 {
+    out_operation: ?*c.ot_handle,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.StartStatus.invalid_service);
     const service = serviceHandle(table) orelse return @intFromEnum(clipboard.StartStatus.invalid_service);
     return @intFromEnum(clipboard.startWriteOperation(
@@ -100,67 +109,119 @@ export fn clipboardWriteOperationStart(
         text_length,
         selection,
         timeout_ms,
-        out_operation_handle,
+        outHandle(out_operation),
     ));
 }
 
-export fn clipboardClearOperationStart(
+pub fn ot_clipboard_clear_operation_start(
     context: ?*ContextHandle,
     selection: u8,
     timeout_ms: u32,
-    out_operation_handle: ?*Handle,
-) u8 {
+    out_operation: ?*c.ot_handle,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.StartStatus.invalid_service);
     const service = serviceHandle(table) orelse return @intFromEnum(clipboard.StartStatus.invalid_service);
-    return @intFromEnum(clipboard.startClearOperation(table, service, selection, timeout_ms, out_operation_handle));
+    return @intFromEnum(clipboard.startClearOperation(
+        table,
+        service,
+        selection,
+        timeout_ms,
+        outHandle(out_operation),
+    ));
 }
 
-export fn clipboardOperationPoll(context: ?*ContextHandle, operation: *const Handle) u8 {
+pub fn ot_clipboard_operation_poll(context: ?*ContextHandle, operation: ?*const c.ot_handle) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.OperationStatus.invalid_handle);
-    return @intFromEnum(clipboard.pollOperation(table, operation.*));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.OperationStatus.invalid_handle);
+    return @intFromEnum(clipboard.pollOperation(table, id));
 }
 
-export fn clipboardOperationCancel(context: ?*ContextHandle, operation: *const Handle) u8 {
+pub fn ot_clipboard_operation_cancel(context: ?*ContextHandle, operation: ?*const c.ot_handle) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CancelStatus.invalid_handle);
-    return @intFromEnum(clipboard.cancelOperation(table, operation.*));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CancelStatus.invalid_handle);
+    return @intFromEnum(clipboard.cancelOperation(table, id));
 }
 
-export fn clipboardOperationResultMimeLength(context: ?*ContextHandle, operation: *const Handle, out_length: ?*u32) u8 {
+pub fn ot_clipboard_operation_result_mime_length(
+    context: ?*ContextHandle,
+    operation: ?*const c.ot_handle,
+    out_length: ?*u32,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
-    return @intFromEnum(clipboard.resultMimeLength(table, operation.*, out_length));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
+    return @intFromEnum(clipboard.resultMimeLength(table, id, out_length));
 }
 
-export fn clipboardOperationResultMimeCopy(context: ?*ContextHandle, operation: *const Handle, out_pointer: ?[*]u8, capacity: u32) u8 {
+pub fn ot_clipboard_operation_result_mime_copy(
+    context: ?*ContextHandle,
+    operation: ?*const c.ot_handle,
+    out_pointer: ?[*]u8,
+    capacity: u32,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
-    return @intFromEnum(clipboard.resultMimeCopy(table, operation.*, out_pointer, capacity));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
+    return @intFromEnum(clipboard.resultMimeCopy(table, id, out_pointer, capacity));
 }
 
-export fn clipboardOperationResultDataLength(context: ?*ContextHandle, operation: *const Handle, out_length: ?*u32) u8 {
+pub fn ot_clipboard_operation_result_data_length(
+    context: ?*ContextHandle,
+    operation: ?*const c.ot_handle,
+    out_length: ?*u32,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
-    return @intFromEnum(clipboard.resultDataLength(table, operation.*, out_length));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
+    return @intFromEnum(clipboard.resultDataLength(table, id, out_length));
 }
 
-export fn clipboardOperationResultDataCopy(context: ?*ContextHandle, operation: *const Handle, out_pointer: ?[*]u8, capacity: u32) u8 {
+pub fn ot_clipboard_operation_result_data_copy(
+    context: ?*ContextHandle,
+    operation: ?*const c.ot_handle,
+    out_pointer: ?[*]u8,
+    capacity: u32,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
-    return @intFromEnum(clipboard.resultDataCopy(table, operation.*, out_pointer, capacity));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
+    return @intFromEnum(clipboard.resultDataCopy(table, id, out_pointer, capacity));
 }
 
-export fn clipboardOperationResultErrorCode(context: ?*ContextHandle, operation: *const Handle, out_error_code: ?*u32) u8 {
+pub fn ot_clipboard_operation_result_error_code(
+    context: ?*ContextHandle,
+    operation: ?*const c.ot_handle,
+    out_error_code: ?*u32,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
-    return @intFromEnum(clipboard.resultErrorCode(table, operation.*, out_error_code));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
+    return @intFromEnum(clipboard.resultErrorCode(table, id, out_error_code));
 }
 
-export fn clipboardOperationResultDiagnosticLength(context: ?*ContextHandle, operation: *const Handle, out_length: ?*u32) u8 {
+pub fn ot_clipboard_operation_result_diagnostic_length(
+    context: ?*ContextHandle,
+    operation: ?*const c.ot_handle,
+    out_length: ?*u32,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
-    return @intFromEnum(clipboard.resultDiagnosticLength(table, operation.*, out_length));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
+    return @intFromEnum(clipboard.resultDiagnosticLength(table, id, out_length));
 }
 
-export fn clipboardOperationResultDiagnosticCopy(context: ?*ContextHandle, operation: *const Handle, out_pointer: ?[*]u8, capacity: u32) u8 {
+pub fn ot_clipboard_operation_result_diagnostic_copy(
+    context: ?*ContextHandle,
+    operation: ?*const c.ot_handle,
+    out_pointer: ?[*]u8,
+    capacity: u32,
+) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
-    return @intFromEnum(clipboard.resultDiagnosticCopy(table, operation.*, out_pointer, capacity));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.CopyStatus.invalid_handle);
+    return @intFromEnum(clipboard.resultDiagnosticCopy(table, id, out_pointer, capacity));
 }
 
-export fn clipboardOperationDestroy(context: ?*ContextHandle, operation: *const Handle) u8 {
+pub fn ot_clipboard_operation_destroy(context: ?*ContextHandle, operation: ?*const c.ot_handle) callconv(.c) u8 {
     const table = objects(context) orelse return @intFromEnum(clipboard.DestroyStatus.invalid_handle);
-    return @intFromEnum(clipboard.destroyOperation(table, operation.*));
+    const id = operationHandle(operation) orelse return @intFromEnum(clipboard.DestroyStatus.invalid_handle);
+    return @intFromEnum(clipboard.destroyOperation(table, id));
+}
+
+comptime {
+    std.debug.assert(@sizeOf(Handle) == @sizeOf(c.ot_handle));
+    std.debug.assert(@alignOf(Handle) == @alignOf(c.ot_handle));
 }

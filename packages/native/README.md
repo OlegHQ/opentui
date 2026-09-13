@@ -20,7 +20,8 @@ file operations, Session deadlines, and native diagnostic clocks.
   text buffers, and pools. Raw primitives remain a separate capability: callers
   manage their lifetimes and do not acquire Context guards merely by importing them.
 - [`include/opentui.h`](include/opentui.h) defines the checked `ot_*` C ABI for
-  Contexts, Sessions, scenes, drawing, text, editors, styles, leases, and diagnostics.
+  Contexts, Sessions, scenes, drawing, text, editors, styles, leases, clipboard,
+  and diagnostics.
   It remains version 1 and experimental as an ABI, not an unused rendering backend.
 - [`../core/src/zig.ts`](../core/src/zig.ts) supplies TypeScript wrappers over that
   checked ABI. Its checked signatures, callbacks, constants, and record layouts come

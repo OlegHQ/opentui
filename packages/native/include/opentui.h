@@ -2475,6 +2475,87 @@ ot_status ot_session_get_state(ot_context *context, const ot_handle *session, ui
  * the session handle and all its tickets, but not caller-owned output copies. */
 ot_status ot_session_destroy(ot_context *context, const ot_handle *session);
 
+/* Host clipboard service owned by a Context. Distinct from ot_session_clipboard,
+ * which writes terminal OSC selection bytes. These calls return domain-specific
+ * uint8 codes, not ot_status. Create returns 0 or -1. The service is the Context's
+ * sole clipboard_service object. wayland_seat may be NULL only when its length is
+ * zero. Request, text, and result bytes are borrowed for the call. */
+#define OT_CLIPBOARD_OPERATION_PENDING UINT32_C(0)
+#define OT_CLIPBOARD_OPERATION_READ UINT32_C(1)
+#define OT_CLIPBOARD_OPERATION_EMPTY UINT32_C(2)
+#define OT_CLIPBOARD_OPERATION_WRITTEN UINT32_C(3)
+#define OT_CLIPBOARD_OPERATION_CLEARED UINT32_C(4)
+#define OT_CLIPBOARD_OPERATION_UNSUPPORTED UINT32_C(5)
+#define OT_CLIPBOARD_OPERATION_CANCELLED UINT32_C(6)
+#define OT_CLIPBOARD_OPERATION_TIMED_OUT UINT32_C(7)
+#define OT_CLIPBOARD_OPERATION_LIMIT_EXCEEDED UINT32_C(8)
+#define OT_CLIPBOARD_OPERATION_FAILED UINT32_C(9)
+#define OT_CLIPBOARD_OPERATION_INVALID_HANDLE UINT32_C(10)
+#define OT_CLIPBOARD_START_OK UINT32_C(0)
+#define OT_CLIPBOARD_START_INVALID_SERVICE UINT32_C(1)
+#define OT_CLIPBOARD_START_SHUTTING_DOWN UINT32_C(2)
+#define OT_CLIPBOARD_START_LIMIT_EXCEEDED UINT32_C(3)
+#define OT_CLIPBOARD_START_INVALID_ARGUMENT UINT32_C(4)
+#define OT_CLIPBOARD_START_OUT_OF_MEMORY UINT32_C(5)
+#define OT_CLIPBOARD_CANCEL_REQUESTED UINT32_C(0)
+#define OT_CLIPBOARD_CANCEL_ALREADY_TERMINAL UINT32_C(1)
+#define OT_CLIPBOARD_CANCEL_INVALID_HANDLE UINT32_C(2)
+#define OT_CLIPBOARD_COPY_OK UINT32_C(0)
+#define OT_CLIPBOARD_COPY_BUFFER_TOO_SMALL UINT32_C(1)
+#define OT_CLIPBOARD_COPY_INVALID_HANDLE UINT32_C(2)
+#define OT_CLIPBOARD_COPY_INVALID_STATE UINT32_C(3)
+#define OT_CLIPBOARD_COPY_INVALID_ARGUMENT UINT32_C(4)
+#define OT_CLIPBOARD_DESTROY_DESTROYED UINT32_C(0)
+#define OT_CLIPBOARD_DESTROY_NOT_READY UINT32_C(1)
+#define OT_CLIPBOARD_DESTROY_INVALID_HANDLE UINT32_C(2)
+#define OT_CLIPBOARD_SHUTDOWN_PENDING UINT32_C(0)
+#define OT_CLIPBOARD_SHUTDOWN_READY UINT32_C(1)
+#define OT_CLIPBOARD_SHUTDOWN_INVALID_HANDLE UINT32_C(2)
+
+int32_t ot_clipboard_service_create(
+    ot_context *context,
+    uint32_t max_operations,
+    uint32_t max_provider_transfers,
+    const uint8_t *wayland_seat,
+    uint32_t wayland_seat_length);
+uint8_t ot_clipboard_service_begin_shutdown(ot_context *context);
+uint8_t ot_clipboard_service_poll_shutdown(ot_context *context);
+uint8_t ot_clipboard_service_destroy(ot_context *context);
+uint8_t ot_clipboard_service_drain(ot_context *context);
+uint8_t ot_clipboard_read_operation_start(
+    ot_context *context,
+    const uint8_t *request, uint32_t request_length,
+    uint8_t selection,
+    uint32_t max_bytes, uint32_t max_image_pixels, uint32_t max_conversion_bytes,
+    uint32_t timeout_ms,
+    ot_handle *out_operation);
+uint8_t ot_clipboard_write_operation_start(
+    ot_context *context,
+    const uint8_t *text, uint32_t text_length,
+    uint8_t selection, uint32_t timeout_ms,
+    ot_handle *out_operation);
+uint8_t ot_clipboard_clear_operation_start(
+    ot_context *context,
+    uint8_t selection, uint32_t timeout_ms,
+    ot_handle *out_operation);
+uint8_t ot_clipboard_operation_poll(ot_context *context, const ot_handle *operation);
+uint8_t ot_clipboard_operation_cancel(ot_context *context, const ot_handle *operation);
+uint8_t ot_clipboard_operation_result_mime_length(
+    ot_context *context, const ot_handle *operation, uint32_t *out_length);
+uint8_t ot_clipboard_operation_result_mime_copy(
+    ot_context *context, const ot_handle *operation, uint8_t *out_bytes, uint32_t capacity);
+uint8_t ot_clipboard_operation_result_data_length(
+    ot_context *context, const ot_handle *operation, uint32_t *out_length);
+uint8_t ot_clipboard_operation_result_data_copy(
+    ot_context *context, const ot_handle *operation, uint8_t *out_bytes, uint32_t capacity);
+uint8_t ot_clipboard_operation_result_error_code(
+    ot_context *context, const ot_handle *operation, uint32_t *out_error_code);
+uint8_t ot_clipboard_operation_result_diagnostic_length(
+    ot_context *context, const ot_handle *operation, uint32_t *out_length);
+uint8_t ot_clipboard_operation_result_diagnostic_copy(
+    ot_context *context, const ot_handle *operation, uint8_t *out_bytes, uint32_t capacity);
+uint8_t ot_clipboard_operation_destroy(ot_context *context, const ot_handle *operation);
+
 #ifdef __cplusplus
 }
 #endif
