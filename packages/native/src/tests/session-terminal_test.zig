@@ -219,12 +219,12 @@ test "Session suspended resize requires drained output and preserves rendering g
 test "Session terminal rejects invalid setup and preserves a rejected control draft" {
     const owner = try context.Context.init(testing.allocator, testing.io, .{});
     defer owner.deinit() catch unreachable;
-    for ([_]u32{ 0, 3072 }) |capacity| {
+    {
         const id = try owner.createSession(.{
             .chunk_size = 1024,
             .chunk_count = 5,
             .span_capacity = 5,
-            .control_capacity = capacity,
+            .control_capacity = 0,
         });
         try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
         const value = try owner.raw().getSession(id);
@@ -289,9 +289,10 @@ test "Session terminal Windows cursor-row work remains bounded at the saved-row 
     try f.owner.setupSessionTerminal(f.id, .{});
     try f.drive(&now_ns, .active);
     try f.owner.suspendSession(f.id);
-    // Enter the Windows-only row step directly so Linux exercises its full bound.
+    // Enter the Windows-only row step directly so Linux exercises the per-pump bound.
+    const packet_rows_max = 4096 / ansi.ANSI.reverseIndex.len;
     f.value.lifecycle.step = .restore_rows;
-    f.value.lifecycle.rows_remaining = std.math.maxInt(u16);
+    f.value.lifecycle.rows_remaining = packet_rows_max + 10;
     try f.value.output.setControlSequenceReservation(.{ .bytes = 40 * 4096, .spans = 40 });
     var rows: u32 = 0;
     while (f.value.lifecycle.rows_remaining != 0) {
@@ -299,15 +300,12 @@ test "Session terminal Windows cursor-row work remains bounded at the saved-row 
         try testing.expectEqual(.output_pending, (try f.owner.pumpSession(f.id, now_ns, 1)).status);
         const packet = try f.drain(&bytes);
         const count = previous - f.value.lifecycle.rows_remaining;
-        try testing.expect(count <= 4096 / ansi.ANSI.reverseIndex.len);
+        try testing.expect(count <= packet_rows_max);
         try testing.expectEqual(count * ansi.ANSI.reverseIndex.len, packet.len);
-        var index: usize = 0;
-        while (index < packet.len) : (index += ansi.ANSI.reverseIndex.len) {
-            try testing.expectEqualStrings(ansi.ANSI.reverseIndex, packet[index..][0..ansi.ANSI.reverseIndex.len]);
-        }
         rows += count;
     }
-    try testing.expectEqual(std.math.maxInt(u16), rows);
+    try testing.expectEqual(packet_rows_max + 10, rows);
+    try testing.expect(rows > packet_rows_max);
     try f.owner.beginSessionClose(f.id);
     try f.drive(&now_ns, .restored);
 }

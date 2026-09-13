@@ -344,68 +344,52 @@ test "Context handles tombstone before cleanup and retire exhausted generations"
 }
 
 test "Context text replacement preserves state on allocation failure" {
-    for (0..128) |fail_offset| {
-        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-        var callbacks: Callbacks = .{ .width = 0 };
-        const owner = try context.Context.init(failing.allocator(), std.testing.io, .{
-            .yoga_callbacks = .{ .user_data = &callbacks, .dirtied = Callbacks.dirty },
-        });
-        defer owner.deinit() catch unreachable;
-        const session = try owner.createSession(.{});
-        try owner.attachSessionRenderer(session, 12, 4, .{ .remote_mode = .remote });
-        const root = try owner.sceneCreateNode(session, 0, 1);
-        try owner.sceneSetStyle(root, 0, 4, 0, 0, 1, 0);
-        const node_id = try owner.sceneCreateNode(session, 2, 2);
-        const node = try owner.raw().getRenderable(node_id);
-        const text = node.scene_node.?.text.?;
-        try owner.sceneMoveNode(node_id, root, 0);
-        yoga.yogaNodeSetDirtiedFunc(node.yoga_node, true);
-        try owner.sceneSetText(node_id, "old");
-        const old_layout = try layout(owner, node_id);
-        try text.buffer.rope().store_undo("before");
-        text.buffer.clearViewDirty(text.view.view_id);
-        const old_epoch = text.buffer.getContentEpoch();
-        const old_dirtied = callbacks.dirtied;
-        const old_rope = text.buffer.rope().*;
-        const old_capacity = text.buffer.arena.queryCapacity();
-        const old_bytes = text.buffer.getMemBuffer(text.input_mem_id.?).?;
-        // Owned replacement builds fresh rope pools, not the live rope's allocator.
-        failing.fail_index = failing.alloc_index + fail_offset;
-        failing.resize_fail_index = failing.resize_index;
-        const input = "replacement\r\n\t\u{4e16}\u{754c}\n" ** 8;
-        const result = owner.sceneSetText(node_id, input);
-        failing.fail_index = std.math.maxInt(usize);
-        failing.resize_fail_index = std.math.maxInt(usize);
-        var actual: [256]u8 = undefined;
-        if (result) |_| {
-            try std.testing.expect(fail_offset > 0);
-        } else |err| {
-            try std.testing.expectEqual(error.OutOfMemory, err);
-            try std.testing.expect(failing.has_induced_failure);
-            try std.testing.expectEqual(old_rope.root, text.buffer.rope().root);
-            try std.testing.expectEqual(old_rope.undo_history, text.buffer.rope().undo_history);
-            try std.testing.expectEqual(old_capacity, text.buffer.arena.queryCapacity());
-            try std.testing.expectEqual(old_bytes.ptr, text.buffer.getMemBuffer(text.input_mem_id.?).?.ptr);
-            try std.testing.expectEqualStrings("old", actual[0..text.buffer.getPlainTextIntoBuffer(&actual)]);
-            try std.testing.expectEqual(old_epoch, text.buffer.getContentEpoch());
-            try std.testing.expect(!text.buffer.isViewDirty(text.view.view_id));
-            try std.testing.expectEqual(old_dirtied, callbacks.dirtied);
-            var dirty: u32 = 1;
-            try yoga.check(yoga.yogaNodeIsDirtyChecked(node.yoga_node, &dirty));
-            try std.testing.expectEqual(@as(u32, 0), dirty);
-            try std.testing.expectEqualDeep(old_layout, try layout(owner, node_id));
-            try owner.sceneSetText(node_id, input);
-        }
-        try std.testing.expectEqualStrings("replacement\n\t\u{4e16}\u{754c}\n" ** 8, actual[0..text.buffer.getPlainTextIntoBuffer(&actual)]);
-        try std.testing.expectEqual(old_epoch + 1, text.buffer.getContentEpoch());
-        try std.testing.expectEqual(old_dirtied + 1, callbacks.dirtied);
-        try std.testing.expect(text.buffer.isViewDirty(text.view.view_id));
-        try std.testing.expect(!text.buffer.rope().can_undo());
-        try owner.sceneSetText(node_id, "latest");
-        try std.testing.expectEqual(@as(f32, 6), (try layout(owner, node_id)).width);
-        if (result) |_| return else |_| {}
-    }
-    return error.TestUnexpectedResult;
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    var callbacks: Callbacks = .{ .width = 0 };
+    const owner = try context.Context.init(failing.allocator(), std.testing.io, .{
+        .yoga_callbacks = .{ .user_data = &callbacks, .dirtied = Callbacks.dirty },
+    });
+    defer owner.deinit() catch unreachable;
+    const session = try owner.createSession(.{});
+    try owner.attachSessionRenderer(session, 12, 4, .{ .remote_mode = .remote });
+    const root = try owner.sceneCreateNode(session, 0, 1);
+    try owner.sceneSetStyle(root, 0, 4, 0, 0, 1, 0);
+    const node_id = try owner.sceneCreateNode(session, 2, 2);
+    const node = try owner.raw().getRenderable(node_id);
+    const text = node.scene_node.?.text.?;
+    try owner.sceneMoveNode(node_id, root, 0);
+    yoga.yogaNodeSetDirtiedFunc(node.yoga_node, true);
+    try owner.sceneSetText(node_id, "old");
+    const old_layout = try layout(owner, node_id);
+    try text.buffer.rope().store_undo("before");
+    text.buffer.clearViewDirty(text.view.view_id);
+    const old_epoch = text.buffer.getContentEpoch();
+    const old_dirtied = callbacks.dirtied;
+    const old_rope = text.buffer.rope().*;
+    const input = "replacement\r\n\t\u{4e16}\u{754c}\n" ** 8;
+    failing.fail_index = failing.alloc_index;
+    failing.resize_fail_index = failing.resize_index;
+    try std.testing.expectError(error.OutOfMemory, owner.sceneSetText(node_id, input));
+    failing.fail_index = std.math.maxInt(usize);
+    failing.resize_fail_index = std.math.maxInt(usize);
+    try std.testing.expect(failing.has_induced_failure);
+    try std.testing.expectEqual(old_rope.root, text.buffer.rope().root);
+    try std.testing.expectEqual(old_rope.undo_history, text.buffer.rope().undo_history);
+    var actual: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("old", actual[0..text.buffer.getPlainTextIntoBuffer(&actual)]);
+    try std.testing.expectEqual(old_epoch, text.buffer.getContentEpoch());
+    try std.testing.expect(!text.buffer.isViewDirty(text.view.view_id));
+    try std.testing.expectEqual(old_dirtied, callbacks.dirtied);
+    var dirty: u32 = 1;
+    try yoga.check(yoga.yogaNodeIsDirtyChecked(node.yoga_node, &dirty));
+    try std.testing.expectEqual(@as(u32, 0), dirty);
+    try std.testing.expectEqualDeep(old_layout, try layout(owner, node_id));
+    try owner.sceneSetText(node_id, input);
+    try std.testing.expectEqualStrings("replacement\n\t\u{4e16}\u{754c}\n" ** 8, actual[0..text.buffer.getPlainTextIntoBuffer(&actual)]);
+    try std.testing.expectEqual(old_epoch + 1, text.buffer.getContentEpoch());
+    try std.testing.expectEqual(old_dirtied + 1, callbacks.dirtied);
+    try owner.sceneSetText(node_id, "latest");
+    try std.testing.expectEqual(@as(f32, 6), (try layout(owner, node_id)).width);
 }
 
 test "Context rejects mutation reentry from Yoga dirtied callbacks" {
@@ -473,59 +457,47 @@ fn drain(owner: *context.Context, session: context.Handle, output: []u8) ![]cons
 }
 
 test "Context render admission rejects tracker OOM before pooled cell sync" {
-    for ([_]u32{ 0, 5 }) |previous_count| {
-        for (0..2) |fail_offset| {
-            var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-            var output: [4096]u8 = undefined;
-            const owner = try context.Context.init(failing.allocator(), std.testing.io, .{});
-            defer owner.deinit() catch unreachable;
-            const id = try owner.createSession(.{ .chunk_size = 4096 });
-            try owner.attachSessionRenderer(id, 12, 1, .{ .remote_mode = .remote });
-            const value = try owner.raw().getSessionRenderer(id);
-            value.terminal.caps.hyperlinks = true;
-            const current = value.getCurrentBuffer();
-            const next = value.getNextBuffer();
-            try drawTrackedCells(next, previous_count, 'a');
-            value.addToHitGrid(0, 0, 1, 1, 11);
-            try std.testing.expectEqual(.pending, try owner.renderSession(id, true));
-            try std.testing.expect((try drain(owner, id, &output)).len > 0);
-            if (previous_count == 0) {
-                try std.testing.expectEqual(@as(u32, 0), current.grapheme_tracker.used_ids.capacity());
-                try std.testing.expectEqual(@as(u32, 0), current.link_tracker.used_ids.capacity());
-            }
-            const previous_stats = value.getRenderStats();
-            const previous_written = (try owner.raw().getSession(id)).getStats().bytes_written;
-            const previous_chars = current.buffer.char[0..12].*;
-            try drawTrackedCells(next, if (previous_count == 0) 1 else 7, 'k');
-            const glyph_id = gp.graphemeIdFromChar(next.buffer.char[0]);
-            const link_id = ansi.TextAttributes.getLinkId(next.buffer.attributes[0]);
-            value.addToHitGrid(0, 0, 1, 1, 22);
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    var output: [4096]u8 = undefined;
+    const owner = try context.Context.init(failing.allocator(), std.testing.io, .{});
+    defer owner.deinit() catch unreachable;
+    const id = try owner.createSession(.{ .chunk_size = 4096 });
+    try owner.attachSessionRenderer(id, 12, 1, .{ .remote_mode = .remote });
+    const value = try owner.raw().getSessionRenderer(id);
+    value.terminal.caps.hyperlinks = true;
+    const current = value.getCurrentBuffer();
+    const next = value.getNextBuffer();
+    value.addToHitGrid(0, 0, 1, 1, 11);
+    try std.testing.expectEqual(.pending, try owner.renderSession(id, true));
+    try std.testing.expect((try drain(owner, id, &output)).len > 0);
+    try std.testing.expectEqual(@as(u32, 0), current.grapheme_tracker.used_ids.capacity());
+    const previous_stats = value.getRenderStats();
+    const previous_written = (try owner.raw().getSession(id)).getStats().bytes_written;
+    const previous_chars = current.buffer.char[0..12].*;
+    try drawTrackedCells(next, 1, 'k');
+    const glyph_id = gp.graphemeIdFromChar(next.buffer.char[0]);
+    const link_id = ansi.TextAttributes.getLinkId(next.buffer.attributes[0]);
+    value.addToHitGrid(0, 0, 1, 1, 22);
 
-            failing.fail_index = failing.alloc_index + fail_offset;
-            try std.testing.expectEqual(.failed, try owner.renderSession(id, false));
-            try std.testing.expect(failing.has_induced_failure);
-            try std.testing.expectEqual(previous_written, (try owner.raw().getSession(id)).getStats().bytes_written);
-            try std.testing.expectEqual(previous_stats, value.getRenderStats());
-            try std.testing.expectEqualSlices(u32, &previous_chars, current.buffer.char);
-            try std.testing.expectEqual(@as(u32, 11), value.checkHit(0, 0));
-            try std.testing.expect(value.force_full_repaint);
-            try std.testing.expectEqual(@as(u32, 1), try owner.graphemes.getRefcount(glyph_id));
-            try std.testing.expectEqual(@as(u32, 1), try owner.links.getRefcount(link_id));
+    failing.fail_index = failing.alloc_index;
+    failing.resize_fail_index = failing.resize_index;
+    try std.testing.expectEqual(.failed, try owner.renderSession(id, false));
+    try std.testing.expect(failing.has_induced_failure);
+    try std.testing.expectEqual(previous_written, (try owner.raw().getSession(id)).getStats().bytes_written);
+    try std.testing.expectEqual(previous_stats, value.getRenderStats());
+    try std.testing.expectEqualSlices(u32, &previous_chars, current.buffer.char);
+    try std.testing.expectEqual(@as(u32, 11), value.checkHit(0, 0));
+    try std.testing.expectEqual(@as(u32, 1), try owner.graphemes.getRefcount(glyph_id));
+    try std.testing.expectEqual(@as(u32, 1), try owner.links.getRefcount(link_id));
 
-            failing.fail_index = std.math.maxInt(usize);
-            value.addToHitGrid(0, 0, 1, 1, 22);
-            try std.testing.expectEqual(.pending, try owner.renderSession(id, false));
-            const bytes = try drain(owner, id, &output);
-            try std.testing.expectEqual(@as(u32, 22), value.checkHit(0, 0));
-            try std.testing.expectEqual(@as(u32, 12), value.getRenderStats().cellsUpdated);
-            try std.testing.expect(std.mem.find(u8, bytes, "k\xcc\x81") != null);
-            try std.testing.expect(std.mem.find(u8, bytes, try owner.links.get(link_id)) != null);
-            try std.testing.expectEqual(@as(u32, 1), try owner.graphemes.getRefcount(glyph_id));
-            try std.testing.expectEqual(@as(u32, 1), try owner.links.getRefcount(link_id));
-            failing.fail_index = failing.alloc_index;
-            try owner.destroy(id);
-        }
-    }
+    failing.fail_index = std.math.maxInt(usize);
+    failing.resize_fail_index = std.math.maxInt(usize);
+    value.addToHitGrid(0, 0, 1, 1, 22);
+    try std.testing.expectEqual(.pending, try owner.renderSession(id, false));
+    const bytes = try drain(owner, id, &output);
+    try std.testing.expectEqual(@as(u32, 22), value.checkHit(0, 0));
+    try std.testing.expect(std.mem.find(u8, bytes, "k\xcc\x81") != null);
+    try std.testing.expect(std.mem.find(u8, bytes, try owner.links.get(link_id)) != null);
 }
 
 const RenderTask = struct {

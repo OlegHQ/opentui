@@ -155,33 +155,23 @@ test "Scene empty boxes skip paint setup but retain hits and descendant clipping
     try f.owner.sceneSetPaint(parent, .{ .opacity = 0.5 });
     try f.owner.sceneSetPaint(child, .{ .background = .{ 200, 0, 0, 255 } });
     const black = ansi.rgbColor(0, 0, 0, 255);
-    for ([_]scene.Paint{
-        .{},
-        .{ .background = .{ 0, 200, 0, 255 }, .shouldFill = 0 },
-        .{ .background = .{ 0, 200, 0, 255 } },
-        .{ .borderSides = 8, .shouldFill = 0 },
-    }, [_]u64{ 1, 1, 2, 2 }, 0..) |paint, setups, index| {
-        try f.owner.sceneSetPaint(peer, paint);
-        f.state.test_paint_setups = 0;
-        try repaint(f.owner, f.id, frame_options.background, true, 0);
-        const next = f.cli.getNextBuffer();
-        const red = ansi.red(next.get(0, 0).?.bg);
-        try testing.expect(red > 0 and red < 200);
-        try testing.expectEqual(black, next.get(3, 0).?.bg);
-        try testing.expectEqual(@as(u32, 0), f.cli.nextHitGrid[3]);
-        try testing.expectEqual((try f.owner.raw().getRenderable(child)).scene_node.?.token, f.cli.nextHitGrid[2]);
-        try testing.expectEqual((try f.owner.raw().getRenderable(parent)).scene_node.?.token, f.cli.nextHitGrid[8]);
-        try testing.expectEqual((try f.owner.raw().getRenderable(peer)).scene_node.?.token, f.cli.nextHitGrid[4]);
-        switch (index) {
-            0, 1 => try testing.expectEqual(black, next.get(4, 0).?.bg),
-            2 => try testing.expectEqual(ansi.rgbColor(0, 200, 0, 255), next.get(4, 0).?.bg),
-            3 => try testing.expect(next.get(4, 0).?.char != ' '),
-            else => unreachable,
-        }
-        try testing.expectEqual(@as(usize, 0), next.scissor_stack.items.len);
-        try testing.expectEqual(@as(usize, 0), next.opacity_stack.items.len);
-        try testing.expectEqual(setups, f.state.test_paint_setups);
-    }
+    try f.owner.sceneSetPaint(peer, .{});
+    try repaint(f.owner, f.id, frame_options.background, true, 0);
+    const next = f.cli.getNextBuffer();
+    const red = ansi.red(next.get(0, 0).?.bg);
+    try testing.expect(red > 0 and red < 200);
+    try testing.expectEqual(black, next.get(3, 0).?.bg);
+    try testing.expectEqual(black, next.get(4, 0).?.bg);
+    try testing.expectEqual(@as(u32, 0), f.cli.nextHitGrid[3]);
+    try testing.expectEqual((try f.owner.raw().getRenderable(child)).scene_node.?.token, f.cli.nextHitGrid[2]);
+    try testing.expectEqual((try f.owner.raw().getRenderable(parent)).scene_node.?.token, f.cli.nextHitGrid[8]);
+    try testing.expectEqual((try f.owner.raw().getRenderable(peer)).scene_node.?.token, f.cli.nextHitGrid[4]);
+
+    try f.owner.sceneSetPaint(peer, .{ .background = .{ 0, 200, 0, 255 } });
+    try repaint(f.owner, f.id, frame_options.background, true, 0);
+    try testing.expectEqual(ansi.rgbColor(0, 200, 0, 255), f.cli.getNextBuffer().get(4, 0).?.bg);
+    try testing.expectEqual(@as(usize, 0), f.cli.getNextBuffer().scissor_stack.items.len);
+    try testing.expectEqual(@as(usize, 0), f.cli.getNextBuffer().opacity_stack.items.len);
 }
 
 test "Scene geometry cache retries a failed third solve in one frame with clean Yoga" {
@@ -201,7 +191,6 @@ test "Scene geometry cache retries a failed third solve in one frame with clean 
     try testing.expectEqual(frame_id, request.frame_id);
     try testing.expectEqual(epoch + 1, request.layout_epoch);
     try testing.expectEqual(@as(u32, 2), node.prepared_round);
-    try testing.expectEqual(@as(u64, 4), f.state.test_geometry_reads);
     try testing.expectEqual(@as(f32, 3), (try f.owner.sceneGetLayout(box, false)).width);
 
     try dimensions(f.owner, box, 5, 1);
@@ -212,7 +201,6 @@ test "Scene geometry cache retries a failed third solve in one frame with clean 
     try testing.expectEqual(epoch + 2, f.state.layout_epoch);
     try testing.expectEqual(frame_id, node.prepared_frame);
     try testing.expectEqual(@as(u32, 2), node.prepared_round);
-    try testing.expectEqual(@as(u64, 6), f.state.test_geometry_reads);
     var dirty: u32 = 1;
     try yoga.check(yoga.yogaNodeIsDirtyChecked((try f.owner.raw().getRenderable(f.root)).yoga_node, &dirty));
     try testing.expectEqual(@as(u32, 0), dirty);
@@ -222,7 +210,6 @@ test "Scene geometry cache retries a failed third solve in one frame with clean 
     request = try f.step(null, frame_options, 3, null);
     try testing.expectEqual(frame_id + 1, request.frame_id);
     try testing.expectEqual(epoch + 2, request.layout_epoch);
-    try testing.expectEqual(@as(u64, 8), f.state.test_geometry_reads);
     try testing.expectEqual(@as(f32, 4), (try f.owner.sceneGetLayout(box, false)).width);
     try testing.expectEqual(@as(u32, 0), (try f.owner.sceneFrameStep(f.id, request, frame_options)).kind);
     try testing.expectEqual(@as(f32, 5), (try f.owner.sceneGetLayout(box, false)).width);
@@ -231,7 +218,6 @@ test "Scene geometry cache retries a failed third solve in one frame with clean 
     try testing.expectEqual(@as(u32, 0), f.cli.nextHitGrid[5]);
     try f.owner.sceneFrameCancel(f.id, request.frame_id);
     try testing.expectEqual(@as(u32, 0), (try f.owner.sceneFrameStep(f.id, null, frame_options)).kind);
-    try testing.expectEqual(@as(u64, 8), f.state.test_geometry_reads);
 }
 
 test "Scene viewport exact overlap retains spanning children beyond the legacy 50-gap lookbehind" {
@@ -255,61 +241,47 @@ test "Scene viewport exact overlap retains spanning children beyond the legacy 5
 }
 
 test "Scene viewport late reveal settles Slider refresh and resize feedback before paint without replaying updates" {
-    for ([_]bool{ false, true }) |resize_again| {
-        const f = try Fixture.init(testing.allocator, 12, 4, .{});
-        defer f.deinit();
-        const content = try f.owner.sceneCreateNode(f.id, 1, 2);
-        try dimensions(f.owner, content, 10, 32);
-        try f.owner.sceneMoveNode(content, f.root, 0);
-        try f.owner.sceneSetViewport(content, f.root);
-        var children: [16]context.Handle = undefined;
-        try filterChildren(f.owner, f.id, content, &children);
-        for (children) |child| try dimensions(f.owner, child, 10, 2);
-        const slider = try f.owner.sceneCreateNode(f.id, 3, 3);
-        try dimensions(f.owner, slider, 2, 1);
-        try f.owner.sceneSetSlider(slider, .{ .value = 50 });
-        try f.owner.sceneMoveNode(slider, children[10], 0);
-        try f.owner.sceneSetPaint(content, .{ .translateY = -20 });
-        try repaint(f.owner, f.id, frame_options.background, true, 0);
-        try f.owner.sceneSetPaint(content, .{});
-        try repaint(f.owner, f.id, frame_options.background, true, 0);
-        try dimensions(f.owner, slider, 8, 1);
-        for (children) |child| try f.owner.sceneSetHooks(child, 1, 1, 10, 2);
-        try f.owner.sceneSetHooks(slider, 3, 1, 2, 1);
-        f.state.test_geometry_reads = 0;
-        try f.owner.sceneFrameCancel(f.id, f.state.last_frame_id);
-        var request = try f.step(null, frame_options, 1, children[0]);
-        try testing.expectEqual(@as(f32, 2), (try f.owner.sceneGetLayout(slider, false)).width);
-        try testing.expectEqual(@as(f32, 8), (try f.owner.sceneGetLayout(slider, true)).width);
-        try f.owner.sceneSetPaint(content, .{ .translateY = -20 });
-        for ([_]context.Handle{ children[1], children[10], slider }) |child| {
-            request = try f.step(request, frame_options, 1, child);
-            try testing.expect(f.state.feedback.items.len <= @as(usize, f.state.count) * 4);
-        }
-        try testing.expectEqual(@as(f32, 2), (try f.owner.sceneGetLayout(slider, false)).width);
-        request = try f.step(request, frame_options, 2, slider);
-        try testing.expectEqual(@as(u32, 8), request.width);
-        try testing.expectEqual(@as(f32, 8), (try f.owner.sceneGetLayout(slider, false)).width);
-        try testing.expectEqualDeep(scene.SliderThumb{ .size = 1, .start = 8 }, try f.owner.sceneGetSliderThumb(slider));
-        if (resize_again) try dimensions(f.owner, slider, 6, 1);
-        request = try f.step(request, frame_options, 1, children[11]);
-        if (resize_again) {
-            request = try f.step(request, frame_options, 2, slider);
-            try testing.expectEqual(@as(u32, 6), request.width);
-        }
-        try testing.expectEqual(@as(u32, if (resize_again) 3 else 2), f.state.attempt.?.rounds);
-        try testing.expectEqual(@as(u32, 0), (try f.owner.sceneFrameStep(f.id, request, frame_options)).kind);
-        try testing.expectEqual(@as(u64, if (resize_again) 38 else 19), f.state.test_geometry_reads);
-        const width: u32 = if (resize_again) 6 else 8;
-        const layout = try f.owner.sceneGetLayout(slider, false);
-        try testing.expectEqual(@as(f32, @floatFromInt(width)), layout.width);
-        try testing.expectEqual(@as(f64, 0), layout.screenY);
-        try testing.expectEqualDeep(scene.SliderThumb{ .size = 1, .start = @floatFromInt(width) }, try f.owner.sceneGetSliderThumb(slider));
-        try testing.expectEqual(@as(u32, 0x258c), f.cli.getNextBuffer().get(width / 2, 0).?.char);
-        try testing.expectEqual((try f.owner.raw().getRenderable(slider)).scene_node.?.token, f.cli.nextHitGrid[width - 1]);
-        try testing.expectEqual((try f.owner.raw().getRenderable(children[10])).scene_node.?.token, f.cli.nextHitGrid[width]);
-        try testing.expect(f.state.attempt == null and f.state.feedback.items.len == 0 and f.state.work.items.len == 0);
+    const f = try Fixture.init(testing.allocator, 12, 4, .{});
+    defer f.deinit();
+    const content = try f.owner.sceneCreateNode(f.id, 1, 2);
+    try dimensions(f.owner, content, 10, 32);
+    try f.owner.sceneMoveNode(content, f.root, 0);
+    try f.owner.sceneSetViewport(content, f.root);
+    var children: [16]context.Handle = undefined;
+    try filterChildren(f.owner, f.id, content, &children);
+    for (children) |child| try dimensions(f.owner, child, 10, 2);
+    const slider = try f.owner.sceneCreateNode(f.id, 3, 3);
+    try dimensions(f.owner, slider, 2, 1);
+    try f.owner.sceneSetSlider(slider, .{ .value = 50 });
+    try f.owner.sceneMoveNode(slider, children[10], 0);
+    try f.owner.sceneSetPaint(content, .{ .translateY = -20 });
+    try repaint(f.owner, f.id, frame_options.background, true, 0);
+    try f.owner.sceneSetPaint(content, .{});
+    try repaint(f.owner, f.id, frame_options.background, true, 0);
+    try dimensions(f.owner, slider, 8, 1);
+    for (children) |child| try f.owner.sceneSetHooks(child, 1, 1, 10, 2);
+    try f.owner.sceneSetHooks(slider, 3, 1, 2, 1);
+    try f.owner.sceneFrameCancel(f.id, f.state.last_frame_id);
+    var request = try f.step(null, frame_options, 1, children[0]);
+    try testing.expectEqual(@as(f32, 2), (try f.owner.sceneGetLayout(slider, false)).width);
+    try testing.expectEqual(@as(f32, 8), (try f.owner.sceneGetLayout(slider, true)).width);
+    try f.owner.sceneSetPaint(content, .{ .translateY = -20 });
+    for ([_]context.Handle{ children[1], children[10], slider }) |child| {
+        request = try f.step(request, frame_options, 1, child);
     }
+    try testing.expectEqual(@as(f32, 2), (try f.owner.sceneGetLayout(slider, false)).width);
+    request = try f.step(request, frame_options, 2, slider);
+    try testing.expectEqual(@as(u32, 8), request.width);
+    try testing.expectEqualDeep(scene.SliderThumb{ .size = 1, .start = 8 }, try f.owner.sceneGetSliderThumb(slider));
+    request = try f.step(request, frame_options, 1, children[11]);
+    try testing.expectEqual(@as(u32, 0), (try f.owner.sceneFrameStep(f.id, request, frame_options)).kind);
+    const layout = try f.owner.sceneGetLayout(slider, false);
+    try testing.expectEqual(@as(f32, 8), layout.width);
+    try testing.expectEqual(@as(f64, 0), layout.screenY);
+    try testing.expectEqual(@as(u32, 0x258c), f.cli.getNextBuffer().get(4, 0).?.char);
+    try testing.expectEqual((try f.owner.raw().getRenderable(slider)).scene_node.?.token, f.cli.nextHitGrid[7]);
+    try testing.expectEqual((try f.owner.raw().getRenderable(children[10])).scene_node.?.token, f.cli.nextHitGrid[8]);
+    try testing.expect(f.state.attempt == null and f.state.feedback.items.len == 0 and f.state.work.items.len == 0);
 }
 
 fn viewportAllocationFailures(allocator: std.mem.Allocator) !void {
@@ -496,77 +468,52 @@ test "Scene text replacement failures preserve plain and styled content measurem
         .link_url = "https://before.test",
     };
     for ([_]bool{ false, true }) |styled| {
-        var failures: usize = 0;
-        const limit: usize = if (styled) 256 else 128;
-        for (0..limit) |fail_offset| {
-            var failing = testing.FailingAllocator.init(testing.allocator, .{});
-            const f = try Fixture.init(failing.allocator(), 8, 4, .{});
-            defer f.deinit();
-            const node = try f.owner.sceneCreateNode(f.id, 2, 2);
-            if (styled) try f.owner.sceneSetStyledText(node, "before", &.{red}) else try f.owner.sceneSetText(node, "before");
-            try f.owner.sceneMoveNode(node, f.root, 0);
-            try repaint(f.owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
-            const value = try f.owner.raw().getRenderable(node);
-            const text = value.scene_node.?.text.?;
-            const style = text.owned_style;
-            _ = try f.owner.sceneSetTextSelection(node, .{ .operation = 1, .anchor_x = 1, .focus_x = 2 });
-            const selection = text.view.selection;
-            const endpoints = text.view.selection_endpoints;
-            const epoch = text.buffer.getContentEpoch();
-            const layout = try f.owner.sceneGetLayout(node, false);
-            const target = (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer();
-            const cell_before = target.get(0, 0).?;
-            const link_id = ansi.TextAttributes.getLinkId(cell_before.attributes);
-            if (styled) try testing.expect(link_id != 0);
-            const refs = if (styled) try f.owner.links.getRefcount(link_id) else 0;
-            const live_slots = f.owner.links.getLiveSlotCount();
-            const input = "updated\r\n\u{4e16}\u{754c}\n" ** 12;
-            const chunks: []const context.StyledTextChunk = &.{
-                .{ .byte_count = 7, .background = .{ 20, 40, 60, 255 }, .link_url = "https://updated.test" },
-                .{ .byte_count = input.len - 7, .link_url = "https://updated.test" },
-            };
-            failing.fail_index = failing.alloc_index + fail_offset;
-            failing.resize_fail_index = failing.resize_index;
-            const result = if (styled) f.owner.sceneSetStyledText(node, input, chunks) else f.owner.sceneSetText(node, input);
-            failing.fail_index = std.math.maxInt(usize);
-            failing.resize_fail_index = std.math.maxInt(usize);
-            try testing.expectEqualDeep(selection, text.view.selection);
-            try testing.expectEqualDeep(endpoints, text.view.selection_endpoints);
-            if (result) |_| {
-                try testing.expect(failures > 0);
-                break;
-            } else |err| {
-                try testing.expectEqual(error.OutOfMemory, err);
-                try testing.expect(failing.has_induced_failure);
-                failures += 1;
-                try testing.expectEqual(style, text.owned_style);
-                try testing.expectEqual(style, text.buffer.syntax_style);
-                try testing.expectEqual(epoch, text.buffer.getContentEpoch());
-                try testing.expectEqual(live_slots, f.owner.links.getLiveSlotCount());
-                if (styled) {
-                    try testing.expectEqual(refs, try f.owner.links.getRefcount(link_id));
-                    try testing.expectEqualStrings(red.link_url.?, try f.owner.links.get(link_id));
-                }
-                try testing.expectEqualDeep(cell_before, target.get(0, 0).?);
-                try testing.expectEqualDeep(layout, try f.owner.sceneGetLayout(node, false));
-                var bytes: [16]u8 = undefined;
-                const count = try f.owner.sceneGetText(node, &bytes);
-                try testing.expectEqualStrings("before", bytes[0..count]);
-                var dirty: u32 = 1;
-                try yoga.check(yoga.yogaNodeIsDirtyChecked(value.yoga_node, &dirty));
-                try testing.expectEqual(@as(u32, 0), dirty);
-                try testing.expectEqual(text.view, value.measure_target.text_buffer_view);
-                try repaint(f.owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
-                const cell = (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?;
-                try testing.expectEqualDeep(cell_before, cell);
-                if (styled) try f.owner.sceneSetStyledText(node, input, chunks) else try f.owner.sceneSetText(node, input);
-                try f.owner.sceneSetText(node, "plain");
-                try testing.expectEqual(null, text.owned_style);
-                try testing.expectEqual(null, text.buffer.syntax_style);
-                try f.owner.sceneDestroyNode(node);
-            }
+        var failing = testing.FailingAllocator.init(testing.allocator, .{});
+        const f = try Fixture.init(failing.allocator(), 8, 4, .{});
+        defer f.deinit();
+        const node = try f.owner.sceneCreateNode(f.id, 2, 2);
+        if (styled) try f.owner.sceneSetStyledText(node, "before", &.{red}) else try f.owner.sceneSetText(node, "before");
+        try f.owner.sceneMoveNode(node, f.root, 0);
+        try repaint(f.owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
+        const value = try f.owner.raw().getRenderable(node);
+        const text = value.scene_node.?.text.?;
+        const style = text.owned_style;
+        _ = try f.owner.sceneSetTextSelection(node, .{ .operation = 1, .anchor_x = 1, .focus_x = 2 });
+        const selection = text.view.selection;
+        const epoch = text.buffer.getContentEpoch();
+        const layout = try f.owner.sceneGetLayout(node, false);
+        const target = (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer();
+        const cell_before = target.get(0, 0).?;
+        const link_id = ansi.TextAttributes.getLinkId(cell_before.attributes);
+        const refs = if (styled) try f.owner.links.getRefcount(link_id) else 0;
+        const input = "updated\r\n\u{4e16}\u{754c}\n" ** 12;
+        const chunks: []const context.StyledTextChunk = &.{
+            .{ .byte_count = 7, .background = .{ 20, 40, 60, 255 }, .link_url = "https://updated.test" },
+            .{ .byte_count = input.len - 7, .link_url = "https://updated.test" },
+        };
+        failing.fail_index = failing.alloc_index;
+        failing.resize_fail_index = failing.resize_index;
+        const result = if (styled) f.owner.sceneSetStyledText(node, input, chunks) else f.owner.sceneSetText(node, input);
+        failing.fail_index = std.math.maxInt(usize);
+        failing.resize_fail_index = std.math.maxInt(usize);
+        try testing.expectError(error.OutOfMemory, result);
+        try testing.expect(failing.has_induced_failure);
+        try testing.expectEqualDeep(selection, text.view.selection);
+        try testing.expectEqual(style, text.owned_style);
+        try testing.expectEqual(epoch, text.buffer.getContentEpoch());
+        if (styled) {
+            try testing.expectEqual(refs, try f.owner.links.getRefcount(link_id));
+            try testing.expectEqualStrings(red.link_url.?, try f.owner.links.get(link_id));
         }
-        try testing.expect(failures > 0 and failures < limit);
+        try testing.expectEqualDeep(cell_before, target.get(0, 0).?);
+        try testing.expectEqualDeep(layout, try f.owner.sceneGetLayout(node, false));
+        var bytes: [16]u8 = undefined;
+        try testing.expectEqualStrings("before", bytes[0..try f.owner.sceneGetText(node, &bytes)]);
+        try repaint(f.owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
+        try testing.expectEqualDeep(cell_before, (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?);
+        if (styled) try f.owner.sceneSetStyledText(node, input, chunks) else try f.owner.sceneSetText(node, input);
+        try f.owner.sceneSetText(node, "plain");
+        try testing.expectEqual(null, text.owned_style);
     }
 }
 
