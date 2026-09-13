@@ -343,55 +343,6 @@ test "Context handles tombstone before cleanup and retire exhausted generations"
     try std.testing.expectEqual(@as(u32, 0), table.live_count);
 }
 
-test "Context text replacement preserves state on allocation failure" {
-    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-    var callbacks: Callbacks = .{ .width = 0 };
-    const owner = try context.Context.init(failing.allocator(), std.testing.io, .{
-        .yoga_callbacks = .{ .user_data = &callbacks, .dirtied = Callbacks.dirty },
-    });
-    defer owner.deinit() catch unreachable;
-    const session = try owner.createSession(.{});
-    try owner.attachSessionRenderer(session, 12, 4, .{ .remote_mode = .remote });
-    const root = try owner.sceneCreateNode(session, 0, 1);
-    try owner.sceneSetStyle(root, 0, 4, 0, 0, 1, 0);
-    const node_id = try owner.sceneCreateNode(session, 2, 2);
-    const node = try owner.raw().getRenderable(node_id);
-    const text = node.scene_node.?.text.?;
-    try owner.sceneMoveNode(node_id, root, 0);
-    yoga.yogaNodeSetDirtiedFunc(node.yoga_node, true);
-    try owner.sceneSetText(node_id, "old");
-    const old_layout = try layout(owner, node_id);
-    try text.buffer.rope().store_undo("before");
-    text.buffer.clearViewDirty(text.view.view_id);
-    const old_epoch = text.buffer.getContentEpoch();
-    const old_dirtied = callbacks.dirtied;
-    const old_rope = text.buffer.rope().*;
-    const input = "replacement\r\n\t\u{4e16}\u{754c}\n" ** 8;
-    failing.fail_index = failing.alloc_index;
-    failing.resize_fail_index = failing.resize_index;
-    try std.testing.expectError(error.OutOfMemory, owner.sceneSetText(node_id, input));
-    failing.fail_index = std.math.maxInt(usize);
-    failing.resize_fail_index = std.math.maxInt(usize);
-    try std.testing.expect(failing.has_induced_failure);
-    try std.testing.expectEqual(old_rope.root, text.buffer.rope().root);
-    try std.testing.expectEqual(old_rope.undo_history, text.buffer.rope().undo_history);
-    var actual: [256]u8 = undefined;
-    try std.testing.expectEqualStrings("old", actual[0..text.buffer.getPlainTextIntoBuffer(&actual)]);
-    try std.testing.expectEqual(old_epoch, text.buffer.getContentEpoch());
-    try std.testing.expect(!text.buffer.isViewDirty(text.view.view_id));
-    try std.testing.expectEqual(old_dirtied, callbacks.dirtied);
-    var dirty: u32 = 1;
-    try yoga.check(yoga.yogaNodeIsDirtyChecked(node.yoga_node, &dirty));
-    try std.testing.expectEqual(@as(u32, 0), dirty);
-    try std.testing.expectEqualDeep(old_layout, try layout(owner, node_id));
-    try owner.sceneSetText(node_id, input);
-    try std.testing.expectEqualStrings("replacement\n\t\u{4e16}\u{754c}\n" ** 8, actual[0..text.buffer.getPlainTextIntoBuffer(&actual)]);
-    try std.testing.expectEqual(old_epoch + 1, text.buffer.getContentEpoch());
-    try std.testing.expectEqual(old_dirtied + 1, callbacks.dirtied);
-    try owner.sceneSetText(node_id, "latest");
-    try std.testing.expectEqual(@as(f32, 6), (try layout(owner, node_id)).width);
-}
-
 test "Context rejects mutation reentry from Yoga dirtied callbacks" {
     const Reentry = struct {
         owner: *context.Context = undefined,

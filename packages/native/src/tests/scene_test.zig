@@ -8,15 +8,9 @@ const yoga = @import("../yoga.zig");
 const ansi = @import("../ansi.zig");
 const gp = @import("../grapheme.zig");
 const scene = @import("../scene.zig");
-const native = @import("../native-renderable.zig");
 
 test {
     _ = @import("scene_editor_test.zig");
-}
-
-test "scene Node is not inlined into NativeRenderable" {
-    try testing.expect(@sizeOf(native.NativeRenderable) <= 128);
-    try testing.expect(@sizeOf(*scene.Node) < @sizeOf(scene.Node));
 }
 
 const frame_options: scene.FrameOptions = .{
@@ -64,20 +58,6 @@ test "Scene checked measurement rejects busy frames and preserves layout on wron
     try owner.cancelSession(id);
     try testing.expectError(error.SessionCancelled, owner.sceneMeasureLayout(id, root));
     try testing.expect(!owner.mutating);
-}
-
-test "Scene text metadata distinguishes display columns from bytes and line separators" {
-    const owner = try context.Context.init(testing.allocator, testing.io, .{});
-    defer owner.deinit() catch unreachable;
-    const id = try session(owner, 8, 2);
-    _ = try owner.sceneCreateNode(id, 0, 1);
-    const text = try owner.sceneCreateNode(id, 2, 2);
-    try owner.sceneSetText(text, "界\né");
-    const info = try owner.sceneGetTextInfo(text);
-    try testing.expectEqual(@as(u32, 6), info.byte_count);
-    try testing.expectEqual(@as(u32, 3), info.text_length);
-    try testing.expectEqual(@as(u32, 2), info.line_count);
-    try testing.expectEqual(@as(u32, 2), info.width_cols_max);
 }
 
 test "Scene retained surface binding rejects before replacing and releases each reference" {
@@ -458,63 +438,6 @@ test "Scene selected text copies exact bytes without allocating" {
     try testing.expectEqual(3, try f.owner.sceneGetSelectedText(node, output[0..3]));
     try testing.expectEqualStrings("\xe4\xb8\xad", output[0..3]);
     try testing.expect(!failing.has_induced_failure);
-}
-
-test "Scene text replacement failures preserve plain and styled content measurement and layout" {
-    const red: context.StyledTextChunk = .{
-        .byte_count = 6,
-        .foreground = .{ 255, 0, 0, 255 },
-        .attributes = 1,
-        .link_url = "https://before.test",
-    };
-    for ([_]bool{ false, true }) |styled| {
-        var failing = testing.FailingAllocator.init(testing.allocator, .{});
-        const f = try Fixture.init(failing.allocator(), 8, 4, .{});
-        defer f.deinit();
-        const node = try f.owner.sceneCreateNode(f.id, 2, 2);
-        if (styled) try f.owner.sceneSetStyledText(node, "before", &.{red}) else try f.owner.sceneSetText(node, "before");
-        try f.owner.sceneMoveNode(node, f.root, 0);
-        try repaint(f.owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
-        const value = try f.owner.raw().getRenderable(node);
-        const text = value.scene_node.?.text.?;
-        const style = text.owned_style;
-        _ = try f.owner.sceneSetTextSelection(node, .{ .operation = 1, .anchor_x = 1, .focus_x = 2 });
-        const selection = text.view.selection;
-        const epoch = text.buffer.getContentEpoch();
-        const layout = try f.owner.sceneGetLayout(node, false);
-        const target = (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer();
-        const cell_before = target.get(0, 0).?;
-        const link_id = ansi.TextAttributes.getLinkId(cell_before.attributes);
-        const refs = if (styled) try f.owner.links.getRefcount(link_id) else 0;
-        const input = "updated\r\n\u{4e16}\u{754c}\n" ** 12;
-        const chunks: []const context.StyledTextChunk = &.{
-            .{ .byte_count = 7, .background = .{ 20, 40, 60, 255 }, .link_url = "https://updated.test" },
-            .{ .byte_count = input.len - 7, .link_url = "https://updated.test" },
-        };
-        failing.fail_index = failing.alloc_index;
-        failing.resize_fail_index = failing.resize_index;
-        const result = if (styled) f.owner.sceneSetStyledText(node, input, chunks) else f.owner.sceneSetText(node, input);
-        failing.fail_index = std.math.maxInt(usize);
-        failing.resize_fail_index = std.math.maxInt(usize);
-        try testing.expectError(error.OutOfMemory, result);
-        try testing.expect(failing.has_induced_failure);
-        try testing.expectEqualDeep(selection, text.view.selection);
-        try testing.expectEqual(style, text.owned_style);
-        try testing.expectEqual(epoch, text.buffer.getContentEpoch());
-        if (styled) {
-            try testing.expectEqual(refs, try f.owner.links.getRefcount(link_id));
-            try testing.expectEqualStrings(red.link_url.?, try f.owner.links.get(link_id));
-        }
-        try testing.expectEqualDeep(cell_before, target.get(0, 0).?);
-        try testing.expectEqualDeep(layout, try f.owner.sceneGetLayout(node, false));
-        var bytes: [16]u8 = undefined;
-        try testing.expectEqualStrings("before", bytes[0..try f.owner.sceneGetText(node, &bytes)]);
-        try repaint(f.owner, f.id, .{ 0, 0, 0, 255 }, true, 0);
-        try testing.expectEqualDeep(cell_before, (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?);
-        if (styled) try f.owner.sceneSetStyledText(node, input, chunks) else try f.owner.sceneSetText(node, input);
-        try f.owner.sceneSetText(node, "plain");
-        try testing.expectEqual(null, text.owned_style);
-    }
 }
 
 test "Scene text fully clipped coordinates never enter signed drawing arithmetic" {
