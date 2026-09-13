@@ -1728,16 +1728,18 @@ fn runPlainTextOperation(tb: *TextBuffer, operation: PlainTextOperation, text: [
 
 fn setupPlainTextHistory(tb: *TextBuffer, style: *text_buffer.SyntaxStyle) !u8 {
     const text = "old\ttext\nsecond";
-    const copy = try tb.global_allocator.dupe(u8, text);
-    errdefer tb.global_allocator.free(copy);
     var prepared_links = link.LinkTracker.init(tb.global_allocator, tb.link_pool);
     defer prepared_links.deinit();
     const link_id = try prepared_links.trackUrl("https://example.com/plain");
     const style_id = try style.registerStyle("chunk0", null, null, TextAttributes.setLinkId(0, link_id));
-    const mem_id = try tb.replaceOwnedStyledText(copy, null, style, &.{.{
+    const copy = try tb.global_allocator.dupe(u8, text);
+    const mem_id = tb.replaceOwnedStyledText(copy, null, style, &.{.{
         .byte_count = @intCast(text.len),
         .style_id = style_id,
-    }}, &prepared_links);
+    }}, &prepared_links) catch |err| {
+        tb.global_allocator.free(copy);
+        return err;
+    };
     try tb.rope().store_undo("base");
     try tb.append(" tail");
     try tb.rope().store_undo("tail");
@@ -1746,6 +1748,35 @@ fn setupPlainTextHistory(tb: *TextBuffer, style: *text_buffer.SyntaxStyle) !u8 {
     try tb.addHighlight(0, 2, 4, 42, 2, 7);
     try tb.addHighlight(1, 0, 2, 43, 2, 8);
     return mem_id;
+}
+
+test "TextBuffer plain history setup allocation failures release owned text once" {
+    var pool = gp.GraphemePool.init(std.testing.allocator);
+    defer pool.deinit();
+    var links = link.LinkPool.init(std.testing.allocator);
+    defer links.deinit();
+    var failed_after_transfer = false;
+    for (0..64) |offset| {
+        const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
+        defer style.deinit();
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+        const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
+        defer tb.deinit();
+        failing.fail_index = failing.alloc_index + offset;
+        failing.resize_fail_index = failing.resize_index;
+        const result = setupPlainTextHistory(tb, style);
+        failing.fail_index = std.math.maxInt(usize);
+        failing.resize_fail_index = std.math.maxInt(usize);
+        if (result) |_| {
+            try std.testing.expect(failed_after_transfer);
+            return;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expect(failing.has_induced_failure);
+            if (tb.memRegistry().getUsedSlots() != 0) failed_after_transfer = true;
+        }
+    }
+    return error.MissingSuccessfulSetup;
 }
 
 test "TextBuffer plain replacement registration limit preserves the live document" {

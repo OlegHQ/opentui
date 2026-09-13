@@ -95,7 +95,6 @@ pub const GraphemePool = struct {
         len: u16,
         refcount: u32,
         generation: u32,
-        is_owned: u32, // 0 = unowned (external memory), 1 = owned (copied into pool)
         is_allocated: u32, // 0 = free slot, 1 = pending or referenced slot.
     };
 
@@ -223,23 +222,7 @@ pub const GraphemePool = struct {
         }
 
         const class_id: u32 = classForSize(bytes.len);
-        const slot_index = try self.classes[class_id].allocInternal(bytes, true);
-        const generation = self.classes[class_id].getGeneration(slot_index);
-        const id = try packId(class_id, slot_index, generation);
-        assert((try self.getRefcount(id)) == 0);
-        return id;
-    }
-
-    /// Allocate an ID for externally managed memory (no copy, just reference)
-    /// The caller is responsible for keeping the memory valid while the ID is in use
-    pub fn allocUnowned(self: *GraphemePool, bytes: []const u8) GraphemePoolError!IdPayload {
-        // For unowned allocations, we need space for a pointer
-        if (bytes.len > std.math.maxInt(u16)) return GraphemePoolError.GraphemeTooLong;
-        assert(bytes.len <= std.math.maxInt(u16));
-        const ptr_size = @sizeOf(usize);
-        const class_id: u32 = classForSize(ptr_size);
-        assert(ptr_size <= CLASS_SIZES[class_id]);
-        const slot_index = try self.classes[class_id].allocInternal(bytes, false);
+        const slot_index = try self.classes[class_id].allocInternal(bytes);
         const generation = self.classes[class_id].getGeneration(slot_index);
         const id = try packId(class_id, slot_index, generation);
         assert((try self.getRefcount(id)) == 0);
@@ -254,13 +237,10 @@ pub const GraphemePool = struct {
         const old_refcount = try self.classes[class_id].getRefcount(slot_index, generation);
 
         if (old_refcount == 0) {
-            const is_owned = try self.classes[class_id].isOwned(slot_index, generation);
-            if (is_owned) {
-                // Intern before publishing the first live reference so OOM does
-                // not leave the caller holding an unreported reference.
-                const bytes = try self.classes[class_id].get(slot_index, generation);
-                try self.internLiveId(id, bytes);
-            }
+            // Intern before publishing the first live reference so OOM does
+            // not leave the caller holding an unreported reference.
+            const bytes = try self.classes[class_id].get(slot_index, generation);
+            try self.internLiveId(id, bytes);
         }
 
         try self.classes[class_id].incref(slot_index, generation);
@@ -278,12 +258,8 @@ pub const GraphemePool = struct {
 
         const old_refcount = try self.classes[class_id].getRefcount(slot_index, generation);
         if (old_refcount == 1) {
-            const is_owned = try self.classes[class_id].isOwned(slot_index, generation);
-            if (is_owned) {
-                // This is a transition from 1 to 0 for owned bytes, remove map entry.
-                const bytes = try self.classes[class_id].get(slot_index, generation);
-                self.removeInternedLiveId(bytes, id);
-            }
+            const bytes = try self.classes[class_id].get(slot_index, generation);
+            self.removeInternedLiveId(bytes, id);
         }
 
         try self.classes[class_id].decref(slot_index, generation);
@@ -311,11 +287,8 @@ pub const GraphemePool = struct {
         const slot_index: u32 = id & SLOT_MASK;
         const generation: u32 = (id >> SLOT_BITS) & GENERATION_MASK;
 
-        const is_owned = try self.classes[class_id].isOwned(slot_index, generation);
-        if (is_owned) {
-            const bytes = try self.classes[class_id].get(slot_index, generation);
-            self.removeInternedLiveId(bytes, id);
-        }
+        const bytes = try self.classes[class_id].get(slot_index, generation);
+        self.removeInternedLiveId(bytes, id);
 
         try self.classes[class_id].freeUnreferenced(slot_index, generation);
     }
@@ -427,20 +400,12 @@ pub const GraphemePool = struct {
             return @ptrCast(p);
         }
 
-        pub fn allocInternal(
-            self: *ClassPool,
-            bytes: []const u8,
-            is_owned: bool,
-        ) GraphemePoolError!u32 {
+        pub fn allocInternal(self: *ClassPool, bytes: []const u8) GraphemePoolError!u32 {
             self.assertInvariants();
-            if (is_owned and bytes.len > self.slot_capacity) {
+            if (bytes.len > self.slot_capacity) {
                 return GraphemePoolError.GraphemeTooLong;
             }
-            if (!is_owned and bytes.len > std.math.maxInt(u16)) {
-                return GraphemePoolError.GraphemeTooLong;
-            }
-            if (is_owned) assert(bytes.len <= self.slot_capacity);
-            if (!is_owned) assert(bytes.len <= std.math.maxInt(u16));
+            assert(bytes.len <= self.slot_capacity);
 
             if (self.free_list.items.len == 0) try self.grow();
 
@@ -456,39 +421,18 @@ pub const GraphemePool = struct {
             // Increment generation when reusing a slot, wrapping at 7 bits (128 values)
             const new_generation = (header_ptr.generation + 1) & GENERATION_MASK;
 
-            // Calculate length based on ownership
-            const len: u16 = if (is_owned)
-                @intCast(@min(bytes.len, self.slot_capacity))
-            else
-                @intCast(bytes.len);
-
             header_ptr.* = .{
-                .len = len,
+                .len = @intCast(bytes.len),
                 .refcount = 0,
                 .generation = new_generation,
-                .is_owned = if (is_owned) 1 else 0,
                 .is_allocated = 1,
             };
 
             const data_ptr = @as([*]u8, @ptrCast(p)) + @sizeOf(SlotHeader);
-
-            if (is_owned) {
-                // Owned: copy bytes into our storage
-                @memcpy(data_ptr[0..header_ptr.len], bytes[0..header_ptr.len]);
-            } else {
-                // Store the pointer as bytes because u8 slab storage does not
-                // guarantee native pointer alignment.
-                std.mem.writeInt(
-                    usize,
-                    data_ptr[0..@sizeOf(usize)],
-                    @intFromPtr(bytes.ptr),
-                    .little,
-                );
-            }
+            @memcpy(data_ptr[0..header_ptr.len], bytes);
 
             assert(header_ptr.generation <= GENERATION_MASK);
             assert(header_ptr.refcount == 0);
-            assert(header_ptr.is_owned == @as(u32, if (is_owned) 1 else 0));
             assert(header_ptr.is_allocated == 1);
             return slot_index;
         }
@@ -589,24 +533,10 @@ pub const GraphemePool = struct {
                 return GraphemePoolError.WrongGeneration;
             }
             if (header_ptr.is_allocated != 1) return GraphemePoolError.InvalidId;
-            assert(header_ptr.is_owned == 0 or header_ptr.is_owned == 1);
-            if (header_ptr.is_owned == 1) assert(header_ptr.len <= self.slot_capacity);
+            assert(header_ptr.len <= self.slot_capacity);
 
             const data_ptr = @as([*]u8, @ptrCast(p)) + @sizeOf(SlotHeader);
-
-            if (header_ptr.is_owned == 1) {
-                // Owned memory: return slice from our storage
-                return data_ptr[0..header_ptr.len];
-            } else {
-                // Unowned memory: decode the possibly unaligned stored pointer.
-                const pointer_address = std.mem.readInt(
-                    usize,
-                    data_ptr[0..@sizeOf(usize)],
-                    .little,
-                );
-                const external_ptr: [*]const u8 = @ptrFromInt(pointer_address);
-                return external_ptr[0..header_ptr.len];
-            }
+            return data_ptr[0..header_ptr.len];
         }
 
         pub fn getRefcount(
@@ -623,22 +553,6 @@ pub const GraphemePool = struct {
             if (header_ptr.is_allocated != 1) return GraphemePoolError.InvalidId;
             assert(header_ptr.generation <= GENERATION_MASK);
             return header_ptr.refcount;
-        }
-
-        pub fn isOwned(
-            self: *ClassPool,
-            slot_index: u32,
-            expected_generation: u32,
-        ) GraphemePoolError!bool {
-            if (slot_index >= self.num_slots) return GraphemePoolError.InvalidId;
-            const p = self.slotPtr(slot_index);
-            const header_ptr = slotHeaderPtr(p);
-            if (header_ptr.generation != expected_generation) {
-                return GraphemePoolError.WrongGeneration;
-            }
-            if (header_ptr.is_allocated != 1) return GraphemePoolError.InvalidId;
-            assert(header_ptr.is_owned == 0 or header_ptr.is_owned == 1);
-            return header_ptr.is_owned == 1;
         }
     };
 };
