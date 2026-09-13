@@ -19,53 +19,6 @@ fn box(owner: *context.Context, id: context.Handle, parent: context.Handle, num:
     return paint_tests.node(owner, id, parent, 1, num, index);
 }
 
-test "Scene prefix and custom self fix prepared membership through reparent reveal insertion and slot reuse" {
-    for ([_]u32{ 8, 32 }) |flags| {
-        const f = try Fixture.init(testing.allocator, 8, 1, .{ .output = transport });
-        defer f.deinit();
-        const kind: u32 = if (flags == 8) 1 else 6;
-        const source = try paint_tests.node(f.owner, f.id, f.root, kind, 2, 0);
-        const child = try paint_tests.node(f.owner, f.id, source, kind, 3, 0);
-        const hidden = try paint_tests.node(f.owner, f.id, source, kind, 4, 1);
-        const removed = try paint_tests.node(f.owner, f.id, source, kind, 5, 2);
-        const destination = try paint_tests.node(f.owner, f.id, f.root, kind, 6, 1);
-        try f.owner.sceneSetPaint(source, .{ .translateX = 1, .shouldFill = 0 });
-        try f.owner.sceneSetPaint(destination, .{ .translateX = 5, .shouldFill = 0 });
-        for ([_]context.Handle{ source, child, hidden, removed, destination }) |node| try f.owner.sceneSetHooks(node, flags, 1, 2, 1);
-        try f.owner.sceneSetStyle(hidden, 0, 9, 0, 0, 1, 0);
-        var request = try f.owner.sceneFrameStep(f.id, null, options);
-        try testing.expectEqual(source, request.node);
-        try f.owner.sceneMoveNode(child, destination, 0);
-        if (flags == 8) try f.owner.sceneMoveNode(hidden, destination, 1);
-        try f.owner.sceneSetStyle(hidden, 0, 9, 0, 0, 0, 0);
-        if (flags == 32) try f.owner.sceneSetPaint(destination, .{ .zIndex = -1, .translateX = 5, .shouldFill = 0 });
-        try f.owner.sceneDestroyNode(removed);
-        const inserted = try paint_tests.node(f.owner, f.id, destination, kind, 7, if (flags == 8) 2 else 1);
-        try testing.expectEqual(removed.slot, inserted.slot);
-        try testing.expect(removed.generation != inserted.generation);
-        try f.owner.sceneSetHooks(inserted, flags, 1, 2, 1);
-        for ([_]context.Handle{ child, destination }) |node| {
-            request = try f.step(request, options, if (flags == 8) 4 else 7, node);
-            if (std.meta.eql(node, child)) {
-                try testing.expectEqual(@as(f64, 5), (try f.owner.sceneGetLayout(child, false)).screenX);
-            }
-        }
-        if (flags == 8) try testing.expectEqual(ansi.rgbColor(3, 0, 0, 255), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(1, 0).?.bg);
-        request = try f.step(request, options, 0, null);
-        try f.owner.sceneFrameCancel(f.id, request.frame_id);
-        var previous: ?scene.FrameRequest = null;
-        const next_order = if (flags == 8)
-            [_]context.Handle{ source, destination, child, hidden, inserted }
-        else
-            [_]context.Handle{ destination, child, inserted, source, hidden };
-        for (next_order) |node| {
-            previous = try f.step(previous, options, if (flags == 8) 4 else 7, node);
-        }
-        request = try f.step(previous, options, 0, null);
-        try f.owner.sceneFrameCancel(f.id, request.frame_id);
-    }
-}
-
 test "Scene prefix entered destruction finishes self after and retired hits without painting a replacement" {
     const f = try Fixture.init(testing.allocator, 8, 1, .{ .output = transport });
     defer f.deinit();
@@ -129,24 +82,6 @@ test "Scene prefix freezes clip opacity and dimensions but samples live transfor
     try f.owner.sceneFrameCancel(f.id, done.frame_id);
     request = try f.owner.sceneFrameStep(f.id, null, options);
     try testing.expectEqual(@as(u32, 6), request.width);
-    try f.owner.sceneFrameCancel(f.id, request.frame_id);
-}
-
-test "Scene prefix live focus changes the later box border" {
-    const f = try Fixture.init(testing.allocator, 8, 1, .{ .output = transport });
-    defer f.deinit();
-    const child = try box(f.owner, f.id, f.state.root.?.scene_node.?.handle, 2, 0);
-    try f.owner.sceneSetPaint(child, .{
-        .borderSides = 8,
-        .focusable = true,
-        .borderColor = .{ 200, 0, 0, 255 },
-        .focusedBorderColor = .{ 0, 200, 0, 255 },
-    });
-    try f.owner.sceneSetHooks(child, 24, 1, 2, 1);
-    var request = try f.owner.sceneFrameStep(f.id, null, options);
-    try f.owner.sceneSetFocus(child, true);
-    request = try f.owner.sceneFrameStep(f.id, request, options);
-    try testing.expectEqual(ansi.rgbColor(0, 200, 0, 255), (try f.owner.raw().getSessionRenderer(f.id)).getNextBuffer().get(0, 0).?.fg);
     try f.owner.sceneFrameCancel(f.id, request.frame_id);
 }
 

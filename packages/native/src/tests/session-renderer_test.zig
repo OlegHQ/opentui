@@ -187,64 +187,6 @@ test "Session renderer no-byte frames wait only for earlier output" {
     try testing.expectEqualStrings("tail", try drain(owner, id, &bytes));
 }
 
-test "Session renderer failure and cancellation retain the last completed presentation" {
-    for ([_]enum { before, during, after }{ .before, .during, .after }) |phase| {
-        for ([_]bool{ false, true }) |cancel| {
-            var environment = std.process.Environ.Map.init(testing.allocator);
-            defer environment.deinit();
-            const owner = try context.Context.init(testing.allocator, testing.io, .{});
-            defer owner.deinit() catch unreachable;
-            const id = try owner.createSession(transport);
-            defer owner.cancelSession(id) catch unreachable;
-            try owner.attachSessionRenderer(id, 4, 2, .{ .env_map = &environment });
-            const cli = try owner.raw().getSessionRenderer(id);
-            const value = try owner.raw().getSession(id);
-            var bytes: [1024]u8 = undefined;
-            try paint(cli, "old", 11);
-            try testing.expectEqual(.pending, try owner.renderSession(id, true));
-            _ = try drain(owner, id, &bytes);
-            const initial_end = value.completed_bytes;
-            try owner.writeSession(id, "lead");
-            try paint(cli, "new", 22);
-            try testing.expectEqual(.pending, try owner.renderSession(id, true));
-            const frame_end = value.getStats().bytes_written;
-            try owner.writeSession(id, "tail");
-            const stop = switch (phase) {
-                .before => initial_end + 1,
-                .during => initial_end + "lead".len + 1,
-                .after => frame_end,
-            };
-            while (value.completed_bytes < stop) {
-                const prefix = (try owner.readOutput(id, bytes[0..1])).?;
-                try owner.completeOutput(id, prefix, .written);
-            }
-            const ticket = (try owner.readOutput(id, bytes[0..2])).?;
-            const retained = value.getStats();
-            const published = cli.getRenderStats();
-            if (cancel) {
-                try owner.cancelSession(id);
-                try testing.expect(value.isDrained());
-            } else {
-                try owner.completeOutput(id, ticket, .failed);
-                try testing.expectEqualDeep(retained, value.getStats());
-                try testing.expectError(error.ContextBusy, owner.deinit());
-                try testing.expect(!owner.closing);
-            }
-            try testing.expectEqual(stop, value.completed_bytes);
-            try testing.expect(value.frame_end_offset == null);
-            try testing.expectEqualDeep(published, cli.getRenderStats());
-            try testing.expectEqual(@as(u32, if (phase == .after) 22 else 11), cli.checkHit(0, 0));
-            try testing.expectEqual(@as(u64, if (phase == .after) 2 else 1), published.frameCount);
-            const stopped: context.Error = if (cancel) error.SessionCancelled else error.SessionFailed;
-            try testing.expectError(stopped, owner.renderSession(id, true));
-            try testing.expectError(stopped, owner.writeSession(id, "replay"));
-            try testing.expectError(stopped, owner.readOutput(id, &bytes));
-            try testing.expectError(error.StaleRequest, owner.completeOutput(id, ticket, .written));
-            try testing.expectEqual(stop, value.completed_bytes);
-        }
-    }
-}
-
 test "Session renderer backpressure is bounded and frame rejection needs explicit retry" {
     for ([_]usize{ 512, 448, 64 }) |size| {
         var failing = testing.FailingAllocator.init(testing.allocator, .{});

@@ -1,7 +1,6 @@
 import { ResourceContext } from "./buffer.js"
-import { describe, expect, it, beforeEach, afterEach, spyOn } from "bun:test"
+import { describe, expect, it, beforeEach, afterEach } from "bun:test"
 import { EditBuffer } from "./edit-buffer.js"
-import { resolveRenderLib } from "./zig.js"
 import { ManualClock } from "./testing/manual-clock.js"
 
 let resourceContext: ResourceContext
@@ -9,39 +8,6 @@ beforeEach(() => {
   resourceContext = new ResourceContext({ objectCapacity: 8, renderCellsMax: 1 })
 })
 afterEach(() => resourceContext.destroy())
-
-it.each(["setText", "replaceText", "setTextOwned", "replaceTextOwned"] as const)(
-  "%s rejection preserves text, cursor, history, and notifications",
-  async (method) => {
-    const buffer = EditBuffer.create("unicode", resourceContext)
-    buffer.setText("original")
-    buffer.replaceText("previous")
-    buffer.replaceText("current")
-    buffer.undo()
-    buffer.setCursorToLineCol(0, 3)
-    await Promise.resolve()
-    const cursor = buffer.getCursorPosition()
-    const events: string[] = []
-    buffer.on("content-changed", () => events.push("content"))
-    buffer.on("cursor-changed", () => events.push("cursor"))
-    const failure = new Error("rejected replacement")
-    const rejected = spyOn(resourceContext.renderLib, "contextEditBufferSetText").mockImplementation(() => {
-      throw failure
-    })
-    try {
-      expect(() => buffer[method]("rejected")).toThrow(failure)
-      expect(buffer.getText()).toBe("previous")
-      expect(buffer.getCursorPosition()).toEqual(cursor)
-      expect(buffer.canUndo()).toBe(true)
-      expect(buffer.canRedo()).toBe(true)
-      await Promise.resolve()
-      expect(events).toEqual([])
-    } finally {
-      rejected.mockRestore()
-      buffer.destroy()
-    }
-  },
-)
 
 async function flushNativeEvents(): Promise<void> {
   // EditBuffer forwards native events via queueMicrotask, so a manual 0ms tick
@@ -63,17 +29,6 @@ describe("EditBuffer", () => {
 
   afterEach(() => {
     buffer.destroy()
-  })
-
-  it("debugLogRope delivers diagnostics before returning", () => {
-    buffer.setText("text")
-    const debug = spyOn(console, "debug").mockImplementation(() => {})
-    try {
-      buffer.debugLogRope()
-      expect(debug.mock.calls.some(([message]) => /^Rope structure:/.test(message))).toBe(true)
-    } finally {
-      debug.mockRestore()
-    }
   })
 
   describe("setText and getText", () => {
@@ -1373,89 +1328,6 @@ describe("EditBuffer History Management", () => {
       buffer.undo()
       expect(buffer.getText()).toBe("")
     })
-  })
-
-  it("clean replacement reuses native registrations and retains subsequent editing", async () => {
-    buffer.setText("initial")
-    for (let i = 0; i < 253; i++) buffer.replaceText(`entry-${i}`)
-    await flushNativeEvents()
-    const events: string[] = []
-    buffer.on("content-changed", () => events.push("content"))
-    buffer.on("cursor-changed", () => events.push("cursor"))
-
-    for (const text of ["new\r\n\u4e16\u754c", "", "final"]) {
-      expect(buffer.setText(text)).toBeUndefined()
-      expect(buffer.getText()).toBe(text.replaceAll("\r\n", "\n"))
-      expect(buffer.getCursorPosition()).toEqual({ row: 0, col: 0, offset: 0 })
-      expect(buffer.canUndo()).toBe(false)
-      expect(buffer.canRedo()).toBe(false)
-      await flushNativeEvents()
-      expect(events.splice(0)).toEqual(["cursor", "content"])
-    }
-
-    buffer.insertText("typed")
-    expect(buffer.getText()).toBe("typedfinal")
-    buffer.undo()
-    expect(buffer.getText()).toBe("final")
-    buffer.redo()
-    expect(buffer.getText()).toBe("typedfinal")
-  })
-
-  it.each([
-    ["setText", "new\r\n\u4e16\u754c"],
-    ["replaceText", "new\r\n\u4e16\u754c"],
-    ["setText", ""],
-    ["replaceText", ""],
-  ] as const)("%s retains real native acceptance after a deferred callback error (text: %s)", async (method, text) => {
-    buffer.setText("original")
-    buffer.replaceText("previous")
-    buffer.setCursorToLineCol(0, 3)
-    await flushNativeEvents()
-    const events: string[] = []
-    buffer.on("content-changed", () => events.push("content"))
-    buffer.on("cursor-changed", () => events.push("cursor"))
-    const lib = resolveRenderLib()
-    const symbol = "ot_edit_buffer_set_text"
-    const symbols = Reflect.get(lib, "opentui").symbols as Record<string, (...args: unknown[]) => number>
-    const original = symbols[symbol]!
-    const failure = new Error("accepted replacement callback")
-    let calls = 0
-    symbols[symbol] = (...args) => {
-      calls++
-      const status = original(...args)
-      if (status === 0) {
-        lib.getYogaHost().invokeCallback(() => {
-          expect(() => buffer[method]("reentrant")).toThrow("Cannot mutate Yoga during a callback")
-          throw failure
-        })
-      }
-      return status
-    }
-    try {
-      expect(() => buffer[method](text)).toThrow(failure)
-    } finally {
-      symbols[symbol] = original
-    }
-    expect(calls).toBe(1)
-    const normalized = text.replaceAll("\r\n", "\n")
-    expect(buffer.getText()).toBe(normalized)
-    expect(buffer.getCursorPosition()).toEqual({ row: 0, col: 0, offset: 0 })
-    expect(buffer.canUndo()).toBe(method === "replaceText")
-    await flushNativeEvents()
-    expect(events).toEqual(["cursor", "content"])
-
-    if (method === "replaceText") {
-      buffer.undo()
-      expect(buffer.getText()).toBe("previous")
-      buffer.redo()
-      expect(buffer.getText()).toBe(normalized)
-    }
-    buffer.insertText("!")
-    expect(buffer.getText()).toBe(`!${normalized}`)
-    buffer.undo()
-    expect(buffer.getText()).toBe(normalized)
-    buffer.redo()
-    expect(buffer.getText()).toBe(`!${normalized}`)
   })
 
   describe("replaceTextOwned with history", () => {

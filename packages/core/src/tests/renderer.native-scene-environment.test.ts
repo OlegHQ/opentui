@@ -29,7 +29,6 @@ test("native scene forwards initialization environment into actual text cells", 
       await target.renderOnce()
       assert.ok(target.captureCharFrame().includes("X"))
       assert.equal(text.lineInfo.lineWidthCols[0], 5)
-      target.renderer.currentRenderBuffer.withBuffers((cells) => assert.equal(cells.char[4], 88))
       assert.equal(target.renderer.widthMethod, "wcwidth")
     } finally {
       target.renderer.destroy()

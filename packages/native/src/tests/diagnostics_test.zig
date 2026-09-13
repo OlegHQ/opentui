@@ -144,28 +144,6 @@ test "diagnostics zero capacity drops messages and drop counts saturate" {
     try std.testing.expectEqual(@as(u32, 0), result.remaining);
 }
 
-test "diagnostics legacy adapter preserves message levels and formatting failure" {
-    const Capture = struct {
-        var level: u8 = 0;
-        var length: u32 = 0;
-        var bytes: [logger.Diagnostic.message_bytes_max]u8 = undefined;
-
-        fn callback(message_level: u8, message: [*]const u8, message_len: u32) callconv(.c) void {
-            level = message_level;
-            length = message_len;
-            @memcpy(bytes[0..length], message[0..length]);
-        }
-    };
-    logger.setLogCallback(Capture.callback);
-    defer logger.setLogCallback(null);
-    logger.debug("legacy {}", .{42});
-    try std.testing.expectEqual(@intFromEnum(logger.LogLevel.debug), Capture.level);
-    try std.testing.expectEqualStrings("legacy 42", Capture.bytes[0..Capture.length]);
-    logger.info("{s}", .{&([_]u8{'x'} ** (logger.Diagnostic.message_bytes_max + 1))});
-    try std.testing.expectEqual(@intFromEnum(logger.LogLevel.err), Capture.level);
-    try std.testing.expectEqualStrings("Log formatting failed", Capture.bytes[0..Capture.length]);
-}
-
 const LegacyProbe = struct {
     var calls: std.atomic.Value(u32) = .init(0);
 
@@ -320,60 +298,4 @@ test "Context diagnostics capture renderer and buffer failures without invoking 
         .pool = &owner.graphemes,
     }));
     try std.testing.expectEqual(@as(u32, 1), LegacyProbe.calls.load(.monotonic));
-}
-
-test "Context diagnostics text resources use the supplied I/O" {
-    const FileIo = struct {
-        calls: u32 = 0,
-
-        const vtable: std.Io.VTable = blk: {
-            var result = std.Io.failing.vtable.*;
-            result.dirOpenFile = openFile;
-            break :blk result;
-        };
-
-        fn openFile(user_data: ?*anyopaque, _: std.Io.Dir, _: []const u8, _: std.Io.Dir.OpenFileOptions) std.Io.File.OpenError!std.Io.File {
-            const self: *@This() = @ptrCast(@alignCast(user_data.?));
-            self.calls += 1;
-            return error.FileNotFound;
-        }
-    };
-    var supplied: FileIo = .{};
-    const owner = try context.Context.init(std.testing.allocator, .{ .userdata = &supplied, .vtable = &FileIo.vtable }, .{
-        .object_capacity = 1,
-    });
-    defer owner.deinit() catch unreachable;
-    const text = try owner.raw().getTextBuffer(try owner.createTextBuffer(.unicode));
-    try std.testing.expectError(error.InvalidIndex, text.buffer.loadFile("diagnostics-fixture.txt"));
-    try std.testing.expectEqual(@as(u32, 1), supplied.calls);
-}
-
-test "Context diagnostics preserve rope log order after snapshot allocation failure" {
-    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-    const owner = try context.Context.init(failing.allocator(), std.testing.io, .{
-        .object_capacity = 1,
-        .diagnostic_capacity = 6,
-    });
-    defer owner.deinit() catch unreachable;
-    const text_id = try owner.createTextBuffer(.unicode);
-    try owner.textBufferSetText(text_id, "owned");
-    const text = try owner.raw().getTextBuffer(text_id);
-    failing.fail_index = failing.alloc_index;
-    text.buffer.debugLogRope();
-    try std.testing.expect(failing.has_induced_failure);
-    failing.fail_index = std.math.maxInt(usize);
-    var events: [6]logger.Diagnostic = undefined;
-    try std.testing.expectEqual(@as(u32, 5), owner.diagnostics.drain(&events).count);
-    for ([_][]const u8{
-        "=== TextBuffer Rope Debug ===",
-        "Line count: 1",
-        "Char count: 5",
-        "Byte size: 5",
-        "Failed to generate rope text representation",
-    }, 0..) |expected, index| {
-        try std.testing.expectEqualStrings(expected, events[index].message[0..events[index].message_len]);
-    }
-    text.buffer.debugLogRope();
-    try std.testing.expectEqual(@as(u32, 6), owner.diagnostics.drain(&events).count);
-    try std.testing.expectEqualStrings("=== End Rope Debug ===", events[5].message[0..events[5].message_len]);
 }

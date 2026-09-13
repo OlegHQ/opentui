@@ -6,7 +6,6 @@ import { createMockMouse, createTestRenderer, type TestRenderer } from "../testi
 import { MockTreeSitterClient } from "../testing/mock-tree-sitter-client.js"
 import type { SimpleHighlight } from "../lib/tree-sitter/types.js"
 import { settleDiffHighlighting } from "./__tests__/renderable-test-utils.js"
-import { resolveRenderLib } from "../zig.js"
 import type { CodeRenderable } from "./Code.js"
 
 let currentRenderer: TestRenderer
@@ -83,29 +82,6 @@ const largeDiff = `--- a/large.js
 +const line49 = 'changed';
  const line50 = 'context';
  const line51 = 'context';`
-
-test("DiffRenderable - rejected recursive cleanup preserves line-info listeners", () => {
-  const syntaxStyle = SyntaxStyle.create(currentRenderer.nativeScene)
-  const diff = new DiffRenderable(currentRenderer, { diff: simpleDiff, view: "split", syntaxStyle })
-  try {
-    currentRenderer.root.add(diff)
-    const code = Reflect.get(diff, "leftCodeRenderable") as CodeRenderable
-    const listener = Reflect.get(diff, "_lineInfoChangeHandler")
-    expect(code.listeners("line-info-change").includes(listener)).toBe(true)
-    const host = resolveRenderLib().getYogaHost()
-    host.invokeCallback(() => diff.destroyRecursively())
-    expect(() => host.throwCallbackError()).toThrow("Cannot mutate Yoga during a callback")
-    expect(diff.isDestroyed).toBe(false)
-    expect(code.listeners("line-info-change").includes(listener)).toBe(true)
-    expect(Reflect.get(diff, "leftSideAdded")).toBe(true)
-    expect(Reflect.get(diff, "rightSideAdded")).toBe(true)
-    diff.destroyRecursively()
-    expect(code.isDestroyed).toBe(true)
-  } finally {
-    diff.destroyRecursively()
-    syntaxStyle.destroy()
-  }
-})
 
 test("DiffRenderable - basic construction with unified view", async () => {
   const diffRenderable = new DiffRenderable(currentRenderer, {

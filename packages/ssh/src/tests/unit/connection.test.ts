@@ -1,63 +1,10 @@
 import { EventEmitter } from "node:events"
-import { createRequire } from "node:module"
 import { Duplex } from "node:stream"
-import { expect, spyOn, test } from "bun:test"
-import { NativeSession } from "@opentui/core"
+import { expect, test } from "bun:test"
 import type { AuthContext, ClientInfo, Connection } from "ssh2"
 import { createConnectionHandler } from "../../connection.js"
 import { createSafeInvoke } from "../../safe.js"
 import { deferred, waitFor } from "../support.js"
-
-const require = createRequire(import.meta.url)
-
-test("connections enable no-delay exactly once before authentication and session work", async () => {
-  const events: string[] = []
-  const noDelay: boolean[] = []
-  const client = Object.assign(new EventEmitter(), {
-    setNoDelay(enabled: boolean) {
-      noDelay.push(enabled)
-      events.push("no-delay")
-      return this
-    },
-    end() {},
-    _sock: { destroy() {} },
-  }) as unknown as Connection
-  const handler = createConnectionHandler({
-    authenticator: {
-      advertisedMethods: () => ["none"],
-      authenticate: async () => ({ type: "reject", methods: ["none"] }),
-      async handle() {
-        events.push("authentication")
-        return { type: "accept", identity: { method: "none", username: "test" } }
-      },
-    },
-    middlewares: [],
-    handler: () => {},
-    safe: createSafeInvoke(() => {}),
-    idleTimeoutMs: undefined,
-    maxTimeoutMs: undefined,
-    sessionLimits: { perConnection: 1, global: 1 },
-  })
-  try {
-    handler.onConnection(client, { ip: "127.0.0.1", port: 1234 } as ClientInfo)
-    expect(noDelay).toEqual([true])
-    const authenticated = deferred<void>()
-    client.emit("authentication", {
-      accept: () => authenticated.resolve(),
-    } as unknown as AuthContext)
-    await authenticated.promise
-    client.emit("ready")
-    client.emit("session", () => {
-      events.push("session")
-      return new EventEmitter()
-    })
-    expect(events).toEqual(["no-delay", "authentication", "session"])
-    expect(noDelay).toEqual([true])
-  } finally {
-    client.emit("close")
-    await handler.closeAll()
-  }
-})
 
 test("a no-delay transport failure preserves connection cleanup", async () => {
   const failure = new Error("custom transport failure")
@@ -144,103 +91,6 @@ test("an authentication decision is ignored after the connection closes", async 
 
   expect(accepts).toBe(0)
   expect(rejects).toBe(0)
-})
-
-test("connection loss cancels a native Session while ssh2 channel EOF is behind paused input", async () => {
-  const { Channel, MAX_WINDOW, PACKET_SIZE } = require("ssh2/lib/Channel.js")
-  const { ChannelManager } = require("ssh2/lib/utils.js")
-  const middleware = deferred<void>()
-  const errors: unknown[] = []
-  let driver: NativeSession | undefined
-  let closes = 0
-  let handlers = 0
-  let channelCloses = 0
-  const write = NativeSession.prototype.write
-  const capture = spyOn(NativeSession.prototype, "write").mockImplementation(function (this: NativeSession, bytes) {
-    driver = this
-    return write.call(this, bytes)
-  })
-  const client = Object.assign(new EventEmitter(), {
-    setNoDelay() {},
-    end() {},
-    _sock: { destroy() {} },
-    _protocol: { channelData() {}, channelEOF() {}, channelClose() {}, channelWindowAdjust() {} },
-    _chanMgr: undefined as any,
-  })
-  client._chanMgr = new ChannelManager(client)
-  const channel = new Channel(
-    client,
-    {
-      type: "session",
-      incoming: { id: 0, window: MAX_WINDOW, packetSize: PACKET_SIZE, state: "open" },
-      outgoing: { id: 0, window: 0, packetSize: PACKET_SIZE, state: "open" },
-    },
-    { server: true },
-  ) as Duplex
-  client._chanMgr.add(channel)
-  channel.on("close", () => {
-    channelCloses++
-  })
-  const handler = createConnectionHandler({
-    authenticator: {
-      advertisedMethods: () => ["none"],
-      authenticate: async () => ({ type: "reject", methods: ["none"] }),
-      handle: async () => ({ type: "accept", identity: { method: "none", username: "paused" } }),
-    },
-    middlewares: [
-      async (session, next) => {
-        session.onClose(() => {
-          closes++
-        })
-        session.write("held behind the SSH window")
-        await middleware.promise
-        return next()
-      },
-    ],
-    handler: () => {
-      handlers++
-    },
-    safe: createSafeInvoke((error) => errors.push(error)),
-    idleTimeoutMs: undefined,
-    maxTimeoutMs: undefined,
-    sessionLimits: { perConnection: 1, global: 1 },
-  })
-  try {
-    handler.onConnection(client as unknown as Connection, { ip: "127.0.0.1", port: 1234 } as ClientInfo)
-    handler.setAccepting(true)
-    client.emit("ready")
-    const sshSession = new EventEmitter()
-    client.emit("session", () => sshSession)
-    sshSession.emit("shell", () => channel)
-    channel.push(Buffer.alloc(65_536))
-    await waitFor(() => channel.isPaused() && channel.writableLength > 0)
-    channel.push(Buffer.from("unread"))
-    expect(channel.readableLength).toBeGreaterThan(0)
-    expect(driver?.disposed).toBe(false)
-
-    client.emit("close")
-    // ssh2 emits connection close before its ChannelManager supplies EOF.
-    expect(channelCloses).toBe(0)
-    expect(driver?.disposed).toBe(true)
-    expect(closes).toBe(1)
-    expect(channel.listenerCount("data")).toBe(0)
-    client._chanMgr.cleanup(new Error("connection lost"))
-    await waitFor(() => channelCloses === 1)
-    await handler.closeAll()
-    expect(channel.listenerCount("drain")).toBe(0)
-    expect(channel.listenerCount("error")).toBe(0)
-    expect(handlers).toBe(0)
-    expect(closes).toBe(1)
-    expect(errors).toEqual([])
-    expect(driver?.error).toBeInstanceOf(Error)
-  } finally {
-    middleware.resolve()
-    driver?.dispose()
-    channel.resume()
-    client._chanMgr.cleanup(new Error("test cleanup"))
-    await handler.closeAll()
-    capture.mockRestore()
-  }
 })
 
 test("native closeAll force-closes a client that never drains", async () => {

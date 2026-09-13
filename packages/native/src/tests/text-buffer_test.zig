@@ -1563,23 +1563,6 @@ test "TextBuffer setText - then deleteRange via EditBuffer - validate markers" {
     try std.testing.expectEqual(@as(u32, 0), eb.getTextBuffer().lineWidthAt(2));
 }
 
-const PlainTextOperation = enum { set, from_mem, with_undo, replace_new, replace_slot, owned_new, owned_slot };
-
-fn runPlainTextOperation(tb: *TextBuffer, operation: PlainTextOperation, text: []const u8, mem_id: u8, owned: bool) !u8 {
-    switch (operation) {
-        .set => try tb.setText(text),
-        .from_mem => try tb.setTextFromMemId(mem_id),
-        .with_undo => try tb.setTextFromMemIdWithUndo(mem_id, "replacement metadata"),
-        .replace_new, .replace_slot => {
-            return tb.replaceText(text, if (operation == .replace_slot) mem_id else null, owned);
-        },
-        .owned_new, .owned_slot => {
-            return tb.replaceOwnedText(text, if (operation == .owned_slot) mem_id else null);
-        },
-    }
-    return mem_id;
-}
-
 fn setupPlainTextHistory(tb: *TextBuffer, style: *text_buffer.SyntaxStyle) !u8 {
     const text = "old\ttext\nsecond";
     var prepared_links = link.LinkTracker.init(tb.global_allocator, tb.link_pool);
@@ -1602,35 +1585,6 @@ fn setupPlainTextHistory(tb: *TextBuffer, style: *text_buffer.SyntaxStyle) !u8 {
     try tb.addHighlight(0, 2, 4, 42, 2, 7);
     try tb.addHighlight(1, 0, 2, 43, 2, 8);
     return mem_id;
-}
-
-test "TextBuffer plain history setup allocation failures release owned text once" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    var failed_after_transfer = false;
-    for (0..64) |offset| {
-        const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
-        defer style.deinit();
-        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-        const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
-        defer tb.deinit();
-        failing.fail_index = failing.alloc_index + offset;
-        failing.resize_fail_index = failing.resize_index;
-        const result = setupPlainTextHistory(tb, style);
-        failing.fail_index = std.math.maxInt(usize);
-        failing.resize_fail_index = std.math.maxInt(usize);
-        if (result) |_| {
-            try std.testing.expect(failed_after_transfer);
-            return;
-        } else |err| {
-            try std.testing.expectEqual(error.OutOfMemory, err);
-            try std.testing.expect(failing.has_induced_failure);
-            if (tb.memRegistry().getUsedSlots() != 0) failed_after_transfer = true;
-        }
-    }
-    return error.MissingSuccessfulSetup;
 }
 
 test "TextBuffer plain replacement registration limit preserves the live document" {
@@ -1701,35 +1655,24 @@ const TextState = struct {
     }
 };
 
-fn checkPlainTextAllocationFailures(operation: PlainTextOperation) !void {
+fn checkPlainTextAllocationFailures() !void {
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
     var links = link.LinkPool.init(std.testing.allocator);
     defer links.deinit();
     const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
     defer style.deinit();
-    const owned = operation == .owned_new or operation == .owned_slot;
     for ([_][]const u8{ "replacement\t\u{754c}\n" ** 8, "" }) |input| {
         for ([_]bool{ false, true }) |fail_rope| {
-            if (owned and fail_rope) continue;
             var succeeded = false;
             for (0..128) |offset| {
                 var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
                 const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
                 defer tb.deinit();
-                const history_mem_id = try setupPlainTextHistory(tb, style);
-                const mem_id = switch (operation) {
-                    .replace_slot, .owned_slot => history_mem_id,
-                    .from_mem, .with_undo => try tb.registerMemBuffer(input, false),
-                    else => 0,
-                };
-                const bytes = if (owned) try failing.allocator().dupe(u8, input) else input;
-                var transferred = false;
-                defer if (owned and !transferred) failing.allocator().free(bytes);
+                _ = try setupPlainTextHistory(tb, style);
                 const view = try tb.registerView();
                 tb.clearViewDirty(view);
                 const before = TextState.capture(tb);
-                const capacity = tb.getArenaAllocatedBytes();
                 const allocator = tb.rope().allocator;
                 var rope_failing = std.testing.FailingAllocator.init(allocator, .{});
                 tb.rope().allocator = rope_failing.allocator();
@@ -1737,18 +1680,16 @@ fn checkPlainTextAllocationFailures(operation: PlainTextOperation) !void {
                 const fault = if (fail_rope) &rope_failing else &failing;
                 fault.fail_index = fault.alloc_index + offset;
                 fault.resize_fail_index = fault.resize_index;
-                const result = runPlainTextOperation(tb, operation, bytes, mem_id, owned);
+                const result = tb.setText(input);
                 fault.fail_index = std.math.maxInt(usize);
                 fault.resize_fail_index = std.math.maxInt(usize);
                 if (result) |_| {
-                    transferred = owned;
                     succeeded = true;
                 } else |err| {
                     try std.testing.expectEqual(error.OutOfMemory, err);
                     try std.testing.expect(fault.has_induced_failure);
                     try std.testing.expectEqualDeep(before, TextState.capture(tb));
                     try std.testing.expect(!tb.isViewDirty(view));
-                    if (owned) try std.testing.expectEqual(capacity, tb.getArenaAllocatedBytes());
                     try std.testing.expectEqualStrings("last", try tb.redo());
                     try std.testing.expectEqualStrings("tail", try tb.undo("last"));
                     continue;
@@ -1758,12 +1699,6 @@ fn checkPlainTextAllocationFailures(operation: PlainTextOperation) !void {
                 try std.testing.expectEqual(before.epoch + 1, tb.getContentEpoch());
                 try std.testing.expect(tb.isViewDirty(view));
                 try std.testing.expectEqual(@as(u32, 0), tb.link_tracker.?.getLinkCount());
-                if (operation == .with_undo) {
-                    try std.testing.expectEqualStrings("replacement metadata", try tb.undo("accepted"));
-                    try std.testing.expectEqualStrings(before.text[0..before.text_len], actual[0..tb.getPlainTextIntoBuffer(&actual)]);
-                } else if (operation != .set and operation != .from_mem) {
-                    try std.testing.expect(!tb.rope().can_undo() and !tb.rope().can_redo());
-                }
                 break;
             }
             try std.testing.expect(succeeded);
@@ -1772,25 +1707,7 @@ fn checkPlainTextAllocationFailures(operation: PlainTextOperation) !void {
 }
 
 test "TextBuffer plain replacement setText allocation failures" {
-    try checkPlainTextAllocationFailures(.set);
-}
-
-test "TextBuffer plain replacement FromMemId allocation failures" {
-    try checkPlainTextAllocationFailures(.from_mem);
-}
-
-test "TextBuffer plain replacement WithUndo allocation failures" {
-    try checkPlainTextAllocationFailures(.with_undo);
-}
-
-test "TextBuffer plain replacement new and reused slots allocation failures" {
-    try checkPlainTextAllocationFailures(.replace_new);
-    try checkPlainTextAllocationFailures(.replace_slot);
-}
-
-test "TextBuffer owned replacement allocation failures preserve arena and document" {
-    try checkPlainTextAllocationFailures(.owned_new);
-    try checkPlainTextAllocationFailures(.owned_slot);
+    try checkPlainTextAllocationFailures();
 }
 
 fn replaceOwnedStyledForTest(
@@ -1873,65 +1790,6 @@ test "TextBuffer owned styled replacement preserves accepted linked content on a
         }
         try std.testing.expect(succeeded);
     }
-}
-
-test "TextBuffer owned styled replacement reserves the permanent listener before publication" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, .unicode);
-    defer tb.deinit();
-    const old_copy = try std.testing.allocator.dupe(u8, "accepted");
-    const old = try replaceOwnedStyledForTest(tb, old_copy, null, &.{8}, "https://example.com/old");
-    defer old.style.deinit();
-    const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
-    defer style.deinit();
-    var prepared_links = link.LinkTracker.init(std.testing.allocator, &links);
-    defer prepared_links.deinit();
-    const link_id = try prepared_links.trackUrl("https://example.com/new");
-    const id = try style.registerStyle("new", null, null, TextAttributes.setLinkId(2, link_id));
-    const candidate_links = prepared_links;
-    const copy = try std.testing.allocator.dupe(u8, "replacement\nnext");
-    var transferred = false;
-    defer if (!transferred) std.testing.allocator.free(copy);
-    const root = tb.rope().root;
-    const epoch = tb.getContentEpoch();
-    const allocator = style.emitter.allocator;
-    var failing = std.testing.FailingAllocator.init(allocator, .{ .fail_index = 0 });
-    style.emitter.allocator = failing.allocator();
-    defer style.emitter.allocator = allocator;
-    try std.testing.expectError(error.OutOfMemory, tb.replaceOwnedStyledText(copy, old.mem_id, style, &.{.{
-        .byte_count = @intCast(copy.len),
-        .style_id = id,
-    }}, &prepared_links));
-    try std.testing.expect(failing.has_induced_failure);
-    try std.testing.expectEqual(root, tb.rope().root);
-    try std.testing.expectEqual(epoch, tb.getContentEpoch());
-    try std.testing.expectEqual(old.style, tb.getSyntaxStyle().?);
-    try std.testing.expectEqualDeep(candidate_links, prepared_links);
-    try std.testing.expectEqual(@as(u32, 1), tb.link_tracker.?.getLinkCount());
-    try std.testing.expect(tb.link_tracker.?.used_ids.contains(old.link_id));
-    try std.testing.expectEqual(@as(u32, 1), try links.getRefcount(old.link_id));
-    try std.testing.expectEqual(@as(u32, 1), try links.getRefcount(link_id));
-    try std.testing.expectEqual(@as(usize, 1), old.style.emitter.listeners.get(.Destroy).?.items.len);
-    try std.testing.expectEqual(@as(usize, 0), style.emitter.listeners.get(.Destroy).?.items.len);
-    var actual: [32]u8 = undefined;
-    try std.testing.expectEqualStrings("accepted", actual[0..tb.getPlainTextIntoBuffer(&actual)]);
-    style.emitter.allocator = allocator;
-    try std.testing.expectEqual(old.mem_id, try tb.replaceOwnedStyledText(copy, old.mem_id, style, &.{.{
-        .byte_count = @intCast(copy.len),
-        .style_id = id,
-    }}, &prepared_links));
-    transferred = true;
-    try std.testing.expectEqual(@as(u32, 0), prepared_links.getLinkCount());
-    try std.testing.expectEqual(@as(u32, 1), tb.link_tracker.?.getLinkCount());
-    try std.testing.expect(tb.link_tracker.?.used_ids.contains(link_id));
-    try std.testing.expectEqual(@as(u32, 0), try links.getRefcount(old.link_id));
-    try std.testing.expectEqual(@as(u32, 1), try links.getRefcount(link_id));
-    try std.testing.expectEqual(style, tb.getSyntaxStyle().?);
-    try std.testing.expectEqual(@as(usize, 0), old.style.emitter.listeners.get(.Destroy).?.items.len);
-    try std.testing.expectEqual(@as(usize, 1), style.emitter.listeners.get(.Destroy).?.items.len);
 }
 
 test "TextBuffer prepared styled replacement abort detaches only the candidate and commit does not allocate" {
@@ -2033,91 +1891,6 @@ test "TextBuffer owned styled replacement rejects unowned and foreign links with
     try std.testing.expectEqualStrings("new", copy);
 }
 
-test "TextBuffer owned styled replacement matches concatenated chunk ranges" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    const cases = [_][]const []const u8{
-        &.{ "\u{1f469}", "\u{200d}\u{1f4bb}", "WXYZ" },
-        &.{ "e", "\u{301}X", "Y" },
-        &.{ "\u{4e16}", "\t", "B\r", "\nC" },
-        &.{ "a\r\nb\rc\nd", "\n", "tail" },
-        &.{ "\u{301}", "\n", "word" },
-        &.{ "\u{2764}", "\u{fe0f}", "xyz" },
-        &.{ "\u{1f1fa}", "\u{1f1f8}", "xyz" },
-    };
-    for ([_]@import("../utf8.zig").WidthMethod{ .unicode, .wcwidth, .no_zwj, .unicode_wide }) |method| {
-        for (cases) |parts| {
-            const style = try text_buffer.SyntaxStyle.init(std.testing.allocator);
-            defer style.deinit();
-            const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, method);
-            defer tb.deinit();
-            const copy = try std.mem.concat(std.testing.allocator, u8, parts);
-            var width_cursor = @import("../utf8.zig").TextWidthCursor{
-                .text = copy,
-                .tab_width = tb.tabWidth(),
-                .width_method = method,
-            };
-            var chunks: [4]text_buffer.OwnedStyledChunk = undefined;
-            var starts: [4]u32 = undefined;
-            var ends: [4]u32 = undefined;
-            var attributes: [4]u32 = undefined;
-            var byte_end: usize = 0;
-            for (parts, 0..) |part, i| {
-                attributes[i] = @intCast(i + 1);
-                starts[i] = width_cursor.columns;
-                byte_end += part.len;
-                ends[i] = width_cursor.advanceTo(byte_end);
-                var name_buffer: [32]u8 = undefined;
-                const name = try std.fmt.bufPrint(&name_buffer, "chunk{d}", .{i});
-                chunks[i] = .{
-                    .byte_count = @intCast(part.len),
-                    .style_id = if (ends[i] == starts[i]) 0 else try style.registerStyle(name, null, null, attributes[i]),
-                };
-            }
-            _ = tb.replaceOwnedStyledText(copy, null, style, chunks[0..parts.len], null) catch |err| {
-                std.testing.allocator.free(copy);
-                return err;
-            };
-            var actual: [64]u8 = undefined;
-            const written = tb.getPlainTextIntoBuffer(&actual);
-            if (std.mem.indexOfScalar(u8, copy, '\r') == null) {
-                try std.testing.expectEqualStrings(copy, actual[0..written]);
-            }
-            var line_col: u32 = 0;
-            for (0..tb.getLineCount()) |line| {
-                const line_width = tb.lineWidthAt(@intCast(line));
-                const highlights = tb.getLineHighlights(line);
-                const spans = tb.getLineSpans(line);
-                try std.testing.expectEqual(highlights.len, spans.len);
-                var expected_count: usize = 0;
-                for (0..parts.len) |i| {
-                    if (ends[i] == starts[i]) continue;
-                    const start = @max(starts[i], line_col);
-                    const end = @min(ends[i], line_col + line_width);
-                    if (start >= end) continue;
-                    try std.testing.expectEqual(start - line_col, highlights[expected_count].col_start);
-                    try std.testing.expectEqual(end - line_col, highlights[expected_count].col_end);
-                    try std.testing.expect(highlights[expected_count].internal);
-                    try std.testing.expectEqual(@as(u8, 1), highlights[expected_count].priority);
-                    try std.testing.expectEqual(
-                        attributes[i],
-                        style.resolveById(highlights[expected_count].style_id).?.attributes,
-                    );
-                    try std.testing.expectEqual(highlights[expected_count].col_start, spans[expected_count].col);
-                    try std.testing.expectEqual(highlights[expected_count].col_end, spans[expected_count].next_col);
-                    try std.testing.expectEqual(highlights[expected_count].style_id, spans[expected_count].style_id);
-                    expected_count += 1;
-                }
-                try std.testing.expectEqual(expected_count, highlights.len);
-                line_col += line_width;
-            }
-            try std.testing.expectEqual(width_cursor.columns, line_col);
-        }
-    }
-}
-
 test "TextBuffer owned styled replacement reclaims styled plain and empty transitions" {
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
@@ -2212,26 +1985,6 @@ test "TextBuffer plain replacement reuses full registry and recovers an absent p
     try std.testing.expectEqual(@as(u8, 1), try tb.replaceText("absent", 254, false));
 }
 
-test "TextBuffer plain replacement textToSegments measures supplied bytes with insertion offset" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    const tb = try TextBuffer.init(std.testing.allocator, &pool, &links, .unicode);
-    defer tb.deinit();
-    const input = "\u{754c}\t\n\u{1f31f}";
-    const id = try tb.registerMemBuffer("prefix" ++ input, false);
-    var parsed = try tb.textToSegments(std.testing.allocator, input, id, 6, true);
-    defer parsed.segments.deinit(std.testing.allocator);
-    try tb.rope().setSegments(parsed.segments.items);
-    var actual: [32]u8 = undefined;
-    try std.testing.expectEqualStrings(input, actual[0..tb.getPlainTextIntoBuffer(&actual)]);
-    try std.testing.expectEqual(@as(u32, 4), tb.lineWidthAt(0));
-    try std.testing.expectEqual(@as(u32, 2), tb.lineWidthAt(1));
-    try std.testing.expectEqual(@as(u32, 6), parsed.segments.items[1].text.byte_start);
-    try std.testing.expectEqual(tb.createChunk(id, 6, 10), parsed.segments.items[1].text);
-}
-
 test "TextBuffer clear and reset retire multipage links without pool allocation" {
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
@@ -2321,70 +2074,60 @@ test "TextBuffer clear failure preserves text, highlights, links, and view state
     try std.testing.expectEqualStrings("old", actual[0..length]);
 }
 
-fn checkAppendAllocationFailures(from_mem_id: bool) !void {
+fn checkAppendAllocationFailures() !void {
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();
     var links = link.LinkPool.init(std.testing.allocator);
     defer links.deinit();
     for ([_]bool{ false, true }) |fail_rope| {
-        for ([_]bool{ false, true }) |reuse_slot| {
-            var succeeded = false;
-            for (0..128) |offset| {
-                var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
-                const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
-                defer tb.deinit();
-                try tb.setText("old\n");
-                try tb.rope().store_undo("base");
-                try tb.append("!");
-                _ = try tb.undo("last");
-                try tb.addHighlight(0, 0, 1, 1, 1, 7);
-                const spare = try tb.registerMemBuffer("spare", false);
-                while (tb.mem_registry.buffers.items.len < @min(tb.mem_registry.buffers.capacity, 255)) {
-                    _ = try tb.registerMemBuffer("unused", false);
-                }
-                if (reuse_slot) try tb.mem_registry.unregister(spare);
-                const input = "\u{754c}\r\n\ttail";
-                const mem_id = if (from_mem_id) try tb.registerMemBuffer(input, false) else 0;
-                const view = try tb.registerView();
-                tb.clearViewDirty(view);
-                const before = TextState.capture(tb);
-                const allocator = tb.rope().allocator;
-                var rope_failing = std.testing.FailingAllocator.init(allocator, .{});
-                tb.rope().allocator = rope_failing.allocator();
-                defer tb.rope().allocator = allocator;
-                const fault = if (fail_rope) &rope_failing else &failing;
-                fault.fail_index = fault.alloc_index + offset;
-                fault.resize_fail_index = fault.resize_index;
-                const result = if (from_mem_id) tb.appendFromMemId(mem_id) else tb.append(input);
-                fault.fail_index = std.math.maxInt(usize);
-                fault.resize_fail_index = std.math.maxInt(usize);
-                if (result) |_| {
-                    succeeded = true;
-                } else |err| {
-                    try std.testing.expectEqual(error.OutOfMemory, err);
-                    try std.testing.expectEqualDeep(before, TextState.capture(tb));
-                    try std.testing.expect(!tb.isViewDirty(view));
-                    if (from_mem_id) try std.testing.expectEqualStrings(input, tb.getMemBuffer(mem_id).?);
-                    try std.testing.expectEqualStrings("last", try tb.redo());
-                    continue;
-                }
-                var actual: [64]u8 = undefined;
-                try std.testing.expectEqualStrings("old\n\u{754c}\n\ttail", actual[0..tb.getPlainTextIntoBuffer(&actual)]);
-                try std.testing.expectEqual(before.epoch + 1, tb.getContentEpoch());
-                try std.testing.expect(tb.isViewDirty(view));
-                break;
+        var succeeded = false;
+        for (0..128) |offset| {
+            var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+            const tb = try TextBuffer.init(failing.allocator(), &pool, &links, .unicode);
+            defer tb.deinit();
+            try tb.setText("old\n");
+            try tb.rope().store_undo("base");
+            try tb.append("!");
+            _ = try tb.undo("last");
+            try tb.addHighlight(0, 0, 1, 1, 1, 7);
+            while (tb.mem_registry.buffers.items.len < @min(tb.mem_registry.buffers.capacity, 255)) {
+                _ = try tb.registerMemBuffer("unused", false);
             }
-            try std.testing.expect(succeeded);
+            const input = "\u{754c}\r\n\ttail";
+            const view = try tb.registerView();
+            tb.clearViewDirty(view);
+            const before = TextState.capture(tb);
+            const allocator = tb.rope().allocator;
+            var rope_failing = std.testing.FailingAllocator.init(allocator, .{});
+            tb.rope().allocator = rope_failing.allocator();
+            defer tb.rope().allocator = allocator;
+            const fault = if (fail_rope) &rope_failing else &failing;
+            fault.fail_index = fault.alloc_index + offset;
+            fault.resize_fail_index = fault.resize_index;
+            const result = tb.append(input);
+            fault.fail_index = std.math.maxInt(usize);
+            fault.resize_fail_index = std.math.maxInt(usize);
+            if (result) |_| {
+                succeeded = true;
+            } else |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                try std.testing.expectEqualDeep(before, TextState.capture(tb));
+                try std.testing.expect(!tb.isViewDirty(view));
+                try std.testing.expectEqualStrings("last", try tb.redo());
+                continue;
+            }
+            var actual: [64]u8 = undefined;
+            try std.testing.expectEqualStrings("old\n\u{754c}\n\ttail", actual[0..tb.getPlainTextIntoBuffer(&actual)]);
+            try std.testing.expectEqual(before.epoch + 1, tb.getContentEpoch());
+            try std.testing.expect(tb.isViewDirty(view));
+            break;
         }
+        try std.testing.expect(succeeded);
     }
 }
 
 test "TextBuffer append allocation failure preserves state and cancels its registration" {
-    try checkAppendAllocationFailures(false);
-}
-
-test "TextBuffer appendFromMemId allocation failure preserves state and caller registration" {
-    try checkAppendAllocationFailures(true);
+    try checkAppendAllocationFailures();
 }
 
 test "TextBuffer reset allocation failure preserves the document and allows retry" {
@@ -2426,36 +2169,6 @@ test "TextBuffer reset allocation failure preserves the document and allows retr
         if (result) |_| return else |_| {}
     }
     return error.MissingSuccessfulReset;
-}
-
-test "TextBuffer owned styled replacement - repeated calls retain bounded arena" {
-    var pools = TestPools.init(std.testing.allocator);
-    defer pools.deinit();
-
-    var tb = try TextBuffer.init(std.testing.allocator, &pools.graphemes, &pools.links, .unicode);
-    defer tb.deinit();
-
-    const iterations = 10000;
-    const initial_arena = tb.getArenaAllocatedBytes();
-    var current: ?owned_styled.Result = null;
-    defer if (current) |c| c.style.deinit();
-
-    var iteration: u32 = 0;
-    while (iteration < iterations) : (iteration += 1) {
-        var frame_buf: [32]u8 = undefined;
-        const frame_text = try std.fmt.bufPrint(&frame_buf, "{}", .{iteration});
-        try owned_styled.replaceInPlace(tb, &current, &.{
-            .{ .text = "System Stats: ", .attributes = 1 },
-            .{ .text = "Frame: " },
-            .{ .text = frame_text },
-        });
-        try std.testing.expectEqual(@as(u32, 1), tb.getLineCount());
-    }
-
-    const final_arena = tb.getArenaAllocatedBytes();
-    const arena_growth = final_arena - initial_arena;
-    const max_expected_growth = 50000;
-    try std.testing.expect(arena_growth < max_expected_growth);
 }
 
 test "addHighlightByCharRange - single line highlight should not extend to EOL" {

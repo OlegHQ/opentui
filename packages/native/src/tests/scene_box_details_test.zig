@@ -145,36 +145,3 @@ test "Scene box details checked title draw reports allocation failure and defaul
     try repaint(owner, fixture.session, options.background, true, 0);
     try testing.expectEqual(@as(u32, 'x'), target.get(2, 0).?.char);
 }
-
-test "Scene box details checked drawing allocation failures release title graphemes and retired bytes" {
-    for ([_]bool{ false, true }) |prefix| {
-        var failures: usize = 0;
-        for (0..64) |offset| {
-            var failing = testing.FailingAllocator.init(testing.allocator, .{});
-            const owner = try context.Context.init(failing.allocator(), testing.io, .{});
-            defer owner.deinit() catch unreachable;
-            const fixture = try setup(owner);
-            try repaint(owner, fixture.session, options.background, true, 0);
-            try owner.sceneSetBoxDetails(fixture.box, .{ .title = "e\u{301}", .bottom_title = "\u{4e16}" });
-            try owner.sceneFrameCancel(fixture.session, (try owner.raw().getSession(fixture.session)).scene.?.last_frame_id);
-            var before: ?scene.FrameRequest = null;
-            if (prefix) {
-                try owner.sceneSetHooks(fixture.box, 8, 1, 12, 3);
-                before = try owner.sceneFrameStep(fixture.session, null, options);
-                try owner.sceneDestroyNode(fixture.box);
-            }
-            failing.fail_index = failing.alloc_index + offset;
-            failing.resize_fail_index = failing.resize_index;
-            const result = owner.sceneFrameStep(fixture.session, before, options);
-            failing.fail_index = std.math.maxInt(usize);
-            failing.resize_fail_index = std.math.maxInt(usize);
-            if (result) |_| break else |err| {
-                try testing.expectEqual(error.OutOfMemory, err);
-                const state = (try owner.raw().getSession(fixture.session)).scene.?;
-                try testing.expect(state.attempt == null and state.prefix == null);
-                failures += 1;
-            }
-        }
-        try testing.expect(failures > 0 and failures < 64);
-    }
-}

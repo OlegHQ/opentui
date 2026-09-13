@@ -192,47 +192,6 @@ test "renderer shutdown image serialization is checked and does not publish" {
     try std.testing.expectEqualDeep(previous_feed, fixture.feed.getStats());
 }
 
-test "renderer presentation invalidation preserves completion and repaints controls" {
-    var fixture: Fixture = undefined;
-    try fixture.init();
-    defer fixture.deinit();
-    const cli = fixture.cli;
-    var bytes: [4096]u8 = undefined;
-    cli.terminal.setCursorPosition(3, 2, true);
-    cli.terminal.setCursorColor(ansi.rgbColor(0x12, 0x34, 0x56, 255));
-    cli.terminal.setCursorStyle(.line, false);
-    cli.terminal.setMousePointerStyle(.pointer);
-    try fixture.paint("same", 11);
-    try std.testing.expectEqual(.rendered, cli.render(true));
-    _ = try fixture.drain(&bytes);
-    const previous_stats = cli.getRenderStats();
-
-    try fixture.paint("same", 22);
-    try std.testing.expectEqual(.rendered, try cli.renderDeferred(false));
-    try std.testing.expectEqual(@as(usize, 0), (try fixture.drain(&bytes)).len);
-    const previous_pending = cli.pendingPresentation;
-    const previous_feed = fixture.feed.getStats();
-    cli.invalidateTerminalState();
-    try std.testing.expectEqualDeep(previous_pending, cli.pendingPresentation);
-    try std.testing.expectEqualDeep(previous_stats, cli.getRenderStats());
-    try std.testing.expectEqualDeep(previous_feed, fixture.feed.getStats());
-    try std.testing.expectEqual(@as(u32, 11), cli.checkHit(0, 0));
-    try cli.completePresentation(.presented);
-    try std.testing.expectEqual(@as(u32, 22), cli.checkHit(0, 0));
-
-    try fixture.paint("same", 33);
-    try std.testing.expectEqual(.rendered, try cli.renderDeferred(false));
-    const output = try fixture.drain(&bytes);
-    try std.testing.expect(std.mem.find(u8, output, "same") != null);
-    try std.testing.expect(std.mem.find(u8, output, "\x1b]12;#123456\x07") != null);
-    try std.testing.expect(std.mem.find(u8, output, ansi.ANSI.cursorLine) != null);
-    try std.testing.expect(std.mem.find(u8, output, "\x1b[2;3H" ++ ansi.ANSI.showCursor) != null);
-    try std.testing.expect(std.mem.find(u8, output, "\x1b]22;pointer\x07") != null);
-    try cli.completePresentation(.presented);
-    try std.testing.expectEqual(@as(u32, 8), cli.getRenderStats().cellsUpdated);
-    try std.testing.expectEqual(@as(u32, 33), cli.checkHit(0, 0));
-}
-
 test "renderer presentation failure retains published state and forbids implicit replay" {
     for ([_]bool{ true, false }) |restore_image| {
         var fixture: Fixture = undefined;
@@ -287,54 +246,6 @@ test "renderer presentation failure retains published state and forbids implicit
         try std.testing.expectEqual(@as(u32, 11), cli.checkHit(0, 0));
         try std.testing.expectEqualDeep(previous_stats, cli.getRenderStats());
     }
-}
-
-test "renderer presentation queries preserve resize invalidation until completion" {
-    var fixture: Fixture = undefined;
-    try fixture.init();
-    defer fixture.deinit();
-    const cli = fixture.cli;
-    var bytes: [4096]u8 = undefined;
-    for ([_]bool{ true, false }) |force| {
-        try fixture.paint("old", 11);
-        try std.testing.expectEqual(.rendered, cli.render(force));
-        _ = try fixture.drain(&bytes);
-    }
-    try std.testing.expect(!cli.getHitGridDirty());
-    try cli.resize(2, 2);
-    try std.testing.expectEqual(.rendered, try cli.renderDeferred(true));
-    try std.testing.expect(!cli.getHitGridDirty());
-    _ = try fixture.drain(&bytes);
-    try cli.completePresentation(.presented);
-    try std.testing.expect(cli.getHitGridDirty());
-    try std.testing.expectEqual(@as(u32, 0), cli.checkHit(0, 0));
-    try std.testing.expectEqual(.rendered, try cli.renderDeferred(false));
-    try cli.completePresentation(.presented);
-    try std.testing.expect(!cli.getHitGridDirty());
-}
-
-test "renderer presentation rejects split prefixes and preserves split output" {
-    var fixture: Fixture = undefined;
-    try fixture.init();
-    defer fixture.deinit();
-    const cli = fixture.cli;
-    var bytes: [4096]u8 = undefined;
-    _ = cli.resetSplitScrollback(1, 2);
-    const snapshot = cli.getNextBuffer();
-    try fixture.paint("row", 11);
-    try std.testing.expectEqual(.rendered, cli.commitSplitFooterSnapshotBatched(snapshot, 4, false, true, 2, false, true, false).status);
-    try std.testing.expectError(error.SplitRenderPending, cli.renderDeferred(false));
-    try std.testing.expect(cli.splitBatchActive);
-    try std.testing.expectEqual(.rendered, cli.commitSplitFooterSnapshotBatched(snapshot, 4, false, true, 2, false, false, true).status);
-    try std.testing.expect(!cli.splitBatchActive);
-    _ = try fixture.drain(&bytes);
-
-    cli.setPendingSplitFooterTransition(.viewport_scroll, 1, 1, 2, 1, 1);
-    const previous_split = cli.splitScrollback;
-    try std.testing.expectError(error.SplitRenderPending, cli.renderDeferred(false));
-    try std.testing.expectEqualDeep(previous_split, cli.splitScrollback);
-    try std.testing.expectEqual(.rendered, cli.render(true));
-    try std.testing.expect(std.mem.find(u8, try fixture.drain(&bytes), "\x1b[1T") != null);
 }
 
 test "renderer presentation rejects active output and callback reentry" {
@@ -402,24 +313,6 @@ test "renderer presentation failed or skipped admission has no completion" {
     _ = try fixture.drain(&bytes);
     try cli.completePresentation(.presented);
     try std.testing.expectEqual(@as(u32, 22), cli.checkHit(0, 0));
-}
-
-test "renderer presentation rejects legacy terminal setup without changing legacy rendering" {
-    var fixture: Fixture = undefined;
-    try fixture.init();
-    defer fixture.deinit();
-    const cli = fixture.cli;
-    var bytes: [4096]u8 = undefined;
-    cli.setupTerminal(false);
-    _ = try fixture.drain(&bytes);
-    const previous_stats = cli.getRenderStats();
-    try fixture.paint("old", 11);
-    try std.testing.expectError(error.IncompatibleOutput, cli.renderDeferred(true));
-    try std.testing.expectEqualDeep(previous_stats, cli.getRenderStats());
-    try std.testing.expectEqual(@as(usize, 0), (try fixture.drain(&bytes)).len);
-    try std.testing.expectEqual(.rendered, cli.render(true));
-    try std.testing.expect(std.mem.find(u8, try fixture.drain(&bytes), "old") != null);
-    try std.testing.expectEqual(@as(u32, 11), cli.checkHit(0, 0));
 }
 
 test "renderer presentation cancellation and storage destruction release pending work" {

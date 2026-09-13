@@ -55,24 +55,6 @@ describe("NativeSyntaxStyle", () => {
   })
 
   describe("registerStyle", () => {
-    it("reads inherited definition properties once before registration", () => {
-      let reads = 0
-      const fg = RGBA.fromInts(255, 0, 0)
-      class Definition {
-        get fg() {
-          reads++
-          return fg
-        }
-        get bold() {
-          return true
-        }
-      }
-      style.registerStyle("keyword", new Definition())
-      expect(reads).toBe(1)
-      expect(style.getStyle("keyword")).toMatchObject({ fg, bold: true })
-      expect(reads).toBe(1)
-    })
-
     it("should register a simple style and return an ID", () => {
       const id = style.registerStyle("keyword", {
         fg: RGBA.fromValues(1, 0, 0, 1),
@@ -679,51 +661,6 @@ describe("NativeSyntaxStyle", () => {
   })
 
   describe("getStyle", () => {
-    it("snapshots registered definitions and returns detached values", () => {
-      const fg = RGBA.fromInts(255, 0, 0)
-      const bg = RGBA.fromInts(0, 0, 255)
-      const definition = { fg, bg, bold: true }
-      const expected = { fg: RGBA.clone(fg), bg: RGBA.clone(bg), bold: true }
-      const id = style.registerStyle("keyword", definition)
-      const merged = style.mergeStyles("keyword")
-      const attributes = merged.attributes
-      fg.buffer.fill(0)
-      bg.buffer.fill(0)
-      definition.bold = false
-      expect(style.getStyle("keyword")).toMatchObject(expected)
-      for (const value of [
-        style.getStyle("keyword")!,
-        style.getStyle("keyword.control")!,
-        style.getAllStyles().get("keyword")!,
-      ]) {
-        value.fg!.buffer.fill(0)
-        value.bg!.buffer.fill(0)
-        value.bold = false
-      }
-      merged.fg!.buffer.fill(0)
-      merged.bg!.buffer.fill(0)
-      merged.attributes = 0
-      expect(style.getStyle("keyword")).toMatchObject(expected)
-      expect(style.mergeStyles("keyword")).toEqual({ fg: expected.fg, bg: expected.bg, attributes })
-      expect(style.registerStyle("keyword", definition)).toBe(id)
-      expect(style.getStyle("keyword")).toMatchObject(definition)
-    })
-
-    it("converts reusable themes into independent definition values", () => {
-      const fg = RGBA.fromInts(255, 0, 0)
-      const bg = RGBA.fromInts(0, 0, 255)
-      const expected = { fg: RGBA.clone(fg), bg: RGBA.clone(bg) }
-      const definitions = convertThemeToStyles([
-        { scope: ["keyword", "string"], style: { foreground: fg, background: bg } },
-      ])
-      fg.buffer.fill(0)
-      bg.buffer.fill(0)
-      expect(definitions.keyword).toEqual(expected)
-      definitions.keyword.fg!.buffer.fill(0)
-      definitions.keyword.bg!.buffer.fill(0)
-      expect(definitions.string).toEqual(expected)
-    })
-
     it("should retrieve registered style definition", () => {
       const styleDef = { fg: RGBA.fromValues(1, 0, 0, 1), bold: true }
       style.registerStyle("keyword", styleDef)

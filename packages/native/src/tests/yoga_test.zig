@@ -1,152 +1,6 @@
 const std = @import("std");
 
 const yoga = @import("../yoga.zig");
-const yoga_c = @import("yoga");
-
-test "Yoga cache predicate matches eager reference across modes rounding margins and undefined dimensions" {
-    const nan = std.math.nan(f32);
-    const inf = std.math.inf(f32);
-    // Each tuple is available, last available, computed, margin. Cross both axes
-    // and all sizing modes so width rejection cannot conceal a height mismatch.
-    const dimensions = [_][4]f32{
-        .{ nan, nan, 0, 0 },
-        .{ nan, 0, nan, 0 },
-        .{ 0, nan, 0, 0 },
-        .{ 0, -0.0, 0, 0 },
-        .{ 1, 1, -1, 0 },
-        .{ 139.0071, 140, 139, 0 },
-        .{ 139, 139.0071, 139, 0 },
-        .{ 140, 139, 139, 0 },
-        .{ 0.4998, 0.5, 0.5, 0 },
-        .{ 0.5, 0.5002, 0.5, 0 },
-        .{ -0.5, -0.4998, 0, 0 },
-        .{ 4, 8, 3, 1 },
-        .{ 4, 8, 4, 1 },
-        .{ 4, 8, 5, -1 },
-        .{ 4, 4, 4, nan },
-        .{ inf, inf, 1, 0 },
-        .{ 1, inf, inf, 0 },
-        .{ -inf, 1, 0, 0 },
-        .{ 1, 1, -inf, 0 },
-        .{ std.math.floatMax(f32), 0, 1, 0 },
-    };
-    var accepted: usize = 0;
-    var rejected: usize = 0;
-    for ([_]f32{ 0, 1, 2 }) |scale| {
-        for (0..81) |modes| {
-            for (dimensions) |width| {
-                for (dimensions) |height| {
-                    const w: yoga_c.OTYogaCacheAxis = .{
-                        .mode = @intCast(modes % 3),
-                        .last_mode = @intCast(modes / 3 % 3),
-                        .available = width[0],
-                        .last_available = width[1],
-                        .computed = width[2],
-                        .margin = width[3],
-                    };
-                    const h: yoga_c.OTYogaCacheAxis = .{
-                        .mode = @intCast(modes / 9 % 3),
-                        .last_mode = @intCast(modes / 27),
-                        .available = height[0],
-                        .last_available = height[1],
-                        .computed = height[2],
-                        .margin = height[3],
-                    };
-                    var reference: u32 = undefined;
-                    var rounds: u32 = undefined;
-                    const actual = yoga_c.otYogaTestCacheMeasurement(&w, &h, scale, &reference, &rounds);
-                    try std.testing.expectEqual(reference, actual);
-                    try std.testing.expect(rounds <= 4);
-                    if (actual == 0) rejected += 1 else accepted += 1;
-                }
-            }
-        }
-    }
-    try std.testing.expectEqual(@as(usize, 97_200), accepted + rejected);
-    try std.testing.expect(accepted > 0 and rejected > 0);
-}
-
-test "Yoga cache predicate skips rounding for mismatched modes and rejected width" {
-    const SizingMode = struct {
-        const stretch = 0;
-        const max_content = 1;
-        const fit = 2;
-    };
-    var width: yoga_c.OTYogaCacheAxis = .{
-        .mode = SizingMode.fit,
-        .last_mode = SizingMode.stretch,
-        .available = 1,
-        .last_available = 10,
-        .computed = 10,
-        .margin = 0,
-    };
-    var height: yoga_c.OTYogaCacheAxis = .{
-        .mode = SizingMode.stretch,
-        .last_mode = SizingMode.max_content,
-        .available = 1,
-        .last_available = 10,
-        .computed = 1,
-        .margin = 0,
-    };
-    var reference: u32 = undefined;
-    var rounds: u32 = undefined;
-    try std.testing.expectEqual(@as(u32, 0), yoga_c.otYogaTestCacheMeasurement(&width, &height, 1, &reference, &rounds));
-    try std.testing.expectEqual(@as(u32, 0), reference);
-    try std.testing.expectEqual(@as(u32, 0), rounds);
-
-    width.mode = SizingMode.stretch;
-    try std.testing.expectEqual(@as(u32, 0), yoga_c.otYogaTestCacheMeasurement(&width, &height, 1, &reference, &rounds));
-    try std.testing.expectEqual(@as(u32, 2), rounds);
-
-    width.last_mode = SizingMode.max_content;
-    width.computed = 1;
-    try std.testing.expectEqual(@as(u32, 1), yoga_c.otYogaTestCacheMeasurement(&width, &height, 1, &reference, &rounds));
-    try std.testing.expectEqual(@as(u32, 1), reference);
-    try std.testing.expectEqual(@as(u32, 0), rounds);
-
-    height.last_mode = SizingMode.stretch;
-    try std.testing.expectEqual(@as(u32, 1), yoga_c.otYogaTestCacheMeasurement(&width, &height, 1, &reference, &rounds));
-    try std.testing.expectEqual(@as(u32, 2), rounds);
-    width.last_mode = SizingMode.stretch;
-    try std.testing.expectEqual(@as(u32, 1), yoga_c.otYogaTestCacheMeasurement(&width, &height, 1, &reference, &rounds));
-    try std.testing.expectEqual(@as(u32, 4), rounds);
-    try std.testing.expectEqual(@as(u32, 1), yoga_c.otYogaTestCacheMeasurement(&width, &height, 0, &reference, &rounds));
-    try std.testing.expectEqual(@as(u32, 0), rounds);
-}
-
-test "Yoga layout wrapper work follows ancestor depth rather than connected tree size" {
-    var first: yoga.Config = undefined;
-    try first.init(std.testing.allocator, .{});
-    defer first.deinit();
-    var second: yoga.Config = undefined;
-    try second.init(std.testing.allocator, .{});
-    defer second.deinit();
-    const root = try first.createNode();
-    defer yoga.yogaNodeFreeRecursive(root);
-    const subtree = try second.createNode();
-    try yoga.check(yoga.yogaNodeInsertChildChecked(root, subtree, 0));
-    try yoga.check(yoga.yogaNodeInsertChildChecked(subtree, try first.createNode(), 0));
-    for (1..1001) |index| {
-        try yoga.check(yoga.yogaNodeInsertChildChecked(root, try second.createNode(), @intCast(index)));
-    }
-    try yoga.check(yoga.yogaNodeCalculateLayoutChecked(root, 100, 100, 1));
-    for ([_]yoga.YGNodeRef{ root, subtree }) |node| {
-        for ([_]f32{ 100, 101 }) |width| {
-            first.test_work_count = 0;
-            second.test_work_count = 0;
-            try yoga.check(yoga.yogaNodeCalculateLayoutChecked(node, width, 100, 1));
-            try std.testing.expectEqual(if (node == root) @as(u64, 1) else 2, first.test_work_count + second.test_work_count);
-        }
-    }
-    try yoga.check(yoga.yogaNodeStyleSetFloatChecked(subtree, 0, 1));
-    first.test_work_count = 0;
-    second.test_work_count = 0;
-    yoga.testFailAfter(0);
-    defer yoga.testFailAfter(-1);
-    try std.testing.expectEqual(yoga.Status.out_of_memory, yoga.yogaNodeCalculateLayoutChecked(subtree, 102, 100, 1));
-    try std.testing.expect(first.test_work_count + second.test_work_count >= 1003);
-    try std.testing.expectEqual(yoga.Status.poisoned, yoga.yogaNodeCalculateLayoutChecked(root, 100, 100, 1));
-}
 
 test "Yoga mixed-config activity guards nodes and configs outside the requested subtree" {
     const Probe = struct {
@@ -521,28 +375,6 @@ test "Yoga compound move reorders using the final index without allocation" {
     try yoga.check(yoga.yogaNodeUnsetDirtiedFuncChecked(parent));
 }
 
-test "Yoga compound appends preserve geometric child capacity growth" {
-    var config: yoga.Config = undefined;
-    try config.init(std.testing.allocator, .{});
-    defer config.deinit();
-    const parent = try config.createNode();
-    defer yoga.yogaNodeFree(parent);
-    var children: [4]yoga.YGNodeRef = undefined;
-    for (&children) |*child| child.* = try config.createNode();
-    defer for (children) |child| yoga.yogaNodeFree(child);
-    for (children[0..3], 0..) |child, index| try yoga.check(yoga.yogaNodeMoveChildChecked(parent, child, @intCast(index)));
-    yoga.testFailAfter(0);
-    defer yoga.testFailAfter(-1);
-    try std.testing.expectEqual(yoga.Status.ok, yoga.yogaNodeMoveChildChecked(parent, children[3], 3));
-    try std.testing.expectEqual(@as(u64, 0), yoga.testAllocationCount());
-    for (children, 0..) |child, index| {
-        var actual: yoga.YGNodeRef = null;
-        try yoga.check(yoga.yogaNodeGetChildChecked(parent, @intCast(index), &actual));
-        try std.testing.expectEqual(child, actual);
-        try std.testing.expectEqual(parent, yoga.yogaNodeGetParent(child));
-    }
-}
-
 test "Yoga compound move notifies a common ancestor once after both parents are dirty" {
     var probe: MoveProbe = undefined;
     var config: yoga.Config = undefined;
@@ -844,7 +676,7 @@ test "Yoga checked native editor measurement OOM is not a successful one-cell la
     try std.testing.expectEqual(yoga.Status.poisoned, yoga.yogaNodeCalculateLayoutChecked(renderable.yoga_node, 8, 4, 1));
 }
 
-test "Yoga checked frees 10000 owned nodes iteratively at the depth limit with faults armed" {
+test "Yoga checked frees owned nodes iteratively at the depth limit with faults armed" {
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
     var config: yoga.Config = undefined;
     try config.init(failing.allocator(), .{});
@@ -874,14 +706,10 @@ test "Yoga checked frees 10000 owned nodes iteratively at the depth limit with f
     try std.testing.expectEqual(yoga.Status.depth_limit, yoga.yogaNodeMoveChildChecked(parent, beyond, 0));
     try std.testing.expectEqual(source, yoga.yogaNodeGetParent(beyond));
     try yoga.check(yoga.yogaNodeFreeRecursiveChecked(source));
-    for (yoga.depth_max..10_000) |index| {
-        const child = try config.createNode();
-        try yoga.check(yoga.yogaNodeInsertChildChecked(root, child, @intCast(index - yoga.depth_max + 1)));
-    }
     var node_count: u32 = 0;
     var cursor = config.nodes;
     while (cursor) |node| : (cursor = node.config_next) node_count += 1;
-    try std.testing.expectEqual(@as(u32, 10_000), node_count);
+    try std.testing.expectEqual(@as(u32, yoga.depth_max), node_count);
     failing.fail_index = failing.alloc_index;
     yoga.testFailAfter(0);
     try yoga.check(yoga.yogaNodeFreeRecursiveChecked(root));

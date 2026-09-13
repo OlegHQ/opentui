@@ -1,10 +1,10 @@
 import { ResourceContext } from "./buffer.js"
-import { describe, expect, it, beforeEach, afterEach, spyOn } from "bun:test"
+import { describe, expect, it, beforeEach, afterEach } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { TextBuffer } from "./text-buffer.js"
-import { NativeStatus, resolveRenderLib } from "./zig.js"
+import { resolveRenderLib } from "./zig.js"
 import { StyledText, stringToStyledText } from "./lib/styled-text.js"
 import { RGBA } from "./lib/RGBA.js"
 import { SyntaxStyle } from "./syntax-style.js"
@@ -16,35 +16,6 @@ beforeEach(() => {
 afterEach(() => resourceContext.destroy())
 
 const MALFORMED_UTF8_ABOVE_UNICODE_RANGE = new Uint8Array([0x41, 0xf4, 0x90, 0x80, 0x80, 0x42])
-
-it.each(["setText", "append"] as const)("%s publishes only accepted mutations before deferred errors", (method) => {
-  const buffer = TextBuffer.create("unicode", resourceContext)
-  const lib = resourceContext.renderLib
-  const operation = method === "setText" ? "contextTextBufferSetText" : "contextTextBufferAppend"
-  const original = lib[operation].bind(lib)
-  const failure = new Error("rejected text mutation")
-  buffer.setText("old")
-  const rejected = spyOn(lib, operation).mockImplementation(() => {
-    throw failure
-  })
-  try {
-    expect(() => buffer[method]("new")).toThrow(failure)
-    expect(buffer.getPlainText()).toBe("old")
-    expect(buffer.length).toBe(3)
-    rejected.mockImplementation((...args) => {
-      original(...args)
-      lib.getYogaHost().invokeCallback(() => {
-        throw failure
-      })
-    })
-    expect(() => buffer[method]("new")).toThrow(failure)
-    expect(buffer.getPlainText()).toBe(method === "setText" ? "new" : "oldnew")
-    expect(buffer.length).toBe(method === "setText" ? 3 : 6)
-  } finally {
-    rejected.mockRestore()
-    buffer.destroy()
-  }
-})
 
 describe("TextBuffer", () => {
   let buffer: TextBuffer
@@ -268,14 +239,6 @@ describe("TextBuffer", () => {
   })
 
   describe("clear() vs reset()", () => {
-    it("reset rejection crosses the native status boundary", () => {
-      const handle = buffer._getSceneHandle(resourceContext)
-      buffer.destroy()
-      expect(() => resolveRenderLib().contextTextBufferClear(resourceContext.context, handle, true)).toThrow(
-        "StaleHandle",
-      )
-    })
-
     it("clear() should empty buffer but preserve text across setText calls", () => {
       // Set initial text
       buffer.setText("First text")

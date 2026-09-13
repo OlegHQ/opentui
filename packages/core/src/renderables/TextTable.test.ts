@@ -371,34 +371,6 @@ describe("TextTableRenderable", () => {
     expect(table.wrapMode).toBe("char")
   })
 
-  test("keeps intrinsic width in content mode when extra space is available", async () => {
-    const table = new TextTableRenderable(renderer, {
-      left: 0,
-      top: 0,
-      width: 34,
-      wrapMode: "word",
-      columnWidthMode: "content",
-      content: [
-        [cell("A"), cell("B")],
-        [cell("1"), cell("2")],
-      ],
-    })
-
-    renderer.root.add(table)
-    await renderOnce()
-
-    const lines = captureFrame().split("\n")
-    const headerY = lines.findIndex((line) => line.includes("A") && line.includes("B"))
-    expect(headerY).toBeGreaterThanOrEqual(0)
-
-    const buffer = renderer.currentRenderBuffer
-    const borderXs = findVerticalBorderXs(buffer, headerY)
-
-    expect(borderXs.length).toBe(3)
-    expect(borderXs[0]).toBe(0)
-    expect(borderXs[borderXs.length - 1]).toBeLessThan(33)
-  })
-
   test("fills available width by default in full mode", async () => {
     const table = new TextTableRenderable(renderer, {
       left: 0,

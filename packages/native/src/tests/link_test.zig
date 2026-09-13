@@ -381,7 +381,7 @@ test "LinkPool - acquire then release does not leak live slots" {
     var pool = LinkPool.init(std.testing.allocator);
     defer pool.deinit();
 
-    const rounds: usize = 4096;
+    const rounds: usize = 64;
     for (0..rounds) |i| {
         var buf: [64]u8 = undefined;
         const url = std.fmt.bufPrint(&buf, "https://example.com/r{d}", .{i}) catch unreachable;

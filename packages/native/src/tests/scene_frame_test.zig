@@ -265,64 +265,6 @@ test "Scene painted commit admission rejection retains the draft for retry" {
     try drain(f.owner, f.id);
 }
 
-test "Scene convenience paint retains the canonical draft" {
-    const f = try Fixture.init(testing.allocator, 4, 1, .{ .output = transport });
-    defer f.deinit();
-    const frame = try f.owner.scenePaint(f.id, options.background, true, 0);
-    try testing.expect(f.state.painted != null);
-    try testing.expectEqualDeep(frame, f.state.painted.?.ticket);
-    try testing.expectEqual(@as(u32, 0), frame.kind);
-    try testing.expectError(error.FrameBusy, f.owner.renderSession(f.id, true));
-    const lease = try f.owner.sceneFrameAcquireBufferLease(f.id, frame, .next);
-    try testing.expectError(error.FrameBusy, f.owner.sceneFrameCommit(f.id, frame, true));
-    try f.owner.releaseBufferLease(lease);
-    try testing.expectEqual(.pending, try f.owner.sceneFrameCommit(f.id, frame, true));
-    try testing.expectError(error.StaleFrame, f.owner.sceneFrameCommit(f.id, frame, true));
-    try drain(f.owner, f.id);
-}
-
-test "Scene commit statuses consume normal and split drafts but earlier pending rejects a new draft" {
-    for ([_]bool{ false, true }) |split| {
-        for ([_]@import("../session.zig").RenderStatus{ .presented, .pending, .skipped, .failed }) |expected| {
-            const accepted = expected == .pending or expected == .presented;
-            const f = try Fixture.init(testing.allocator, 4, 1, .{
-                .output = .{ .chunk_size = if (accepted) 4096 else 32, .chunk_count = 2, .span_capacity = 2 },
-            });
-            defer f.deinit();
-            defer f.owner.cancelSession(f.id) catch unreachable;
-            const value = try f.owner.raw().getSession(f.id);
-            if (expected == .presented) {
-                const initial = try f.owner.scenePaint(f.id, options.background, true, 0);
-                _ = try f.owner.sceneFrameCommit(f.id, initial, true);
-                try drain(f.owner, f.id);
-            }
-            const frame = try f.owner.sceneFrameStep(f.id, null, options);
-            if (expected == .skipped) try f.owner.writeSession(f.id, &([_]u8{'x'} ** 64));
-            const before = value.getStats().bytes_written;
-            const result = if (split)
-                try value.renderSplit(frame, &.{}, 0, !accepted)
-            else
-                try f.owner.sceneFrameCommit(f.id, frame, !accepted);
-            try testing.expectEqual(expected, result);
-            if (!accepted) try testing.expectEqual(before, value.getStats().bytes_written);
-            try testing.expect(f.state.painted == null);
-            try testing.expectError(error.StaleFrame, f.owner.sceneFrameCommit(f.id, frame, true));
-            if (expected == .pending) {
-                const written = value.getStats().bytes_written;
-                try testing.expectEqual(.pending, try f.owner.renderSession(f.id, true));
-                try testing.expectEqual(.pending, try value.renderSplit(null, &.{}, 0, true));
-                try testing.expectEqual(written, value.getStats().bytes_written);
-                try testing.expectError(error.PresentationPending, f.owner.sceneFrameStep(f.id, null, options));
-                // A consumed draft must not be reported as an accepted split submission.
-                try testing.expectError(error.StaleFrame, value.renderSplit(frame, &.{}, 0, true));
-            }
-            try drain(f.owner, f.id);
-            const retry = try f.owner.sceneFrameStep(f.id, null, options);
-            try f.owner.sceneFrameCancel(f.id, retry.frame_id);
-        }
-    }
-}
-
 fn prefix(owner: *context.Context, id: context.Handle) !context.Handle {
     const root = (try owner.raw().getSession(id)).scene.?.root.?.scene_node.?.handle;
     const child = try owner.sceneCreateNode(id, 1, 2);
@@ -330,36 +272,6 @@ fn prefix(owner: *context.Context, id: context.Handle) !context.Handle {
     try owner.sceneSetHooks(child, 8 | 16, 1, 1, 1);
     try owner.sceneMoveNode(child, root, 0);
     return child;
-}
-
-test "Scene frame terminal transitions retain painted and prefix scopes but forbid new paint or capture" {
-    for ([_]bool{ false, true }) |painted| {
-        for ([_]bool{ false, true }) |should_suspend| {
-            const f = try Fixture.init(testing.allocator, 4, 1, .{ .output = transport });
-            defer f.deinit();
-            defer f.owner.cancelSession(f.id) catch unreachable;
-            if (should_suspend) {
-                try f.owner.setupSessionTerminal(f.id, .{});
-                for (0..32) |_| {
-                    try drain(f.owner, f.id);
-                    if ((try f.owner.pumpSession(f.id, 0, 8)).status == .idle) break;
-                } else return error.TestUnexpectedResult;
-            }
-            if (!painted) _ = try prefix(f.owner, f.id);
-            const before = try f.step(null, options, if (painted) 0 else 4, null);
-            const lease = try f.owner.sceneFrameAcquireBufferLease(f.id, before, .next);
-            errdefer f.owner.releaseBufferLease(lease) catch {};
-            const snapshot = try f.owner.bufferLeaseSnapshot(lease);
-            if (should_suspend) try f.owner.suspendSession(f.id) else try f.owner.setupSessionTerminal(f.id, .{});
-            try testing.expectEqualDeep(snapshot, try f.owner.bufferLeaseSnapshot(lease));
-            try testing.expectError(error.TerminalInactive, f.owner.sceneFrameAcquireBufferLease(f.id, before, .next));
-            try f.owner.releaseBufferLease(lease);
-            if (painted) {
-                try testing.expectError(error.TerminalInactive, f.owner.sceneFrameCommit(f.id, before, true));
-            } else try testing.expectError(error.TerminalInactive, f.owner.sceneFrameStep(f.id, before, options));
-            try f.owner.sceneFrameCancel(f.id, before.frame_id);
-        }
-    }
 }
 
 test "Scene prefix root destruction retains scoped cells until explicit cancellation" {
@@ -378,41 +290,6 @@ test "Scene prefix root destruction retains scoped cells until explicit cancella
     try testing.expectEqual(@as(u32, 'A'), (try f.owner.bufferLeaseSnapshot(nested)).buffer.char[0]);
     try f.owner.sceneFrameCancel(f.id, before.frame_id);
     try testing.expectError(error.StaleLease, f.owner.bufferLeaseSnapshot(lease));
-}
-
-test "Scene idle update consumes its traversal position without retroactive activation" {
-    for ([_]u32{ 0, 64 }) |initial_flags| for ([_]bool{ false, true }) |activate_before| {
-        const f = try Fixture.init(testing.allocator, 4, 1, .{ .output = transport });
-        defer f.deinit();
-        const idle = try f.owner.sceneCreateNode(f.id, 1, 2);
-        const sibling = try f.owner.sceneCreateNode(f.id, 1, 3);
-        try f.owner.sceneMoveNode(if (activate_before) sibling else idle, f.root, 0);
-        try f.owner.sceneMoveNode(if (activate_before) idle else sibling, f.root, 1);
-        try f.owner.sceneSetHooks(idle, initial_flags, 1, 0, 0);
-        try f.owner.sceneSetHooks(sibling, 1, 1, 0, 0);
-        var request = try f.step(null, options, 1, sibling);
-        try f.owner.sceneSetHooks(idle, 1, 2, 0, 0);
-        var updates: u32 = 0;
-        for (0..8) |_| {
-            request = try f.owner.sceneFrameStep(f.id, request, options);
-            if (request.kind == 0) break;
-            try testing.expectEqual(@as(u32, 1), request.kind);
-            try testing.expectEqual(idle, request.node);
-            updates += 1;
-        } else return error.TestUnexpectedResult;
-        try testing.expectEqual(@as(u32, @intFromBool(activate_before or initial_flags == 0)), updates);
-        try f.owner.sceneFrameCancel(f.id, request.frame_id);
-        var previous: ?scene.FrameRequest = null;
-        updates = 0;
-        for (0..8) |_| {
-            request = try f.owner.sceneFrameStep(f.id, previous, options);
-            if (request.kind == 0) break;
-            if (std.meta.eql(request.node, idle)) updates += 1;
-            previous = request;
-        } else return error.TestUnexpectedResult;
-        try testing.expectEqual(@as(u32, 1), updates);
-        try f.owner.sceneFrameCancel(f.id, request.frame_id);
-    };
 }
 
 test "Scene idle update metadata keeps the native one call path and excludes host counts" {

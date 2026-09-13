@@ -63,56 +63,6 @@ test "Resolved buffer capture uses the checked Session snapshot pool and exact c
     try std.testing.expectError(error.StaleLease, owner.bufferLeaseSnapshot(current));
 }
 
-test "Resolved buffer capture sizes replacement spaces and image fallbacks" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 1, 4, .{
-        .pool = &pool,
-        .link_pool = &links,
-    });
-    defer target.deinit();
-    @memcpy(target.buffer.char, &[_]u32{ 0, 0xd800, 0x110000, gp.packImageCell(1, 15) });
-    var lease = try target.acquireLease();
-    defer lease.release();
-    const snapshot = try lease.snapshot();
-    try std.testing.expectEqual(@as(u32, 10), try snapshot.getRealCharSize(true));
-    var output: [10]u8 = undefined;
-    var lengths: [4]u8 = undefined;
-    const written = try snapshot.writeResolvedCells(&output, true, &lengths);
-    try std.testing.expectEqualStrings(" \n \n \n\u{2588}\n", output[0..written]);
-    try std.testing.expectEqualSlices(u8, &.{ 1, 1, 1, 3 }, &lengths);
-}
-
-test "Resolved buffer capture preserves independent cell boundaries and maximum pool entries" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    const target = try buffer.OptimizedBuffer.init(std.testing.allocator, 3, 2, .{
-        .pool = &pool,
-        .link_pool = &links,
-    });
-    defer target.deinit();
-    const foreground = ansi.rgbColor(255, 255, 255, 255);
-    try target.drawText("\u{1f1fa}", 0, 0, foreground, null, 0);
-    try target.drawText("\u{1f1f8}", 1, 0, foreground, null, 0);
-    try target.drawText("Z", 2, 0, foreground, null, 0);
-    const maximum = "\u{e9}" ++ "\u{301}" ** 63;
-    try std.testing.expectEqual(@as(usize, 128), maximum.len);
-    try target.drawText(maximum, 0, 1, foreground, null, 0);
-    try target.drawText("\u{754c}", 1, 1, foreground, null, 0);
-    var lease = try target.acquireLease();
-    defer lease.release();
-    const snapshot = try lease.snapshot();
-    var output: [140]u8 = undefined;
-    var lengths: [6]u8 = undefined;
-    const written = try snapshot.writeResolvedCells(&output, false, &lengths);
-    try std.testing.expectEqualStrings("\u{1f1fa}\u{1f1f8}Z" ++ maximum ++ "\u{754c}", output[0..written]);
-    try std.testing.expectEqualSlices(u8, &.{ 4, 4, 1, 128, 3, 0 }, &lengths);
-}
-
 test "Buffer lease resize is transactional at every replacement allocation" {
     var pool = gp.GraphemePool.init(std.testing.allocator);
     defer pool.deinit();

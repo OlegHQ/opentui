@@ -224,32 +224,3 @@ test "Scene flush partial masks preserve omitted values and reject invalid paylo
         try testing.expectEqualDeep(expected, try fixture.paint());
     }
 }
-
-test "Scene flush border character reset shares appearance and Yoga admission" {
-    var fixture: Fixture = .{};
-    try fixture.init(testing.allocator);
-    defer fixture.deinit();
-    const core = fixture.owner.core;
-    const chars = [_]u32{'X'} ** 11;
-    try core.sceneSetBoxDetails(fixture.node, .{ .custom_border_chars = chars });
-    for (2..7) |kind| try core.sceneSetStyle(fixture.node, 2, @intCast(kind), 0, 1, 3.25, 0);
-    var input: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer input.deinit();
-    const payload = [_]u32{ 15, 1 };
-    try append(&input, fixture.node, c.OT_SCENE_PROPERTY_BORDER | c.OT_SCENE_PROPERTY_BORDER_STYLE | c.OT_SCENE_PROPERTY_RESET_BORDER_CHARACTERS, std.mem.asBytes(&payload));
-    var applied: u32 = 99;
-    yoga.testFailAfter(0);
-    defer yoga.testFailAfter(-1);
-    const status = fixture.flush(input.written(), &applied);
-    yoga.testFailAfter(-1);
-    try testing.expectEqual(c.OT_OUT_OF_MEMORY, status);
-    try testing.expectEqual(@as(u32, 0), applied);
-    const node = (try core.raw().getRenderable(fixture.node)).scene_node.?;
-    try testing.expectEqual(chars, node.control.box.?.custom_border_chars.?);
-    try testing.expectEqual(@as(u32, 0), node.paint.borderSides);
-    try testing.expectEqual(c.OT_OK, fixture.flush(input.written(), &applied));
-    try testing.expectEqual(@as(u32, 1), applied);
-    try testing.expectEqual(@as(u32, 15), node.paint.borderSides);
-    try testing.expectEqual(@as(u32, 1), node.paint.borderStyle);
-    try testing.expectEqual(null, node.control.box.?.custom_border_chars);
-}

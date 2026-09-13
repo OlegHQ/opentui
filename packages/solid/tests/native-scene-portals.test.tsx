@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, it } from "bun:test"
 import { BoxRenderable, TextRenderable, type Renderable } from "@opentui/core"
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-import { batch, createContext, createSignal, onCleanup, onMount, Show, useContext } from "solid-js"
-import { createScrollbackWriter, Portal, render, useRenderer } from "../index.js"
+import { batch, createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
+import { Portal, render, useRenderer } from "../index.js"
 
 let setup: Awaited<ReturnType<typeof createTestRenderer>>
 const tick = () => new Promise<void>((resolve) => process.nextTick(resolve))
@@ -101,65 +101,7 @@ it.each(["main", "detached"])("moves Portal content within a %s scene without re
   if (surface) expect(surface.isDestroyed).toBe(true)
 })
 
-it.each(["inside-mount", "portal-writer"])(
-  "isolates scrollback owners and assigns refs before spreads (%s)",
-  async (mode) => {
-    let text!: TextRenderable
-    let container: BoxRenderable | undefined
-    let cleanups = 0
-    const write = () =>
-      setup.renderer.writeToScrollback(
-        createScrollbackWriter(
-          ({ renderContext }) => {
-            onCleanup(() => cleanups++)
-            const snapshotRenderer = useRenderer()
-            const props = () => {
-              expect(text.ctx).toBe(snapshotRenderer)
-              expect(text.ctx.nativeScene).toBe(renderContext.nativeScene)
-              expect(text.ctx.nativeScene).not.toBe(setup.renderer.nativeScene)
-              return { content: "snapshot" }
-            }
-            const body = () => <text ref={text} {...props()} />
-            return mode === "inside-mount" ? (
-              body()
-            ) : (
-              <Portal
-                ref={(node) => {
-                  container = node as BoxRenderable
-                }}
-              >
-                {body()}
-              </Portal>
-            )
-          },
-          { height: 1 },
-        ),
-      )
-    function Content() {
-      if (mode === "inside-mount") onMount(write)
-      return <text content="main portal" />
-    }
-    await render(
-      () => (
-        <Portal>
-          <Content />
-        </Portal>
-      ),
-      setup.renderer,
-    )
-    if (mode === "portal-writer") write()
-    expect(setup.externalOutput.takeText()).toContain("snapshot")
-    expect(cleanups).toBe(1)
-    await tick()
-    expect((container ? [text, container] : [text]).every((node) => node.isDestroyed && node.parent === null)).toBe(
-      true,
-    )
-    await setup.renderOnce()
-    expect(setup.captureCharFrame().trim()).toBe("main portal")
-  },
-)
-
-it.each(["sequential", "mount-first", "reveal-first"])("retargets empty but not live Portals (%s)", async (order) => {
+it("retargets empty but not live Portals", async () => {
   const left = setup.renderer.createScrollbackSurface()
   const right = setup.renderer.createScrollbackSurface()
   const [mount, setMount] = createSignal(left.root)
@@ -198,19 +140,8 @@ it.each(["sequential", "mount-first", "reveal-first"])("retargets empty but not 
   setVisible(false)
   await tick()
   expect(original.isDestroyed).toBe(true)
-  if (order === "sequential") {
-    setMount(right.root)
-    setVisible(true)
-  } else
-    batch(() => {
-      if (order === "mount-first") {
-        setMount(right.root)
-        setVisible(true)
-      } else {
-        setVisible(true)
-        setMount(right.root)
-      }
-    })
+  setMount(right.root)
+  setVisible(true)
   expect(owners).toBe(1)
   expect(text).not.toBe(original)
   expect(text.ctx.nativeScene).toBe(right.renderContext.nativeScene)

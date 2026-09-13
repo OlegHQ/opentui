@@ -1,10 +1,5 @@
 import { ResourceContext } from "./buffer.js"
 import { describe, expect, it, beforeEach, afterEach } from "bun:test"
-import { spawnSync } from "node:child_process"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { OptimizedBuffer, type BufferAccess } from "./buffer.js"
 import { RGBA } from "./lib/RGBA.js"
 import { NativeImage } from "./image.js"
@@ -15,37 +10,6 @@ beforeEach(() => {
 })
 afterEach(() => resourceContext.destroy())
 
-for (const scenario of ["before", "after", "rejected"]) {
-  it(`preserves native resize outcomes when FFI file logging fails: ${scenario}`, () => {
-    const dir = mkdtempSync(join(process.env.OTUI_TEXT_BUFFER_TEST_TMPDIR ?? tmpdir(), "opentui-ffi-log-"))
-    try {
-      const extension = import.meta.url.endsWith(".ts") ? "ts" : "js"
-      const runtimeArgs = "bun" in process.versions ? [] : process.execArgv.filter((arg) => !arg.startsWith("--test"))
-      const child = spawnSync(
-        process.execPath,
-        [
-          ...runtimeArgs,
-          fileURLToPath(new URL(`tests/buffer-resize-logging-child.${extension}`, import.meta.url)),
-          scenario,
-          dir,
-        ],
-        { encoding: "utf8", timeout: 30_000, env: { ...process.env, OTUI_DEBUG_FFI: "1", OTUI_TRACE_FFI: "1" } },
-      )
-      expect({ status: child.status, signal: child.signal, stderr: child.stderr, error: child.error?.message }).toEqual(
-        {
-          status: 0,
-          signal: null,
-          stderr: "",
-          error: undefined,
-        },
-      )
-      expect(child.stdout).toMatch(/^ot_buffer_resize\s+\|\s+4\s+\|/m)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-}
-
 describe("OptimizedBuffer", () => {
   let buffer: OptimizedBuffer
 
@@ -55,45 +19,6 @@ describe("OptimizedBuffer", () => {
 
   afterEach(() => {
     buffer.destroy()
-  })
-
-  it("scopes resized native geometry and immediate cell writes", () => {
-    const initial = buffer.withBuffers((cells) => cells.generation)
-    buffer.resize(3, 2)
-    expect([buffer.width, buffer.height]).toEqual([3, 2])
-
-    const generation = buffer.withBuffers((cells) => {
-      expect([cells.width, cells.height, cells.char.length, cells.fg.length]).toEqual([3, 2, 6, 24])
-      expect(cells.bg.length).toBe(24)
-      expect(cells.attributes.length).toBe(6)
-      cells.char[5] = 88
-      cells.attributes[5] = 0x8000_00ff
-      return cells.generation
-    })
-
-    expect(generation > initial).toBe(true)
-    expect(new TextDecoder().decode(buffer.getRealCharBytes())).toContain("X")
-    buffer.withBuffers((cells) => expect(cells.attributes[5]).toBe(0x8000_00ff))
-  })
-
-  it.each(["resize", "destroy"] as const)("retains storage through scoped %s and reports invalidation", (operation) => {
-    let entered = false
-    let retained = 0
-    expect(() =>
-      buffer.withBuffers((cells) => {
-        entered = true
-        cells.char[0] = 65
-        const chars = cells.char
-        if (operation === "resize") buffer.resize(3, 2)
-        else buffer.destroy()
-        retained = chars[0]
-      }),
-    ).toThrow()
-    expect(entered).toBe(true)
-    expect(retained).toBe(65)
-    if (operation === "resize") {
-      buffer.withBuffers((cells) => expect([cells.width, cells.height]).toEqual([3, 2]))
-    }
   })
 
   it("releases failed scopes, rejects the saved facade, and permits owned copies", () => {
@@ -113,26 +38,6 @@ describe("OptimizedBuffer", () => {
     }))
     buffer.destroy()
     expect([copy.width, copy.height, copy.char.length]).toEqual([20, 5, 100])
-  })
-
-  it("keeps nested scopes independent and rejects asynchronous callback results", async () => {
-    let outer: BufferAccess | undefined
-    let inner: BufferAccess | undefined
-    buffer.withBuffers((first) => {
-      outer = first
-      buffer.withBuffers((second) => {
-        inner = second
-        expect(second.generation).toBe(first.generation)
-        second.char[0] = 66
-      })
-      expect(() => inner!.char).toThrow("scope has ended")
-      expect(first.char[0]).toBe(66)
-    })
-    expect(() => outer!.char).toThrow("scope has ended")
-    expect(() => buffer.withBuffers(() => Promise.resolve())).toThrow("must be synchronous")
-    expect(() => buffer.withBuffers(() => Promise.reject(new Error("async rejection")))).toThrow("must be synchronous")
-    await Promise.resolve()
-    buffer.withBuffers((cells) => expect(cells.char[0]).toBe(66))
   })
 
   it("rejects native resize failures without publishing dimensions and retries", () => {

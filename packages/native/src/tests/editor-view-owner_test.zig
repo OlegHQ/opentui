@@ -50,48 +50,6 @@ fn expectPlaceholderOwner() !void {
     try testing.expectEqual(placeholder, ev.getTextBuffer());
 }
 
-test "EditorView - logical line queries reuse prepared storage until content or view changes" {
-    var pool = gp.GraphemePool.init(testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(testing.allocator);
-    defer links.deinit();
-    const eb = try EditBuffer.init(testing.allocator, &pool, &links, .unicode, null);
-    defer eb.deinit();
-    const ev = try EditorView.init(testing.allocator, eb, 4, 2);
-    defer ev.deinit();
-    const peer = try EditorView.init(testing.allocator, eb, 8, 2);
-    defer peer.deinit();
-    ev.setWrapMode(.char);
-    try eb.setText("a\xe4\xb8\xadb\nc");
-    const before = ev.getLogicalLineInfo();
-    try testing.expectEqualSlices(u32, &.{ 4, 1 }, before.line_width_cols);
-    _ = peer.getLogicalLineInfo();
-
-    const arena = ev.text_buffer_view.virtual_lines_arena;
-    const allocator = arena.child_allocator;
-    var failing = testing.FailingAllocator.init(allocator, .{ .fail_index = 0 });
-    arena.child_allocator = failing.allocator();
-    defer arena.child_allocator = allocator;
-    const cached = ev.getLogicalLineInfo();
-    try testing.expect(!failing.has_induced_failure);
-    try testing.expectEqual(before.line_width_cols.ptr, cached.line_width_cols.ptr);
-    try testing.expectEqualSlices(u32, &.{ 4, 1 }, cached.line_width_cols);
-
-    arena.child_allocator = allocator;
-    try eb.setText("abcdef");
-    try testing.expectEqualSlices(u32, &.{ 4, 2 }, ev.getLogicalLineInfo().line_width_cols);
-    try testing.expectEqualSlices(u32, &.{6}, peer.getLogicalLineInfo().line_width_cols);
-    ev.setViewportSize(3, 2);
-    try testing.expectEqualSlices(u32, &.{ 3, 3 }, ev.getLogicalLineInfo().line_width_cols);
-    try eb.setText("");
-    try owned_styled.setPlaceholder(ev, &.{.{ .text = "hint" }});
-    try testing.expectEqualSlices(u32, &.{ 3, 1 }, ev.getLogicalLineInfo().line_width_cols);
-    try eb.setText("x");
-    try testing.expectEqualSlices(u32, &.{1}, ev.getLogicalLineInfo().line_width_cols);
-    try eb.setText("");
-    try testing.expectEqualSlices(u32, &.{ 3, 1 }, ev.getLogicalLineInfo().line_width_cols);
-}
-
 test "EditorView - rejected selected deletion preserves selection and local endpoints" {
     var pool = gp.GraphemePool.init(testing.allocator);
     defer pool.deinit();

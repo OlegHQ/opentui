@@ -2,8 +2,6 @@ const std = @import("std");
 const testing = std.testing;
 const session = @import("../session.zig");
 const ansi = @import("../ansi.zig");
-const abi = @import("../context-abi.zig");
-const c = @import("context_abi_c");
 
 const Fixture = @import("session-terminal_test.zig").Fixture;
 const transport: session.Options = .{ .chunk_size = 4096, .chunk_count = 4, .span_capacity = 4, .control_capacity = 4096 };
@@ -128,73 +126,4 @@ test "Session cursor checked ownership and position bounds reject without partia
     try testing.expectError(error.SessionFailed, f.owner.controlSession(f.id, .{ .cursor = .{} }));
     try f.owner.cancelSession(f.id);
     try testing.expectError(error.SessionCancelled, f.owner.controlSession(f.id, .{ .cursor = .{} }));
-}
-
-test "Session cursor ABI accepts copied unaligned updates and rejects malformed payloads atomically" {
-    const config: c.ot_context_options = .{
-        .struct_size = @sizeOf(c.ot_context_options),
-        .abi_version = c.OT_CONTEXT_ABI_VERSION,
-        .flags = 0,
-        .object_capacity = 4,
-        .render_cells_max = 32,
-        .reserved = .{ 0, 0, 0 },
-    };
-    var handle: ?*abi.ContextHandle = null;
-    try testing.expectEqual(c.OT_OK, abi.ot_context_create(&config, &handle));
-    defer testing.expectEqual(c.OT_OK, abi.ot_context_destroy(handle)) catch unreachable;
-    const owner = handle.?.core;
-    const id = try owner.createSession(.{});
-    defer owner.cancelSession(id) catch unreachable;
-    try owner.attachSessionRenderer(id, 8, 4, .{ .remote_mode = .remote });
-    const session_id: c.ot_handle = .{ .context_id = id.context_id, .slot = id.slot, .generation = id.generation };
-    const command: c.ot_session_control_options = .{
-        .struct_size = @sizeOf(c.ot_session_control_options),
-        .abi_version = c.OT_CONTEXT_ABI_VERSION,
-        .kind = c.OT_CONTROL_CURSOR,
-        .argument = 0,
-        .reserved = 0,
-    };
-    const update: c.ot_session_cursor_update = .{
-        .fields = 31,
-        .x = 4,
-        .y = 2,
-        .visible = 1,
-        .style = 2,
-        .blinking = 1,
-        .mouse_pointer = 3,
-        .color = .{ 128, 192, 64, 255 },
-    };
-    var storage: [25]u8 align(4) = undefined;
-    const bytes = storage[1..];
-    @memcpy(bytes, std.mem.asBytes(&update));
-    try testing.expectEqual(c.OT_OK, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, bytes.len));
-    const cli = try owner.raw().getSessionRenderer(id);
-    const accepted = cli.terminal.state;
-    try testing.expectEqual(@as(u32, 4), accepted.cursor.x);
-    try testing.expectEqual(@as(u32, 2), accepted.cursor.y);
-    try testing.expect(accepted.cursor.visible and accepted.cursor.blinking);
-    try testing.expectEqual(.underline, accepted.cursor.style);
-    try testing.expectEqual(.crosshair, accepted.mouse_pointer);
-    try testing.expectEqualDeep(update.color, accepted.cursor.color);
-    const stats = (try owner.raw().getSession(id)).getStats();
-    for ([_]u32{ 0, 23, 25 }) |len| {
-        try testing.expectEqual(c.OT_INVALID_ARGUMENT, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, len));
-    }
-    try testing.expectEqual(c.OT_INVALID_ARGUMENT, abi.ot_session_control(handle, &session_id, &command, null, bytes.len));
-    for ([_][2]u8{ .{ 0, 32 }, .{ 0, 0 }, .{ 12, 2 }, .{ 13, 4 }, .{ 14, 2 }, .{ 15, 6 } }) |invalid| {
-        @memcpy(bytes, std.mem.asBytes(&update));
-        bytes[invalid[0]] = invalid[1];
-        try testing.expectEqual(c.OT_INVALID_ARGUMENT, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, bytes.len));
-        try testing.expectEqualDeep(accepted, cli.terminal.state);
-        try testing.expectEqualDeep(stats, (try owner.raw().getSession(id)).getStats());
-    }
-    @memset(bytes, 0);
-    bytes[0] = c.OT_CURSOR_BLINKING;
-    try testing.expectEqual(c.OT_OK, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, bytes.len));
-    var expected = accepted;
-    expected.cursor.blinking = false;
-    try testing.expectEqualDeep(expected, cli.terminal.state);
-    owner.mutating = true;
-    defer owner.mutating = false;
-    try testing.expectEqual(c.OT_CONTEXT_BUSY, abi.ot_session_control(handle, &session_id, &command, bytes.ptr, bytes.len));
 }

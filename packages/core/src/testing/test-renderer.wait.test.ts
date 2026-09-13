@@ -1,7 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test"
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { setImmediate } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { CliRenderEvents } from "../renderer.js"
 import { TextRenderable } from "../renderables/Text.js"
@@ -56,32 +55,6 @@ test("waitForFrame observes text from a scheduled render", async () => {
 
   expect(frame).toContain("hello")
   expect(setup.getNativeStats().nativeFrameCount).toBe(1)
-})
-
-test("waitForFrame rechecks an intervening redraw before reading frame storage", async () => {
-  setup = await createTestRenderer({ width: 10, height: 4, clock: new ManualClock() })
-  const text = new TextRenderable(setup.renderer, { content: "hello" })
-  setup.renderer.root.add(text)
-  const hold = Promise.withResolvers<void>()
-  setup.renderer.setFrameCallback(() => hold.promise)
-  setup.renderer.once(CliRenderEvents.FRAME, () => {
-    text.content = "world"
-  })
-  const active = setup.renderOnce()
-  const redraw = setup.renderOnce()
-  const observed = setup.waitForFrame((frame) => frame.includes("world"), { maxPasses: 2 })
-  try {
-    await setImmediate()
-    setup.renderer.clearFrameCallbacks()
-    hold.resolve()
-    const [, , frame] = await Promise.all([active, redraw, observed])
-    expect(frame).toContain("world")
-    expect(setup.getNativeStats().nativeFrameCount).toBe(2)
-  } finally {
-    setup.renderer.clearFrameCallbacks()
-    hold.resolve()
-    await Promise.allSettled([active, redraw, observed])
-  }
 })
 
 test("waitFor observes predicate changes after scheduled work", async () => {

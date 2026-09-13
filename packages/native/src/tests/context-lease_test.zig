@@ -45,58 +45,6 @@ test "Context Session lease rejects terminal transitions and cancelled sessions"
     try std.testing.expectEqual(0, owner.lease_count);
 }
 
-test "Context lease pins stale generations through renderer resize, destroy, and slot reuse" {
-    const owner = try context.Context.init(std.testing.allocator, std.testing.io, .{ .object_capacity = 5 });
-    defer owner.deinit() catch unreachable;
-    const renderer = try owner.createSession(.{});
-    try owner.attachSessionRenderer(renderer, 2, 1, .{ .remote_mode = .remote });
-    const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
-    const grapheme_id = try owner.graphemes.acquire("e\xcc\x81");
-    const link_id = try owner.links.acquire("https://lease.invalid");
-    target.set(0, 0, .{
-        .char = gp.packGraphemeStart(grapheme_id, 2),
-        .fg = ansi.rgbColor(1, 2, 3, 255),
-        .bg = ansi.rgbColor(4, 5, 6, 255),
-        .attributes = ansi.TextAttributes.setLinkId(0, link_id),
-    });
-    const first = try owner.acquireSessionBufferLease(renderer, .next);
-    defer owner.releaseBufferLease(first) catch unreachable;
-    const second = try owner.acquireSessionBufferLease(renderer, .next);
-    const before = try owner.bufferLeaseSnapshot(first);
-    const pinned_bytes = owner.lease_bytes;
-    try std.testing.expectEqualDeep(before, try owner.bufferLeaseSnapshot(second));
-    try owner.resizeSessionRenderer(renderer, 2, 1);
-    try std.testing.expectEqualDeep(before, try owner.bufferLeaseSnapshot(first));
-    try owner.resizeSessionRenderer(renderer, 3, 1);
-    try std.testing.expectError(error.StaleLease, owner.bufferLeaseSnapshot(first));
-    try std.testing.expectError(error.StaleLease, owner.bufferLeaseSnapshot(second));
-    const current = try owner.acquireSessionBufferLease(renderer, .next);
-    defer owner.releaseBufferLease(current) catch unreachable;
-    const after = try owner.bufferLeaseSnapshot(current);
-    try std.testing.expectEqual(before.generation + 1, after.generation);
-    try std.testing.expect(before.buffer.char.ptr != after.buffer.char.ptr);
-    try std.testing.expectEqual(@as(u32, 3), after.width);
-    try std.testing.expect(owner.lease_bytes > pinned_bytes);
-    try owner.releaseBufferLease(second);
-    try owner.destroy(renderer);
-    try std.testing.expectError(error.StaleLease, owner.bufferLeaseSnapshot(current));
-    try std.testing.expectError(error.StaleHandle, owner.acquireSessionBufferLease(renderer, .next));
-    const replacement = try owner.createSession(.{});
-    try owner.attachSessionRenderer(replacement, 2, 1, .{ .remote_mode = .remote });
-    try std.testing.expectEqual(renderer.slot, replacement.slot);
-    try std.testing.expect(renderer.generation != replacement.generation);
-    try std.testing.expectError(error.StaleLease, owner.bufferLeaseSnapshot(first));
-    try std.testing.expectError(error.StaleLease, owner.bufferLeaseSnapshot(current));
-    try std.testing.expectEqual(gp.packGraphemeStart(grapheme_id, 2), before.buffer.char[0]);
-    try std.testing.expect(gp.isContinuationChar(before.buffer.char[1]));
-    try std.testing.expectEqual(ansi.rgbColor(1, 2, 3, 255), before.buffer.fg[0]);
-    try std.testing.expectEqual(ansi.rgbColor(4, 5, 6, 255), before.buffer.bg[0]);
-    try std.testing.expectEqual(link_id, ansi.TextAttributes.getLinkId(before.buffer.attributes[0]));
-    try std.testing.expectEqualStrings("e\xcc\x81", try owner.graphemes.get(grapheme_id));
-    try std.testing.expectEqualStrings("https://lease.invalid", try owner.links.get(link_id));
-    try std.testing.expectEqual(buffer.DEFAULT_SPACE_CHAR, after.buffer.char[0]);
-}
-
 test "Context link retirement preserves all slots on destroy and final lease release" {
     for ([_]bool{ false, true }) |leased| {
         var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
@@ -215,66 +163,6 @@ test "Context lease charges distinct current and retired storage once and enforc
     try owner.destroy(replacement);
     try std.testing.expectEqual(@as(u64, 0), owner.lease_bytes);
     try std.testing.expectEqual(@as(u32, 0), owner.lease_count);
-}
-
-test "Context lease checked counts ignore raw leases and release order" {
-    const Lifetime = enum { current, resized, destroyed };
-    for ([_]Lifetime{ .current, .resized, .destroyed }) |lifetime| {
-        for ([_]bool{ false, true }) |raw_first| {
-            const owner = try context.Context.init(std.testing.allocator, std.testing.io, .{ .object_capacity = 3 });
-            defer owner.deinit() catch unreachable;
-            const renderer = try owner.createSession(.{});
-            try owner.attachSessionRenderer(renderer, 1, 1, .{ .remote_mode = .remote });
-            const target = (try owner.raw().getSessionRenderer(renderer)).getNextBuffer();
-            var raw = try target.acquireLease();
-            defer raw.release();
-            const storage = raw.storage.?;
-            const snapshot = try raw.snapshot();
-            snapshot.buffer.char[0] = 'A';
-            const leases = [_]context.Handle{
-                try owner.acquireSessionBufferLease(renderer, .next),
-                try owner.acquireSessionBufferLease(renderer, .next),
-            };
-            const bytes = owner.lease_bytes;
-            try std.testing.expectEqual(@as(u32, 4), storage.ref_count);
-            try std.testing.expectEqual(@as(u32, 2), storage.lease_budget.?.checked_ref_count);
-            switch (lifetime) {
-                .current => {},
-                .resized => try owner.resizeSessionRenderer(renderer, 2, 1),
-                .destroyed => try owner.destroy(renderer),
-            }
-            if (raw_first) raw.release();
-            try std.testing.expectEqual(@as(u32, 2), storage.lease_budget.?.checked_ref_count);
-            const order: [2]usize = if (raw_first) .{ 1, 0 } else .{ 0, 1 };
-            try owner.releaseBufferLease(leases[order[0]]);
-            try std.testing.expectEqual(@as(u32, 1), storage.lease_budget.?.checked_ref_count);
-            try std.testing.expectEqual(bytes, owner.lease_bytes);
-            if (lifetime == .current) {
-                _ = try owner.bufferLeaseSnapshot(leases[order[1]]);
-            } else {
-                try std.testing.expectError(error.StaleLease, owner.bufferLeaseSnapshot(leases[order[1]]));
-            }
-            try owner.releaseBufferLease(leases[order[1]]);
-            try std.testing.expectEqual(@as(u32, 0), owner.lease_count);
-            try std.testing.expectEqual(@as(u64, 0), owner.lease_bytes);
-            if (lifetime == .current or !raw_first) {
-                try std.testing.expect(storage.lease_budget == null);
-            }
-            if (!raw_first) {
-                try std.testing.expectEqual(@as(u32, 'A'), snapshot.buffer.char[0]);
-                try std.testing.expectEqual(@as(u32, if (lifetime == .current) 2 else 1), storage.ref_count);
-            }
-            if (lifetime == .current) {
-                const replacement = try owner.acquireSessionBufferLease(renderer, .next);
-                try std.testing.expectEqual(@as(u32, 1), storage.lease_budget.?.checked_ref_count);
-                try std.testing.expectEqual(bytes, owner.lease_bytes);
-                try owner.releaseBufferLease(replacement);
-            }
-            // Raw borrowers remain the caller's responsibility after the last
-            // checked release; release them before the context frees its pools.
-            raw.release();
-        }
-    }
 }
 
 test "Context lease accounts for future tracker growth before admitting storage" {

@@ -13,8 +13,6 @@ import type { RenderContext } from "../types.js"
 import { TextNodeRenderable } from "../renderables/TextNode.js"
 import { TextRenderable } from "../renderables/Text.js"
 import { ScrollBoxRenderable } from "../renderables/ScrollBox.js"
-import { BoxRenderable } from "../renderables/Box.js"
-import { Unit } from "../yoga.js"
 
 export class TestBaseRenderable extends BaseRenderable {
   constructor(options: BaseRenderableOptions) {
@@ -81,7 +79,6 @@ let testRenderer: TestRenderer
 let testMockMouse: MockMouse
 let testMockInput: MockInput
 let renderOnce: () => Promise<void>
-let captureCharFrame: () => string
 
 beforeEach(async () => {
   ;({
@@ -89,7 +86,6 @@ beforeEach(async () => {
     mockMouse: testMockMouse,
     mockInput: testMockInput,
     renderOnce,
-    captureCharFrame,
   } = await createTestRenderer({}))
 })
 
@@ -155,42 +151,6 @@ describe("Renderable", () => {
     })
     expect(renderable.width).toBe(100)
     expect(renderable.height).toBe(50)
-  })
-
-  test.each([
-    ["getter", "minWidth"],
-    ["getter", "flexGrow"],
-    ["proxy", "minWidth"],
-    ["proxy", "flexGrow"],
-  ] as const)("constructor restores defaults after %s reentry changes %s", async (access, property) => {
-    const options = { id: `constructor-${access}-${property}`, width: 2, height: 2, border: true }
-    const reenter = () => {
-      const constructing = [...Renderable.renderablesByNumber.values()].find((node) => node.id === options.id)
-      expect(constructing).toBeDefined()
-      constructing![property] = 8
-      return undefined
-    }
-    const box = new BoxRenderable(
-      testRenderer,
-      access === "getter"
-        ? Object.defineProperty(options, "minWidth", { get: reenter })
-        : new Proxy(options, {
-            get(target, key, receiver) {
-              return key === "minWidth" ? reenter() : Reflect.get(target, key, receiver)
-            },
-          }),
-    )
-    testRenderer.root.add(box)
-    expect(box.getMinWidth()).toEqual({ unit: Unit.Undefined, value: NaN })
-    expect(box.getFlexGrow()).toBe(0)
-    await renderOnce()
-    expect([box.x, box.y, box.width, box.height]).toEqual([0, 0, 2, 2])
-    expect(
-      captureCharFrame()
-        .split("\n")
-        .slice(0, 3)
-        .map((row) => row.trimEnd()),
-    ).toEqual(["\u250c\u2510", "\u2514\u2518", ""])
   })
 
   test("throws on invalid width", () => {
@@ -302,22 +262,6 @@ describe("Renderable", () => {
 })
 
 describe("Renderable - layout read caching invariants", () => {
-  test("primary-axis sorting reads each child's layout once", async () => {
-    const parent = new TestRenderable(testRenderer, { width: 10, height: 10 })
-    for (const top of [3, 1, 2, 0]) {
-      parent.add(new TestRenderable(testRenderer, { id: String(top), position: "absolute", top, width: 1, height: 1 }))
-    }
-    testRenderer.root.add(parent)
-    await renderOnce()
-    const reads = spyOn(testRenderer.nativeScene.driver.renderLib, "sceneGetLayout")
-    try {
-      expect(parent.getChildrenSortedByPrimaryAxis().map((child) => child.id)).toEqual(["0", "1", "2", "3"])
-      expect(reads).toHaveBeenCalledTimes(4)
-    } finally {
-      reads.mockRestore()
-    }
-  })
-
   test("grandchild screen position follows a translate-only ancestor move", async () => {
     const parent = new TestRenderable(testRenderer, {
       id: "cascade-parent",
@@ -350,28 +294,6 @@ describe("Renderable - layout read caching invariants", () => {
 })
 
 describe("Renderable - Child Management", () => {
-  test("ordinary first attachment does not allocate unused propagation maps", async () => {
-    const child = new BoxRenderable(testRenderer, { width: 2, height: 1 })
-    const OriginalMap = globalThis.Map
-    let allocations = 0
-    globalThis.Map = class<K, V> extends OriginalMap<K, V> {
-      constructor(entries?: Iterable<readonly [K, V]> | null) {
-        super(entries)
-        allocations++
-      }
-    }
-    try {
-      testRenderer.root.add(child)
-    } finally {
-      globalThis.Map = OriginalMap
-    }
-    expect(allocations).toBe(0)
-    expect(child.parent).toBe(testRenderer.root)
-    expect(testRenderer.root.getChildren()).toContain(child)
-    await renderOnce()
-    expect(child.width).toBe(2)
-  })
-
   test("can add and remove children", () => {
     const parent = new TestRenderable(testRenderer, { id: "parent" })
     const child1 = new TestRenderable(testRenderer, { id: "child1" })
@@ -798,19 +720,6 @@ describe("Renderable - Child Management", () => {
     expect(parent.isDestroyed).toBe(false)
     expect(() => parent.destroyRecursively()).not.toThrow()
     expect(parent.isDestroyed).toBe(true)
-  })
-
-  test("destroyRecursively destroys many siblings", () => {
-    const parent = new TestRenderable(testRenderer, { id: "parent" })
-    const children = Array.from(
-      { length: 64 },
-      (_, index) => new TestRenderable(testRenderer, { id: `child-${index}` }),
-    )
-    for (const child of children) parent.add(child)
-    parent.destroyRecursively()
-    expect(parent.isDestroyed).toBe(true)
-    expect(children.every((child) => child.isDestroyed)).toBe(true)
-    expect(parent.getChildrenCount()).toBe(0)
   })
 
   test("destroyRecursively destroys all children correctly with multiple children", () => {

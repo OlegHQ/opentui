@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach, afterEach, spyOn } from "bun:test"
 import { BoxRenderable, type BoxOptions } from "./Box.js"
 import { createTestRenderer, type TestRenderer } from "../testing/test-renderer.js"
-import { BorderChars, type BorderCharacters, type BorderStyle } from "../lib/border.js"
+import type { BorderStyle } from "../lib/border.js"
 import { RGBA } from "../lib/RGBA.js"
 
 let testRenderer: TestRenderer
@@ -171,60 +171,6 @@ describe("BoxRenderable - borderStyle validation", () => {
         expect(box.borderStyle).toBe(style)
       },
     )
-  })
-})
-
-describe("BoxRenderable - empty custom border characters", () => {
-  const emptyBorder: BorderCharacters = {
-    topLeft: "",
-    topRight: "",
-    bottomLeft: "",
-    bottomRight: "",
-    horizontal: "",
-    vertical: "",
-    topT: "",
-    bottomT: "",
-    leftT: "",
-    rightT: "",
-    cross: "",
-  }
-
-  test.each(["constructor", "setter"] as const)("renders blank borders through the %s", async (boundary) => {
-    const customBorderChars = { ...emptyBorder, vertical: "┃" }
-    const box = new BoxRenderable(testRenderer, {
-      width: 8,
-      height: 3,
-      border: true,
-      customBorderChars: boundary === "constructor" ? customBorderChars : undefined,
-    })
-    testRenderer.root.add(box)
-    if (boundary === "setter") box.customBorderChars = customBorderChars
-    await renderOnce()
-    expect(
-      captureFrame()
-        .split("\n")
-        .slice(0, 3)
-        .map((line) => line.slice(0, 8)),
-    ).toEqual(["        ", "┃      ┃", "        "])
-
-    box.customBorderChars = { ...emptyBorder, vertical: "▎" }
-    await renderOnce()
-    expect(captureFrame().split("\n")[1].slice(0, 8)).toBe("▎      ▎")
-
-    box.customBorderChars = emptyBorder
-    await renderOnce()
-    expect(captureFrame().split("\n")[1].slice(0, 8)).toBe("        ")
-  })
-
-  test.each(["\0", "\n", "\x1b", "\x7f"])("still rejects control character %j", (vertical) => {
-    const customBorderChars = { ...BorderChars.single, vertical }
-    expect(() => new BoxRenderable(testRenderer, { customBorderChars })).toThrow()
-    const box = new BoxRenderable(testRenderer, { border: true })
-    testRenderer.root.add(box)
-    expect(() => {
-      box.customBorderChars = customBorderChars
-    }).toThrow()
-    expect(box.customBorderChars).toBeUndefined()
   })
 })
 

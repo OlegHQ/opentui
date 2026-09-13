@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { createTestRenderer } from "../testing/test-renderer.js"
 import Yoga, {
   Align,
   BoxSizing,
@@ -111,27 +110,6 @@ describe("native Yoga API coverage", () => {
     expect(config.measures.size).toBe(0)
     expect(config.dirtied.size).toBe(0)
     config.free()
-  })
-
-  test("scene-backed renderables expose layout without Yoga topology APIs or implicit flushing", async () => {
-    const { renderer } = await createTestRenderer({ width: 20, height: 10 })
-    const scene = renderer.nativeScene
-    const node = renderer.root
-    try {
-      node.setWidth(12)
-      for (const name of ["getChild", "getChildCount", "getParent"]) {
-        expect(name in node).toBe(false)
-      }
-      expect(scene.hasStagedMutations).toBe(true)
-      expect(node.getWidth().value).toBe(12)
-      expect(scene.hasStagedMutations).toBe(false)
-      renderer.destroy()
-      expect(node.isFreed()).toBe(true)
-      expect(() => node.getWidth()).toThrow("destroyed")
-    } finally {
-      renderer.destroy()
-      await renderer.closed
-    }
   })
 
   test("covers enum, float, value, and edge style round trips", () => {

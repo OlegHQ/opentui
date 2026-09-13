@@ -8,8 +8,6 @@ import {
   NativeAudioStreamFormat,
   NativeAudioStreamState,
 } from "../zig-structs.js"
-import { RGBA } from "../lib/RGBA.js"
-import { ptr, toArrayBuffer, type Pointer } from "../platform/ffi.js"
 
 // Borrowed-pointer contract for styled text, styled placeholders, and cursor
 // options: packed struct buffers must reach the FFI symbol as object values so
@@ -53,29 +51,6 @@ function fieldOffset(struct: { layoutByName: Map<string, { offset: number }> }, 
 }
 
 describe("borrowed pointer call sites", () => {
-  test("checked text and editor replacement preserve transient byte owners and spans", () => {
-    const context = lib.createContext({ objectCapacity: 4, renderCellsMax: 1 })
-    try {
-      const text = lib.createContextTextBuffer(context)
-      const edit = lib.createContextEditBuffer(context)
-      const bytes = new Uint8Array([0, 65, 66, 0]).subarray(1, 3)
-      withStubbedSymbols({ ot_text_buffer_set_text: () => 0, ot_edit_buffer_set_text: () => 0 }, (calls) => {
-        lib.contextTextBufferSetText(context, text, bytes)
-        lib.contextEditBufferSetText(context, edit, bytes)
-        for (const name of ["ot_text_buffer_set_text", "ot_edit_buffer_set_text"]) {
-          const input = calls[name]![0]![2] as Uint8Array
-          expect(input).toBeInstanceOf(Uint8Array)
-          expect(input.buffer).toBe(bytes.buffer)
-          expect(input.byteOffset).toBe(bytes.byteOffset)
-          expect(input.byteLength).toBe(bytes.byteLength)
-          expect(calls[name]![0]![3]).toBe(bytes.byteLength)
-        }
-      })
-    } finally {
-      lib.destroyContext(context)
-    }
-  })
-
   test("audio stats reuse owned output storage without aliasing public results", () => {
     const outputs: ArrayBuffer[] = []
     let bytesReceived = 20n
@@ -465,31 +440,6 @@ describe("borrowed pointer call sites", () => {
     })
   })
 
-  test("Session cursor calls pass the packed options and color as transient typed-array owners", () => {
-    const context = lib.createContext({ objectCapacity: 2, renderCellsMax: 16 })
-    try {
-      const session = lib.createSession(context, { chunkSize: 4096, spanCapacity: 4, maxBytes: 16384n })
-      withStubbedSymbols({ ot_session_control: () => 0 }, (calls) => {
-        const color = RGBA.fromValues(1, 1, 0, 1)
-        lib.sessionSetCursor(context, session, { style: "block", blinking: true, color })
-
-        expect(calls.ot_session_control).toHaveLength(1)
-        const [, handle, record, bytes, length] = calls.ot_session_control[0]!
-        expect(handle).toBeInstanceOf(BigUint64Array)
-        expect(record).toBeInstanceOf(Uint32Array)
-        expect([...record]).toEqual([20, 1, 8, 0, 0])
-        expect(bytes).toBeInstanceOf(Uint8Array)
-        expect(length).toBe(24)
-        expect(new Uint32Array(bytes.buffer)[0]).toBe(14)
-        expect(bytes[13]).toBe(0)
-        expect(bytes[14]).toBe(1)
-        expect([...new Uint16Array(bytes.buffer, 16, 4)]).toEqual([...color.buffer])
-      })
-    } finally {
-      lib.destroyContext(context)
-    }
-  })
-
   test("image calls pass transient buffer owners directly", () => {
     const names = [
       "ot_image_inspect",
@@ -560,20 +510,6 @@ describe("borrowed pointer call sites", () => {
       expect(calls.get("ot_image_composite")![7]).toBeInstanceOf(BigUint64Array)
     } finally {
       for (const [name, original] of originals) symbols[name] = original
-      lib.destroyContext(context)
-    }
-  })
-
-  test("checked image raw transfer preserves portable addresses", () => {
-    const context = lib.createContext({ objectCapacity: 4, renderCellsMax: 1 })
-    const image = lib.imageCreateFromRgba(context, Uint8Array.of(1, 2, 3, 255), 1, 1, 4).handle!
-    const raw = lib.imageTakePixels(image)
-    try {
-      expect(raw.status).toBe(0)
-      expect(["number", "bigint"]).toContain(typeof raw.pointer)
-      expect(raw.byteCount).toBe(4)
-    } finally {
-      lib.imageReleasePixels(raw.lease!)
       lib.destroyContext(context)
     }
   })

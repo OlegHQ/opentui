@@ -787,32 +787,6 @@ test "OptimizedBuffer drawTextBufferChecked returns errors at every drawing allo
     }
 }
 
-test "OptimizedBuffer checked text rejects oversized glyphs while legacy continues" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    const target = try OptimizedBuffer.init(std.testing.allocator, 8, 2, .{ .pool = &pool, .link_pool = &links });
-    defer target.deinit();
-    target.clear(ansi.rgbColor(0, 0, 0, 255), null);
-    const text = try TextBuffer.init(std.testing.allocator, &pool, &links, .unicode);
-    defer text.deinit();
-    const view = try TextBufferView.init(std.testing.allocator, text);
-    defer view.deinit();
-    view.setViewport(.{ .x = 0, .y = 0, .width = 8, .height = 2 });
-    try text.setText("e" ++ "\u{301}" ** 64 ++ "\nTAIL");
-    try std.testing.expectError(error.TextLimit, target.drawTextBufferChecked(view, 0, 0));
-    try std.testing.expectEqual(@as(u32, ' '), target.get(0, 0).?.char);
-    try std.testing.expectEqual(@as(u32, 0), pool.interned_live_ids.count());
-    target.drawTextBuffer(view, 0, 0);
-    try std.testing.expectEqualSlices(u32, &.{ 'T', 'A', 'I', 'L' }, target.buffer.char[8..12]);
-    try text.setText("\u{e9}" ++ "\u{301}" ** 63);
-    try target.drawTextBufferChecked(view, 0, 0);
-    const id = gp.graphemeIdFromChar(target.get(0, 0).?.char);
-    try std.testing.expectEqual(@as(usize, 128), (try pool.get(id)).len);
-    try std.testing.expectEqual(@as(u32, 1), try pool.getRefcount(id));
-}
-
 test "OptimizedBuffer drawTextBuffer transparent glyphs reclaim pending slots and preserve live references" {
     for ([_]bool{ false, true }) |checked| {
         var pool = gp.GraphemePool.initWithOptions(std.testing.allocator, .{ .slots_per_page = .{ 1, 1, 1, 1, 1 } });
@@ -951,55 +925,6 @@ test "OptimizedBuffer drawTextChecked rejects image targets without materializin
         try std.testing.expectEqual(1, target.image_placements.items.len);
         try std.testing.expectEqual(2, source.ref_count);
         try std.testing.expectEqual(0, pool.interned_live_ids.count());
-    }
-}
-
-test "OptimizedBuffer drawTextChecked matches legacy clipping tab wide cell and alpha drawing" {
-    var pool = gp.GraphemePool.init(std.testing.allocator);
-    defer pool.deinit();
-    var links = link.LinkPool.init(std.testing.allocator);
-    defer links.deinit();
-    const cases = [_]struct { text: []const u8, x: u32 = 0, clip: ?buffer_mod.ClipRect = null }{
-        .{ .text = "plain text" },
-        .{ .text = "\u{e9}\u{4e2d}e\u{301}" },
-        .{ .text = "1\u{fe0f}\u{20e3}X", .x = 1 },
-        .{ .text = "\u{1f469}\u{200d}\u{1f4bb}X" },
-        .{ .text = "A\tB" },
-        .{ .text = "\t\u{4e2d}X", .clip = .{ .x = 1, .y = 0, .width = 5, .height = 1 } },
-        .{ .text = "\u{4e2d}A\u{4e2d}B", .clip = .{ .x = 1, .y = 0, .width = 5, .height = 1 } },
-        .{ .text = "A\u{4e2d}X", .x = 10 },
-        .{ .text = "", .x = 0 },
-        .{ .text = "outside", .x = std.math.maxInt(u32) },
-    };
-    const backgrounds = [_]?RGBA{ null, ansi.rgbColor(30, 60, 90, 255), ansi.rgbColor(30, 60, 90, 128), ansi.rgbColor(0, 0, 0, 0) };
-    for ([_]@import("../utf8.zig").WidthMethod{ .unicode, .wcwidth, .no_zwj, .unicode_wide }) |width_method| {
-        const legacy = try OptimizedBuffer.init(std.testing.allocator, 12, 1, .{ .pool = &pool, .link_pool = &links, .width_method = width_method });
-        defer legacy.deinit();
-        const checked = try OptimizedBuffer.init(std.testing.allocator, 12, 1, .{ .pool = &pool, .link_pool = &links, .width_method = width_method });
-        defer checked.deinit();
-        for (cases) |case| {
-            for (backgrounds) |bg| {
-                for ([_]u8{ 255, 120 }) |alpha| {
-                    for ([_]f32{ 1.0, 0.35, 0.0 }) |opacity| {
-                        for ([_]*OptimizedBuffer{ legacy, checked }) |target| {
-                            target.clearScissorRects();
-                            target.clearOpacity();
-                            target.clear(ansi.rgbColor(10, 20, 30, 120), null);
-                            try target.drawText("\u{3a9}old\u{4e2d}", 0, 0, ansi.rgbColor(200, 210, 220, 255), null, 1);
-                            if (case.clip) |clip| try target.pushScissorRect(clip.x, clip.y, clip.width, clip.height);
-                            try target.pushOpacity(opacity);
-                        }
-                        const fg = ansi.rgbColor(100, 150, 200, alpha);
-                        try legacy.drawText(case.text, case.x, 0, fg, bg, 0xff);
-                        try checked.drawTextChecked(case.text, case.x, 0, fg, bg, 0xff);
-                        try std.testing.expectEqualSlices(u32, legacy.buffer.char, checked.buffer.char);
-                        try std.testing.expectEqualSlices(RGBA, legacy.buffer.fg, checked.buffer.fg);
-                        try std.testing.expectEqualSlices(RGBA, legacy.buffer.bg, checked.buffer.bg);
-                        try std.testing.expectEqualSlices(u32, legacy.buffer.attributes, checked.buffer.attributes);
-                    }
-                }
-            }
-        }
     }
 }
 

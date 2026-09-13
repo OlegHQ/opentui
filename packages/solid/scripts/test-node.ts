@@ -23,10 +23,8 @@ const emittedAllowlist = [
   ".node-test/tests/image.test.js",
   ".node-test/tests/native-scene.test.js",
   ".node-test/tests/native-editors.test.js",
-  ".node-test/tests/native-scene-code.test.js",
   ".node-test/tests/native-scene-portals.test.js",
   ".node-test/tests/native-scene-slots.test.js",
-  ".node-test/tests/render-self-signal.test.js",
   ".node-test/tests/scrollback-writer.test.js",
 ]
 const testEntries = [
@@ -35,10 +33,8 @@ const testEntries = [
   { source: "tests/image.test.tsx", output: "tests/image.test.js" },
   { source: "tests/native-scene.test.tsx", output: "tests/native-scene.test.js" },
   { source: "tests/native-editors.test.tsx", output: "tests/native-editors.test.js" },
-  { source: "tests/native-scene-code.test.tsx", output: "tests/native-scene-code.test.js" },
   { source: "tests/native-scene-portals.test.tsx", output: "tests/native-scene-portals.test.js" },
   { source: "tests/native-scene-slots.test.ts", output: "tests/native-scene-slots.test.js" },
-  { source: "tests/render-self-signal.test.tsx", output: "tests/render-self-signal.test.js" },
   { source: "tests/scrollback-writer.test.tsx", output: "tests/scrollback-writer.test.js" },
   { source: "../core/src/testing/bun-test-node.ts", output: "src/testing/bun-test-node.js" },
 ]

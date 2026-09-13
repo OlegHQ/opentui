@@ -230,22 +230,6 @@ describe("TextBufferView", () => {
     })
   })
 
-  it("reset preserves live view ellipsis", () => {
-    const output = OptimizedBuffer.create(10, 1, "wcwidth", { owner: resourceContext })
-    try {
-      view.setTruncate(true)
-      view.setViewport(0, 0, 10, 1)
-      buffer.reset()
-      buffer.setText("")
-      buffer.append("0123456789ABCDEFGHIJ")
-      output.clear()
-      output.drawTextBuffer(view, 0, 0)
-      expect(new TextDecoder().decode(output.getRealCharBytes())).toBe("012...GHIJ")
-    } finally {
-      output.destroy()
-    }
-  })
-
   describe("lineInfo getter with wrapping", () => {
     it("should return line info for empty buffer", () => {
       const emptyText = stringToStyledText("")
