@@ -1,5 +1,10 @@
 import { test } from "bun:test"
-import { keyedScene, optionalAttributesScene, optionalZIndexScene, refSpreadScene } from "../scripts/native-scene.fixture.js"
+import {
+  keyedScene,
+  optionalAttributesScene,
+  optionalZIndexScene,
+  refSpreadScene,
+} from "../scripts/native-scene.fixture.js"
 
 test(`native Text assigns refs before arbitrary reactive spreads`, () => refSpreadScene())
 test(`native Text resets optional JSX attributes to the default`, () => optionalAttributesScene())
