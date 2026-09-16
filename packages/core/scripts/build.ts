@@ -348,7 +348,7 @@ if (buildLib) {
   // and Node consumers can resolve package-relative files.
   const externalPatterns = [...externalDeps, "@opentui/core/parser.worker", "*.wasm", "*.scm"]
 
-  const portableEntryPoints = [packageJson.module, "src/testing.ts", "src/yoga.ts"]
+  const portableEntryPoints = [packageJson.module, "src/testing.ts", "src/yoga.ts", "src/renderer-entry.ts"]
 
   runBunBuild({
     chunkNaming: "chunk-node-[hash].[ext]",
@@ -403,6 +403,8 @@ if (buildLib) {
     "dist/runtime-plugin-support.js",
     "dist/runtime-plugin-support-configure.js",
     "dist/yoga.js",
+    "dist/renderer-entry.js",
+    "dist/renderer-entry.bun.js",
     "dist/lib/tree-sitter/update-assets.js",
     "dist/index.bun.js",
     "dist/testing.bun.js",
@@ -510,6 +512,12 @@ if (buildLib) {
       bun: "./index.bun.js",
       node: "./index.node.js",
       import: "./index.node.js",
+    },
+    "./renderer": {
+      types: "./renderer-entry.d.ts",
+      bun: "./renderer-entry.bun.js",
+      node: "./renderer-entry.js",
+      import: "./renderer-entry.js",
     },
     "./testing": {
       bun: "./testing.bun.js",

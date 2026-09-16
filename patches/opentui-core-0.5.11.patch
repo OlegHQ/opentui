@@ -208,3 +208,67 @@ diff --git a/chunk-node-70eg2nhg.js b/chunk-node-70eg2nhg.js
 +    throw error;
 +  }
 +}
+diff --git a/renderer-entry.bun.js b/renderer-entry.bun.js
+new file mode 100644
+--- /dev/null
++++ b/renderer-entry.bun.js
+@@ -0,0 +1,8 @@
++export { CliRenderer2 as CliRenderer } from "./chunk-bun-bwjmgnxw.js";
++export { MouseEvent2 as MouseEvent } from "./chunk-bun-bwjmgnxw.js";
++export { RGBA2 as RGBA } from "./chunk-bun-37s3zwb6.js";
++export { Renderable2 as Renderable } from "./chunk-bun-bwjmgnxw.js";
++export { StdinParser2 as StdinParser } from "./chunk-bun-37s3zwb6.js";
++export { TextAttributes2 as TextAttributes } from "./chunk-bun-37s3zwb6.js";
++export { createCliRenderer2 as createCliRenderer } from "./chunk-bun-bwjmgnxw.js";
++export { parseColor2 as parseColor } from "./chunk-bun-37s3zwb6.js";
+diff --git a/renderer-entry.js b/renderer-entry.js
+new file mode 100644
+--- /dev/null
++++ b/renderer-entry.js
+@@ -0,0 +1,8 @@
++export { CliRenderer2 as CliRenderer } from "./chunk-node-54dhb2fr.js";
++export { MouseEvent2 as MouseEvent } from "./chunk-node-54dhb2fr.js";
++export { RGBA2 as RGBA } from "./chunk-node-70eg2nhg.js";
++export { Renderable2 as Renderable } from "./chunk-node-54dhb2fr.js";
++export { StdinParser2 as StdinParser } from "./chunk-node-70eg2nhg.js";
++export { TextAttributes2 as TextAttributes } from "./chunk-node-70eg2nhg.js";
++export { createCliRenderer2 as createCliRenderer } from "./chunk-node-54dhb2fr.js";
++export { parseColor2 as parseColor } from "./chunk-node-70eg2nhg.js";
+diff --git a/renderer-entry.d.ts b/renderer-entry.d.ts
+new file mode 100644
+--- /dev/null
++++ b/renderer-entry.d.ts
+@@ -0,0 +1,10 @@
++/** Renderer primitives without the full widget, Markdown and audio entrypoint.
++ * All exports share identity and native ownership with the main package.
++ */
++export { createCliRenderer, CliRenderer, MouseEvent, type CliRendererConfig } from "./renderer.js"
++export { Renderable, type RenderableOptions } from "./Renderable.js"
++export { RGBA, parseColor } from "./lib/RGBA.js"
++export { TextAttributes, type RenderContext } from "./types.js"
++export { StdinParser, type StdinEvent } from "./lib/stdin-parser.js"
++export type { KeyEvent } from "./lib/KeyHandler.js"
++export type { OptimizedBuffer } from "./buffer.js"
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -66,6 +66,12 @@
+     "./node-assets": {
+       "types": "./node-assets.d.ts",
+       "import": "./node-assets.js"
++    },
++    "./renderer": {
++      "types": "./renderer-entry.d.ts",
++      "bun": "./renderer-entry.bun.js",
++      "node": "./renderer-entry.js",
++      "import": "./renderer-entry.js"
+     }
+   },
+   "dependencies": {
+@@ -88,4 +94,4 @@
+     "@opentui/core-linux-x64-musl": "0.5.11",
+     "@opentui/core-linux-arm64-musl": "0.5.11"
+   }
+-}
+\ No newline at end of file
++}

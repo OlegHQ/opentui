@@ -126,6 +126,12 @@
     "./node-assets": {
       "types": "./src/node-assets.ts",
       "import": "./src/node-assets.ts"
+    },
+    "./renderer": {
+      "types": "./src/renderer-entry.ts",
+      "bun": "./src/renderer-entry.ts",
+      "node": "./src/renderer-entry.ts",
+      "import": "./src/renderer-entry.ts"
     }
   },
   "engines": {

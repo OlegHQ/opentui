@@ -258,6 +258,7 @@ import { join } from "node:path"
 
 const nativePackageName = ${JSON.stringify(nativePackageName)}
 
+const slim = await import(${JSON.stringify(`${packageJson.name}/renderer`)})
 const core = await import(${JSON.stringify(packageJson.name)})
 const nodeAssets = await import(${JSON.stringify(`${packageJson.name}/node-assets`)})
 const testing = await import(${JSON.stringify(`${packageJson.name}/testing`)})
@@ -265,6 +266,9 @@ const yoga = await import(${JSON.stringify(`${packageJson.name}/yoga`)})
 const parserWorker = await import(${JSON.stringify(`${packageJson.name}/parser.worker`)})
 const nativePackage = await import(nativePackageName)
 
+for (const [name, value] of Object.entries(slim)) assert.equal(value, core[name], "shared renderer primitive: " + name)
+assert.equal("Audio" in slim, false)
+assert.equal("MarkdownRenderable" in slim, false)
 assert.equal(typeof core.createCliRenderer, "function")
 assert.equal(typeof core.Audio, "function")
 assert.equal(typeof core.AudioCaptureStream, "function")
@@ -406,6 +410,7 @@ function writeBunTest(bunDir: string): void {
 
 describe("${packageJson.name} dist smoke test", () => {
   test("imports portable and Bun-only entrypoints", async () => {
+    const slim = await import(${JSON.stringify(`${packageJson.name}/renderer`)})
     const core = await import(${JSON.stringify(packageJson.name)})
     const testing = await import(${JSON.stringify(`${packageJson.name}/testing`)})
     const yoga = await import(${JSON.stringify(`${packageJson.name}/yoga`)})
@@ -413,6 +418,9 @@ describe("${packageJson.name} dist smoke test", () => {
     const runtimePlugin = await import(${JSON.stringify(`${packageJson.name}/runtime-plugin`)})
     const nativePackage = await import(${JSON.stringify(nativePackageName)})
 
+    for (const [name, value] of Object.entries(slim)) expect(value).toBe(core[name])
+    expect("Audio" in slim).toBe(false)
+    expect("MarkdownRenderable" in slim).toBe(false)
     expect(typeof core.createCliRenderer).toBe("function")
     expect(typeof core.Audio).toBe("function")
     expect(typeof core.AudioCaptureStream).toBe("function")

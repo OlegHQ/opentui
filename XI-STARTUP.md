@@ -27,6 +27,18 @@ Use Bun 1.3.13 for byte-identical patch generation. Source maps for the existing
 bundle retain their original mappings; appended helper code has no source map.
 The patch includes both runtime chunks and retains the upstream native ABI.
 
+The `@opentui/core/renderer` entry exposes renderer primitives without loading
+the all-widgets root entry. `src/renderer-entry.ts` owns its public surface.
+The patch generator resolves its runtime exports to the published shared chunks
+and emits declarations from the re-export-only source. It fails if an export
+cannot share its original implementation. The regular Bun/Node library build
+also emits the entry. Neither path duplicates renderer classes or native state;
+renderer-internal shared dependencies remain on the startup graph.
+
+The narrowed entry passes shared-export identity checks in both packed Bun and
+Node distribution tests. Xi checks mixed full/narrow/testing imports with an
+actual render and disposal, and source/ESM-bytecode first-input Unicode bursts.
+
 Validation performed on Linux arm64:
 
 - Focused lazy-library ownership/error tests and compiled native-state/cleanup
