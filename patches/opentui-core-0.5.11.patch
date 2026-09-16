@@ -1,0 +1,210 @@
+diff --git a/chunk-bun-37s3zwb6.js b/chunk-bun-37s3zwb6.js
+--- a/chunk-bun-37s3zwb6.js
++++ b/chunk-bun-37s3zwb6.js
+@@ -13588,7 +13588,7 @@
+ var targetLibPath;
+ var targetLibError;
+ try {
+-  targetLibPath = await resolveNativeLibraryPath();
++  targetLibPath = await materializeLibrary(await resolveNativeLibraryPath());
+   if (isBunfsPath(targetLibPath)) {
+     targetLibPath = targetLibPath.replace("../", "");
+   }
+@@ -13732,7 +13732,7 @@
+   if (!resolvedLibPath) {
+     throw targetLibError ?? new Error(`OpenTUI is not supported on the current platform: ${process.platform}-${process.arch}`);
+   }
+-  const rawSymbols = dlopen(resolvedLibPath, {
++  const rawSymbols = dlopenLazy(resolvedLibPath, {
+     setLogCallback: {
+       args: ["ptr"],
+       returns: "void"
+@@ -18790,3 +18790,83 @@
+ 
+ //# debugId=C2AA7ABE4C3E076964756E2164756E21
+ //# sourceMappingURL=chunk-bun-37s3zwb6.js.map
++
++function dlopenLazy(path, definitions, load = dlopen) {
++  if (String(path).includes("$bunfs") || /^B:[\\/]~BUN/i.test(String(path)))
++    return load(path, definitions);
++  const entries = Object.entries(definitions), first = entries[0];
++  if (!first)
++    return load(path, definitions);
++  const anchor = load(path, { [first[0]]: first[1] }), libraries = [anchor], symbols = Object.create(null);
++  let closed = !1;
++  for (const [name, definition] of entries) {
++    if (name === first[0]) {
++      Object.defineProperty(symbols, name, {
++        value: anchor.symbols[name],
++        enumerable: !0,
++        writable: !0,
++        configurable: !0
++      });
++      continue;
++    }
++    Object.defineProperty(symbols, name, {
++      enumerable: !0,
++      configurable: !0,
++      get() {
++        if (closed)
++          throw Error("Cannot resolve a symbol after library has closed");
++        const library = load(path, { [name]: definition });
++        libraries.push(library);
++        const symbol = library.symbols[name];
++        Object.defineProperty(symbols, name, { value: symbol, enumerable: !0, configurable: !0, writable: !0 });
++        return symbol;
++      },
++      set(value) {
++        Object.defineProperty(symbols, name, { value, enumerable: !0, configurable: !0, writable: !0 });
++      }
++    });
++  }
++  return {
++    symbols,
++    createCallback(callback, definition) {
++      if (closed)
++        throw Error("Cannot create a callback after library has closed");
++      return anchor.createCallback(callback, definition);
++    },
++    close() {
++      if (closed)
++        return;
++      closed = !0;
++      const failures = [];
++      for (let index = libraries.length - 1;index >= 0; index--)
++        try {
++          libraries[index].close();
++        } catch (error) {
++          failures.push(error);
++        }
++      libraries.length = 0;
++      if (failures.length === 1)
++        throw failures[0];
++      if (failures.length > 1)
++        throw AggregateError(failures, "Failed to close native bindings");
++    }
++  };
++}
++
++async function materializeLibrary(path) {
++  if (!path.includes("$bunfs") || /^B:[\\/]~BUN/i.test(path))
++    return path;
++  path = path.replace("../", "");
++  const { mkdtemp, readFile, writeFile, rm } = await import("node:fs/promises"), { rmSync } = await import("node:fs"), { tmpdir } = await import("node:os"), { basename, join } = await import("node:path"), directory = await mkdtemp(join(tmpdir(), "opentui-native-"));
++  try {
++    const destination = join(directory, basename(path));
++    await writeFile(destination, await readFile(path), { flag: "wx", mode: 384 });
++    process.once("exit", () => {
++      rmSync(directory, { recursive: !0, force: !0 });
++    });
++    return destination;
++  } catch (error) {
++    await rm(directory, { recursive: !0, force: !0 });
++    throw error;
++  }
++}
+diff --git a/chunk-node-70eg2nhg.js b/chunk-node-70eg2nhg.js
+--- a/chunk-node-70eg2nhg.js
++++ b/chunk-node-70eg2nhg.js
+@@ -13570,7 +13570,7 @@
+ var targetLibPath;
+ var targetLibError;
+ try {
+-  targetLibPath = await resolveNativeLibraryPath();
++  targetLibPath = await materializeLibrary(await resolveNativeLibraryPath());
+   if (isBunfsPath(targetLibPath)) {
+     targetLibPath = targetLibPath.replace("../", "");
+   }
+@@ -13714,7 +13714,7 @@
+   if (!resolvedLibPath) {
+     throw targetLibError ?? new Error(`OpenTUI is not supported on the current platform: ${process.platform}-${process.arch}`);
+   }
+-  const rawSymbols = dlopen(resolvedLibPath, {
++  const rawSymbols = dlopenLazy(resolvedLibPath, {
+     setLogCallback: {
+       args: ["ptr"],
+       returns: "void"
+@@ -18772,3 +18772,83 @@
+ 
+ //# debugId=C8F70BCDECDD4B1164756E2164756E21
+ //# sourceMappingURL=chunk-node-70eg2nhg.js.map
++
++function dlopenLazy(path, definitions, load = dlopen) {
++  if (String(path).includes("$bunfs") || /^B:[\\/]~BUN/i.test(String(path)))
++    return load(path, definitions);
++  const entries = Object.entries(definitions), first = entries[0];
++  if (!first)
++    return load(path, definitions);
++  const anchor = load(path, { [first[0]]: first[1] }), libraries = [anchor], symbols = Object.create(null);
++  let closed = !1;
++  for (const [name, definition] of entries) {
++    if (name === first[0]) {
++      Object.defineProperty(symbols, name, {
++        value: anchor.symbols[name],
++        enumerable: !0,
++        writable: !0,
++        configurable: !0
++      });
++      continue;
++    }
++    Object.defineProperty(symbols, name, {
++      enumerable: !0,
++      configurable: !0,
++      get() {
++        if (closed)
++          throw Error("Cannot resolve a symbol after library has closed");
++        const library = load(path, { [name]: definition });
++        libraries.push(library);
++        const symbol = library.symbols[name];
++        Object.defineProperty(symbols, name, { value: symbol, enumerable: !0, configurable: !0, writable: !0 });
++        return symbol;
++      },
++      set(value) {
++        Object.defineProperty(symbols, name, { value, enumerable: !0, configurable: !0, writable: !0 });
++      }
++    });
++  }
++  return {
++    symbols,
++    createCallback(callback, definition) {
++      if (closed)
++        throw Error("Cannot create a callback after library has closed");
++      return anchor.createCallback(callback, definition);
++    },
++    close() {
++      if (closed)
++        return;
++      closed = !0;
++      const failures = [];
++      for (let index = libraries.length - 1;index >= 0; index--)
++        try {
++          libraries[index].close();
++        } catch (error) {
++          failures.push(error);
++        }
++      libraries.length = 0;
++      if (failures.length === 1)
++        throw failures[0];
++      if (failures.length > 1)
++        throw AggregateError(failures, "Failed to close native bindings");
++    }
++  };
++}
++
++async function materializeLibrary(path) {
++  if (!path.includes("$bunfs") || /^B:[\\/]~BUN/i.test(path))
++    return path;
++  path = path.replace("../", "");
++  const { mkdtemp, readFile, writeFile, rm } = await import("node:fs/promises"), { rmSync } = await import("node:fs"), { tmpdir } = await import("node:os"), { basename, join } = await import("node:path"), directory = await mkdtemp(join(tmpdir(), "opentui-native-"));
++  try {
++    const destination = join(directory, basename(path));
++    await writeFile(destination, await readFile(path), { flag: "wx", mode: 384 });
++    process.once("exit", () => {
++      rmSync(directory, { recursive: !0, force: !0 });
++    });
++    return destination;
++  } catch (error) {
++    await rm(directory, { recursive: !0, force: !0 });
++    throw error;
++  }
++}

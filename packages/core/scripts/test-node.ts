@@ -52,6 +52,8 @@ const nodeProcessTimeoutMs = 10 * 60_000
 const nodePath = requireNode26()
 const emittedAllowlist = [
   ".node-test/src/platform/ffi.test.js",
+  ".node-test/src/platform/lazy-library.test.js",
+  ".node-test/src/platform/materialize-library.test.js",
   ".node-test/src/platform/runtime.test.js",
   ".node-test/src/platform/worker.node-test.js",
   ".node-test/src/lib/bunfs.test.js",

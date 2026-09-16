@@ -7,6 +7,8 @@
   },
   "include": [
     "src/platform/ffi.test.ts",
+    "src/platform/lazy-library.test.ts",
+    "src/platform/materialize-library.test.ts",
     "src/platform/runtime.test.ts",
     "src/platform/worker.node-test.ts",
     "src/platform/worker-startup.fixture.ts",

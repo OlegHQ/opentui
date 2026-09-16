@@ -1,5 +1,4 @@
 import {
-  dlopen,
   ffiBool,
   trimNodeFFIOutputBytes,
   toArrayBuffer,
@@ -9,6 +8,8 @@ import {
   type Pointer,
   usesBunFFI,
 } from "./platform/ffi.js"
+import { dlopenLazy } from "./platform/lazy-library.js"
+import { materializeLibrary } from "./platform/materialize-library.js"
 import { writeFile } from "./platform/runtime.js"
 import { existsSync, writeFileSync } from "fs"
 import { EventEmitter } from "events"
@@ -219,7 +220,7 @@ let targetLibPath: string | undefined
 let targetLibError: Error | undefined
 
 try {
-  targetLibPath = await resolveNativeLibraryPath()
+  targetLibPath = await materializeLibrary(await resolveNativeLibraryPath())
   if (isBunfsPath(targetLibPath)) {
     targetLibPath = targetLibPath.replace("../", "")
   }
@@ -393,7 +394,7 @@ function getOpenTUILib(libPath?: string) {
     )
   }
 
-  const rawSymbols = dlopen(resolvedLibPath, {
+  const rawSymbols = dlopenLazy(resolvedLibPath, {
     // Logging
     setLogCallback: {
       args: ["ptr"],
