@@ -208,6 +208,8 @@ try {
       JSON.stringify({
         type: "module",
         imports: {
+          "#opentui/markdown-lexer": "./src/platform/markdown-lexer.node.js",
+          "#opentui/runtime-text": "./src/platform/runtime-text.node.js",
           "#opentui/runtime-assets": "./src/platform/runtime-assets.node.js",
         },
       }),

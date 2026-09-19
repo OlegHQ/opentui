@@ -5,7 +5,7 @@ import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { resolveAssetPath } from "./assets.js"
-import { resolveBundledFilePath } from "./runtime.js"
+import { resolveBundledFilePath, stringWidth, stripANSI } from "./runtime.js"
 
 const originalAssetRoot = process.env.OTUI_ASSET_ROOT
 const temporaryDirectories: string[] = []
@@ -24,6 +24,17 @@ afterEach(() => {
 })
 
 describe("platform/runtime", () => {
+  test.each([
+    ["plain", 5],
+    ["é漢", 3],
+    ["e\u0301", 1],
+    ["👨‍👩‍👧‍👦", 2],
+    ["\x1b[31mred\x1b[0m", 3],
+  ] as const)("preserves display width and ANSI removal for %s", (text, width) => {
+    expect(stringWidth(text)).toBe(width)
+    expect(stripANSI(text)).toBe(text.replace(/\x1b\[[\d;]*m/g, ""))
+  })
+
   test("resolves configured assets from an absolute OTUI_ASSET_ROOT", () => {
     const root = mkdtempSync(join(assetTestTmpdir, "opentui-assets-"))
     const key = "@opentui/core/assets/markdown/highlights.scm"

@@ -12,6 +12,10 @@ const packageRoot = process.argv[2]
 if (!packageRoot) throw new Error("Provide the pristine published @opentui/core directory")
 const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"))
 if (manifest.name !== "@opentui/core" || manifest.version !== "0.5.11") throw new Error("Expected @opentui/core 0.5.11")
+const runtimeSource = await readFile(join(root, "packages/core/src/platform/runtime-text.bun.ts"), "utf8")
+const timingSource = await readFile(join(root, "packages/core/src/renderables/TimeToFirstDraw.ts"), "utf8")
+const timingInitialization = timingSource.match(/graphemeSegmenter \?\?= .*/)?.[0]
+if (!timingInitialization) throw new Error("Missing deferred timing segmenter initialization")
 const helperSource = await readFile(join(root, "packages/core/src/platform/lazy-library.ts"), "utf8")
 const transpiled = new Bun.Transpiler({ loader: "ts", target: "bun" }).transformSync(helperSource)
 const helper = transpiled
@@ -33,8 +37,25 @@ try {
     if (original.includes("function dlopenLazy")) throw new Error("Input must be pristine")
     const pathCall = "targetLibPath = await resolveNativeLibraryPath();"
     if (!original.includes(pathCall)) throw new Error("Unexpected native path resolver")
+    let runtimeUpdated = original
+    if (name.startsWith("chunk-bun-")) {
+      // Match the source package's runtime condition: Bun never loads Node's
+      // private fallback modules. Node retains its original bundled helpers.
+      const fallbacks = /\/\/ \.\.\/.*\/ansi-regex\/index\.js\n[\s\S]*?(?=\/\/ src\/platform\/assets\.ts)/
+      if (!fallbacks.test(original)) throw new Error("Missing published fallback modules")
+      runtimeUpdated = original.replace(fallbacks, "")
+      for (const [helper, previous] of [
+        ["stringWidth", "stringWidth2"],
+        ["stripANSI", "stripAnsi"],
+      ]) {
+        const expression = runtimeSource.match(new RegExp(`export const ${helper}: .* = (.*)`))?.[1]
+        const declaration = `var ${helper} = bun?.${helper} ?? ${previous};`
+        if (!expression || !runtimeUpdated.includes(declaration)) throw new Error(`Missing runtime helper ${helper}`)
+        runtimeUpdated = runtimeUpdated.replace(declaration, `var ${helper} = ${expression};`)
+      }
+    }
     const updated =
-      original
+      runtimeUpdated
         .replace(call, "const rawSymbols = dlopenLazy(resolvedLibPath, {")
         .replace(pathCall, "targetLibPath = await materializeLibrary(await resolveNativeLibraryPath());") +
       "\n" +
@@ -62,6 +83,28 @@ try {
   const exports = new Bun.Transpiler({ loader: "ts" }).scan(entrySource).exports
   for (const runtime of ["bun", "node"]) {
     const index = await readFile(join(packageRoot, `index.${runtime}.js`), "utf8")
+    const eagerSegmenter = 'var graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });'
+    const segmentLoop = "  for (const { segment } of graphemeSegmenter.segment(text)) {"
+    if (!index.includes(eagerSegmenter) || !index.includes(segmentLoop)) throw new Error("Missing timing widget")
+    let updatedIndex = index
+      .replace(eagerSegmenter, "var graphemeSegmenter;")
+      .replace(segmentLoop, `  ${timingInitialization};\n${segmentLoop}`)
+    if (runtime === "bun") {
+      const parser =
+        /\/\/ \.\.\/.*\/marked\/lib\/marked\.esm\.js\n[\s\S]*?(?=\/\/ src\/renderables\/text-table-width\.ts)/
+      if (!parser.test(updatedIndex)) throw new Error("Missing bundled Markdown parser")
+      const parserBody = updatedIndex.match(parser)![0]
+      updatedIndex = updatedIndex.replace(parser, "")
+      if ((updatedIndex.match(/x\.lex(?:Inline)?\(/g) ?? []).length !== 4)
+        throw new Error("Unexpected Markdown callers")
+      updatedIndex = updatedIndex
+        .replaceAll("x.lex(", "getMarkdownLexer().lex(")
+        .replaceAll("x.lexInline(", "getMarkdownLexer().lexInline(")
+      // The published @bun file is already transpiled: bare require is unavailable.
+      // Keep its bundled lexer self-contained and initialize it once on first use.
+      updatedIndex += `\nvar markdownLexer;\nfunction getMarkdownLexer() {\n  if (markdownLexer) return markdownLexer;\n${parserBody}\n  return markdownLexer = x;\n}\n`
+    }
+    await addPatch(`index.${runtime}.js`, updatedIndex, true)
     const imports = new Map<string, string>()
     for (const match of index.matchAll(/import\s*\{([^}]+)\}\s*from\s*"(\.\/chunk-[^"]+)"/g)) {
       for (const name of match[1]

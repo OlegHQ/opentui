@@ -1,4 +1,5 @@
-import { Lexer, type MarkedToken } from "marked"
+import type { MarkedToken } from "marked"
+import { getMarkdownLexer } from "#opentui/markdown-lexer"
 
 export interface ParseState {
   content: string
@@ -17,7 +18,7 @@ export function parseMarkdownIncremental(
 ): ParseState {
   if (!prevState || prevState.tokens.length === 0) {
     try {
-      const tokens = Lexer.lex(newContent, { gfm: true }) as MarkedToken[]
+      const tokens = getMarkdownLexer().lex(newContent, { gfm: true }) as MarkedToken[]
       return {
         content: newContent,
         tokens,
@@ -62,7 +63,7 @@ export function parseMarkdownIncremental(
   }
 
   try {
-    const newTokens = Lexer.lex(remainingContent, { gfm: true }) as MarkedToken[]
+    const newTokens = getMarkdownLexer().lex(remainingContent, { gfm: true }) as MarkedToken[]
     return {
       content: newContent,
       tokens: [...stableTokens, ...newTokens],
@@ -70,7 +71,7 @@ export function parseMarkdownIncremental(
     }
   } catch {
     try {
-      const fullTokens = Lexer.lex(newContent, { gfm: true }) as MarkedToken[]
+      const fullTokens = getMarkdownLexer().lex(newContent, { gfm: true }) as MarkedToken[]
       return { content: newContent, tokens: fullTokens, stableTokenCount: 0 }
     } catch {
       return { content: newContent, tokens: [], stableTokenCount: 0 }

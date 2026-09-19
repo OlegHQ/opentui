@@ -3,7 +3,7 @@ import { parseColor, RGBA, type ColorInput } from "../lib/RGBA.js"
 import { Renderable, type RenderableOptions } from "../Renderable.js"
 import type { RenderContext } from "../types.js"
 
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
+let graphemeSegmenter: Intl.Segmenter | undefined
 
 function measureCellWidth(buffer: OptimizedBuffer, text: string): number {
   const encoded = buffer.encodeUnicode(text)
@@ -20,6 +20,7 @@ function truncateToCellWidth(buffer: OptimizedBuffer, text: string, maxWidth: nu
   let visibleText = ""
   let visibleWidth = 0
 
+  graphemeSegmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" })
   for (const { segment } of graphemeSegmenter.segment(text)) {
     const segmentWidth = measureCellWidth(buffer, segment)
     if (visibleWidth + segmentWidth > maxWidth) break

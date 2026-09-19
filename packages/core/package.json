@@ -12,6 +12,16 @@
   "version": "0.5.11",
   "type": "module",
   "imports": {
+    "#opentui/markdown-lexer": {
+      "bun": "./src/platform/markdown-lexer.bun.ts",
+      "node": "./src/platform/markdown-lexer.node.ts",
+      "default": "./src/platform/markdown-lexer.node.ts"
+    },
+    "#opentui/runtime-text": {
+      "bun": "./src/platform/runtime-text.bun.ts",
+      "node": "./src/platform/runtime-text.node.ts",
+      "default": "./src/platform/runtime-text.node.ts"
+    },
     "#opentui/runtime-assets": {
       "bun": "./src/platform/runtime-assets.bun.ts",
       "node": "./src/platform/runtime-assets.node.ts",

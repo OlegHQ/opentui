@@ -5,7 +5,8 @@ import type { TextChunk } from "../text-buffer.js"
 import { createTextAttributes } from "../utils.js"
 import type { BorderStyle } from "../lib/border.js"
 import { RGBA, parseColor, type ColorInput } from "../lib/RGBA.js"
-import { Lexer, type MarkedToken, type Token, type Tokens } from "marked"
+import type { MarkedToken, Token, Tokens } from "marked"
+import { getMarkdownLexer } from "#opentui/markdown-lexer"
 import { CodeRenderable, type OnChunksCallback, type OnHighlightCallback } from "./Code.js"
 import { BoxRenderable } from "./Box.js"
 import { StyledText } from "../lib/styled-text.js"
@@ -559,7 +560,7 @@ export class MarkdownRenderable extends Renderable {
     }
 
     if (chunks.length === 0 && "text" in token && typeof token.text === "string") {
-      this.renderInlineContent(Lexer.lexInline(token.text), chunks)
+      this.renderInlineContent(getMarkdownLexer().lexInline(token.text), chunks)
     }
 
     return chunks.length > 0 ? new StyledText(chunks) : undefined

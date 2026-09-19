@@ -59,3 +59,32 @@ input matrix, non-Linux platforms and upstream failure remediation. Deferred
 functions still pay their binding cost on first use; measured startup and first
 input evidence belongs to Xi's `docs/evidence/T122.md`, not a universal timing
 claim. SIGKILL cannot run extracted-file cleanup.
+
+## Avoid unused initialization (Xi T141)
+
+Runtime conditions select Bun's native width/ANSI helpers without evaluating the
+Node fallback packages. Node keeps the original string-width/strip-ansi behavior.
+The timing widget constructs its grapheme segmenter only when truncating text.
+On Bun, Markdown loads its lexer synchronously on first use instead of during an
+unrelated widget import. Node retains the static lexer import. This postpones
+optional Markdown work; it does not make the first Markdown render free.
+
+The generated patch wraps the published, already-bundled Markdown lexer in a
+cached initializer. It must remain self-contained: bare `require` in the published
+`// @bun` bundle is unavailable, while aliasing `import.meta.require` can hide a
+dependency from executable bundling. Xi's compiled initial/incremental Markdown
+smoke checks this consumer path separately from the source tests.
+
+When validating a changed patch with Bun 1.3.13, use a fresh temporary
+`BUN_INSTALL_CACHE_DIR` with `bun install --force`. This session observed stale
+patched JS even after an ordinary forced reinstall. Verify installed JS hashes
+and retain them in benchmark manifests; a changed patch file alone is insufficient.
+
+Current measurements and limitations belong to Xi's `docs/evidence/T141.md`.
+Native binding batching was tried and discarded because paired measurements did
+not establish a gain. The native library and input/frame scheduling are unchanged.
+
+T141 validation: 224 focused Markdown/runtime/import checks and four timing-widget
+checks pass, as do typecheck, library build, packed Bun/Node tests, formatting and
+lint. Full Bun: 5,686 pass / 24 skip / 12 known Kitty failures; Node: 4,935 pass /
+8 skip / the same 12 failures. These failures still block a complete suite pass.
